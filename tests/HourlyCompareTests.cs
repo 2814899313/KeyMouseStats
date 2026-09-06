@@ -13,6 +13,15 @@ internal static class HourlyCompareTests
         Check(Dashboard.HourlyComparisonDate(selected, 1) == new DateTime(2026, 9, 4), "yesterday comparison");
         Check(Dashboard.HourlyComparisonDate(selected, 7) == new DateTime(2026, 8, 29), "same weekday last week");
         Check(Dashboard.HourlyComparisonDate(new DateTime(2026, 1, 1), 7) == new DateTime(2025, 12, 25), "comparison crosses year");
+        Check(Dashboard.HourlyComparisonDate(selected, 14) == new DateTime(2026, 8, 22), "custom comparison window");
+
+        Store.History.Clear();
+        DayRecord averageA = new DayRecord { Date = selected.AddDays(-1) };
+        DayRecord averageB = new DayRecord { Date = selected.AddDays(-3) };
+        averageA.HourKeys[8] = 100; averageB.HourKeys[8] = 300;
+        Store.History[averageA.Date] = averageA; Store.History[averageB.Date] = averageB;
+        double[] average = Dashboard.AverageHourlyValues(selected, 3, 0, selected);
+        Check(average[8] == 200, "custom average ignores missing dates instead of filling zero");
 
         DayRecord day = new DayRecord { Date = selected, ActiveSeconds = 120 };
         day.HourKeys[8] = 123;

@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 //  键鼠统计桌面小组件  KeyMouseWidget.cs
 //  悬浮小组件 + 数据采集(全局钩子)+ 数据持久化(v2:按天历史/小时分布/按键细分)
 //
@@ -477,7 +477,7 @@ namespace KeyMouseStats
                 Prune();
                 if (!Directory.Exists(Dir)) Directory.CreateDirectory(Dir);
                 StringBuilder sb = new StringBuilder();
-                sb.AppendLine("# 键鼠统计数据文件 v10 / 正式版 1.3.0（交叉归因 / 鼠标矢量）");
+                sb.AppendLine("# 键鼠统计数据文件 v10 / 正式版 1.3.1（趋势对比 / 交叉归因）");
                 sb.AppendLine("shortcut_model_v1="+ShortcutSavings.EncodeModel());
                 sb.AppendLine("idle_threshold=" + IdleThresholdSeconds.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("art_theme=" + ArtTheme.Validate(ThemeId).ToString(CultureInfo.InvariantCulture));
@@ -1244,7 +1244,7 @@ namespace KeyMouseStats
         {
             _tray = new NotifyIcon();
             _tray.Icon = MakeIcon();
-            _tray.Text = "键鼠统计 1.3.0 正式版";
+            _tray.Text = "键鼠统计 1.3.1 正式版";
             _tray.Visible = true;
             _tray.ContextMenuStrip = _menu;
             _tray.MouseDoubleClick += delegate { ToggleVisible(); };

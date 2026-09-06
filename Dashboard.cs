@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 //  键鼠统计 - 详细数据分析面板  Dashboard.cs
 //  六个页面:总览 / 趋势 / 时段分布 / 按键排行 / 应用统计 / 使用洞察,全部 GDI+ 自绘。
 // ============================================================================
@@ -267,7 +267,7 @@ namespace KeyMouseStats
 
         public Dashboard()
         {
-            Text = "键鼠统计 1.3.0 - 数据分析";
+            Text = "键鼠统计 1.3.1 - 数据分析";
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterScreen;
             ShowInTaskbar = true;
@@ -700,7 +700,7 @@ namespace KeyMouseStats
                 g.DrawString("Esc      关闭面板", _fSmall, b, 24, BH - 73);
             }
             using (SolidBrush b = new SolidBrush(Cgreen)) g.FillEllipse(b, 24, BH - 30, 6, 6);
-            using (SolidBrush b = new SolidBrush(Csub)) g.DrawString("1.3.0 · 本地记录 365 天", _fSmall, b, 38, BH - 36);
+            using (SolidBrush b = new SolidBrush(Csub)) g.DrawString("1.3.1 · 本地记录 365 天", _fSmall, b, 38, BH - 36);
         }
 
         private void PaintFooter(Graphics g)
