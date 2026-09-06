@@ -1,0 +1,31 @@
+# Local tooling and editor state
+.opensquilla/
+.tools/
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Build outputs and local releases
+*.exe
+*.pdb
+*.dll
+*.obj
+*.cache
+*.log
+*.tmp
+bin/
+obj/
+
+# Generated visual checks and bulk previews
+previews/
+tests/*.png
+
+# Experimental utilities that are not part of the product build
+text-input-demo/
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store

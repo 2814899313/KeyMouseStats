@@ -1,0 +1,9 @@
+# 士官长立体图标
+
+使用内置 image_gen 生成；工具未提供模型型号选择或返回型号，未核实为 image 2。
+
+素材：halo-icons.png。4 × 4 透明图集，运行时按格裁切并缓存缩放结果，不使用原先手绘图标。背景保持原样。
+
+## 最终提示词
+
+Create a premium game UI icon sprite sheet for a Halo Master Chief Collection inspired desktop dashboard. EXACTLY 4 columns by 4 rows of equally sized square cells, 16 separate icons, row-major order below. Transparent alpha background, no grid lines, no text, no labels, no checkerboard painted into image. Every icon centered in its own cell with generous 15% transparent padding and no overlap. Rich polished 3D rendered collectible equipment emblems, convincing olive armor metal, beveled titanium, luminous holographic cyan and amber gold, dramatic studio highlights, clear chunky silhouettes readable at small sizes. NOT thin line icons, NOT flat vector art. Consistent viewpoint, lighting and scale across all icons. 1536x1536 square sheet. Row 1: (1) majestic ringworld orbital emblem, (2) communications uplink antenna with cyan rising signal, (3) circular tactical radar device, (4) futuristic physical keyboard console. Row 2: (5) holographic layered terrain map projector, (6) luminous blue AI crystal floating inside titanium frame, (7) futuristic olive armored computer mouse, (8) metallic scroll wheel with up/down cyan light indicators. Row 3: (9) navigation waypoint beacon with curved luminous route, (10) armored energy shield with tiny clock dial, (11) three connected futuristic session modules, (12) futuristic pulse monitor device with electric cyan waveform. Row 4: (13) prestigious gold and olive military achievement medal, (14) elegant crescent moon sleep beacon in metallic housing, (15) detailed iconic Master Chief helmet with olive green armor and reflective golden visor, (16) blue AI orb with mechanical titanium fins. Cohesive serious high-end science fiction game inventory art, crisp clean silhouettes. All 16 icons fully visible.

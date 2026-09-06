@@ -1,0 +1,7 @@
+# 暖暖／大喵表情图集
+
+生成方式：内置 imagegen。最终图集：nikki-emotes.png，1536×1024，含透明 Alpha。程序按三列两行读取，保留原图，不使用脚本改图。嵌入资源名 NikkiEmotes。
+
+最终提示词：
+
+Create a production transparent PNG sticker atlas inspired by Infinity Nikki. Exactly six separate chibi emote illustrations in a precise 3-column by 2-row equal-cell grid on a truly transparent background. Landscape 1536x1024. Each sticker centered inside its own 512x512 cell, with 70px clear transparent margins, never touching adjacent cells. No text, no letters, no UI, no background. Top left: Momo (大喵), adorable round white cat with yellow hood, proudly wearing a small gold crown and cheering, paws up (keyboard champion). Top middle: Nikki, pink-haired chibi girl in delicate ivory and lilac fantasy dress holding a shining star, happy smile (overview). Top right: Momo in yellow hood riding a rising pastel blue comet, excited (trends). Bottom left: sleepy Momo curled beside a tiny lavender moon (sessions). Bottom middle: pink-haired Nikki peeking over a small ivory book with ribbons and a crystal butterfly (application categorization). Bottom right: Momo in yellow hood examining a small sparkling magnifying glass (insights). Refined expressive meme-like faces, consistent pastel gouache/anime game sticker style, clean dark plum outlines, blush cheeks, white die-cut stroke around each illustration, lavender/pink/gold accents. Cute and immediately readable at 64px. Real transparent alpha, no checkerboard rendered.

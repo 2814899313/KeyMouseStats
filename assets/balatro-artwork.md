@@ -1,0 +1,14 @@
+# 小丑牌 · 幻彩牌桌
+
+使用内置 image_gen 工具生成，未使用 CLI / API 回退。原始输出复制到项目内，运行时从 EXE 资源取用。
+
+- balatro-backgrounds.png → BalatroBackgrounds：2 列 × 3 行，依次为总览、趋势、时段、按键、应用、洞察。保留生成尺寸，以整数区域取图。
+- balatro-icons.png → BalatroIcons：4 列 × 4 行，透明背景；键盘、鼠标、轮盘、路径、沙漏、会话牌组、闪电小丑、计算器、表情及花色徽章。
+
+## 背景图集最终提示词
+
+Create ONE production background atlas for a Windows desktop statistics app, a cohesive Balatro (小丑牌) themed art set. Exactly 2 columns by 3 rows of equal-size 16:9 panels, no gaps, no borders, no text, no UI. Overall canvas 1536x1296 if possible. Six distinct richly crafted pixel-art poker / joker surreal scenes, authentic retro CRT game-art feeling, velvety dark teal and burgundy, cream playing cards, coral red and electric cyan accents, gold glints, subtle swirling hypnotic patterns. Panel order left-to-right top-to-bottom: 1 a smiling classic red-cap Joker card hovering over poker chips on a green felt table; 2 a blue cosmic fortune joker among rising orbiting playing cards and star trails; 3 a gold clockwork joker with sun and moon suit tokens; 4 a purple jester card surrounded by floating keyboard-like square card tiles and red heart sparks; 5 a theatrical masquerade of several different poker jokers with mysterious emerald curtains; 6 a celestial tarot-inspired joker and crystal deck beneath an aurora. Each panel has its main illustrated figure on the rightmost 30%, left 65% is calm dark atmospheric negative space for charts. Keep each panel composition safely inside its own cell; never cross cell boundaries. Detailed deliberate crisp pixel shapes and pixel shading, beautiful premium illustration, not generic casino clipart, no written letters or numbers. This is a single atlas intended to be sampled as six different page backgrounds.
+
+## 图标图集最终提示词
+
+Create one transparent PNG sprite atlas for a Balatro-inspired 小丑牌 poker-joker desktop statistics app theme. Exactly 4 columns x 4 rows, 16 distinct isolated crisp pixel-art icons centered within equal cells, generous transparent gutters, no labels, no grid, no text. Premium readable pixel shapes with cream, coral red, mint cyan, purple and antique gold; deliberate dark pixel outlines, poker roguelike aesthetic, witty smiling jester characters, matching dark green felt backgrounds. Row1: tiny card-deck keyboard, poker-chip computer mouse, revolving roulette token wheel, winding golden chip trail. Row2: hourglass joker, stacked session playing cards, lightning joker, miniature score calculator. Row3: joyful red-cap joker face, surprised blue jester face, golden crown heart card, purple crystal spade. Row4: red heart suit token, blue spade suit token, emerald club suit token, gold diamond suit token. 16 icons, not 15 or 17, each fully contained in its own cell; genuinely transparent alpha background. No scenery or shadows outside icons. Designed to work as beautiful 36-64 pixel app badges.
