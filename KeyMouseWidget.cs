@@ -477,7 +477,7 @@ namespace KeyMouseStats
                 Prune();
                 if (!Directory.Exists(Dir)) Directory.CreateDirectory(Dir);
                 StringBuilder sb = new StringBuilder();
-                sb.AppendLine("# 键鼠统计数据文件 v10 / 正式版 1.3.1（趋势对比 / 交叉归因）");
+                sb.AppendLine("# 键鼠统计数据文件 v10 / 正式版 1.3.2（多日曲线 / 交叉归因）");
                 sb.AppendLine("shortcut_model_v1="+ShortcutSavings.EncodeModel());
                 sb.AppendLine("idle_threshold=" + IdleThresholdSeconds.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("art_theme=" + ArtTheme.Validate(ThemeId).ToString(CultureInfo.InvariantCulture));
@@ -694,7 +694,7 @@ namespace KeyMouseStats
             DoubleBuffered = true;
             BackColor = ArtTheme.Current.Card;
             Opacity = 0.96;
-            TopMost = true;
+            TopMost = false;
 
             _kbProc = KbHookProc;
             _msProc = MsHookProc;
@@ -1181,7 +1181,7 @@ namespace KeyMouseStats
                 _miTopMost.Checked = !_miTopMost.Checked;
                 TopMost = _miTopMost.Checked;
             });
-            _miTopMost.Checked = true;
+            _miTopMost.Checked = false;
 
             _miClickThrough = new ToolStripMenuItem("鼠标穿透(点击穿过小组件)", null, delegate
             {
@@ -1244,7 +1244,7 @@ namespace KeyMouseStats
         {
             _tray = new NotifyIcon();
             _tray.Icon = MakeIcon();
-            _tray.Text = "键鼠统计 1.3.1 正式版";
+            _tray.Text = "键鼠统计 1.3.2 正式版";
             _tray.Visible = true;
             _tray.ContextMenuStrip = _menu;
             _tray.MouseDoubleClick += delegate { ToggleVisible(); };
