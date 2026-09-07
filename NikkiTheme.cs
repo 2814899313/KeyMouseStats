@@ -13,6 +13,11 @@ namespace KeyMouseStats
     internal static class ThemeAssets
     {
         private static readonly Dictionary<int,string[]> Catalog=new Dictionary<int,string[]>{
+            {4,new[]{"CoreMaterials"}},
+            {3,new[]{"CoreMaterials"}},
+            {2,new[]{"CoreMaterials"}},
+            {1,new[]{"CoreMaterials"}},
+            {0,new[]{"CoreMaterials"}},
             {5,new[]{"AccessiblePatterns","NikkiEmotes","NikkiDream","NikkiPoseTrend","NikkiPoseHours","NikkiPoseKeys","NikkiPoseApps","NikkiPoseInsights"}},
             {6,new[]{"AccessiblePatterns","HaloIcons","HaloOverview","HaloTrend","HaloHours","HaloKeys","HaloApps","HaloInsights"}},
             {7,new[]{"AccessiblePatterns","ResidentIcons","ResidentOverview","ResidentTrend","ResidentHours","ResidentKeys","ResidentApps","ResidentInsights"}},

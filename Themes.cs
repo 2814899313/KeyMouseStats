@@ -52,14 +52,18 @@ namespace KeyMouseStats
         private static ImageAttributes Opacity(float alpha){ImageAttributes a=new ImageAttributes();ColorMatrix m=new ColorMatrix();m.Matrix33=alpha;a.SetColorMatrix(m);return a;}
         internal static bool Draw(Graphics g,RectangleF target,int variant,bool strong)
         {
-            int theme=ArtTheme.Validate(Store.ThemeId);if(theme<5||theme>10)return false;
-            Image atlas=ThemeImages.Get("AccessiblePatterns");if(atlas==null)return false;
-            int tile=theme-5,col=tile%3,row=tile/3,tw=atlas.Width/3,th=atlas.Height/2;
+#if CLEAN_EDITION
+            return false;
+#else
+            int theme=ArtTheme.Validate(Store.ThemeId);string resource=theme<5?"CoreMaterials":"AccessiblePatterns";
+            Image atlas=ThemeImages.Get(resource);if(atlas==null)return false;
+            int tile=theme<5?theme:theme-5,col=tile%3,row=tile/3,tw=atlas.Width/3,th=atlas.Height/2;
             int cropW=Math.Max(24,tw/2),cropH=Math.Max(24,th/2),mode=Math.Abs(variant)%4;
             int sx=col*tw+(mode%2)*(tw-cropW),sy=row*th+(mode/2)*(th-cropH);
             InterpolationMode old=g.InterpolationMode;g.InterpolationMode=theme==8?InterpolationMode.NearestNeighbor:InterpolationMode.HighQualityBilinear;
             Rectangle dest=Rectangle.Round(target);if(dest.Width>0&&dest.Height>0)g.DrawImage(atlas,dest,sx,sy,cropW,cropH,GraphicsUnit.Pixel,strong?Strong:Soft);
             g.InterpolationMode=old;return true;
+#endif
         }
     }
 
@@ -69,33 +73,26 @@ namespace KeyMouseStats
         // secondary/idle is striped, tertiary is dotted, and auxiliary is dash-dot.
         internal static void Ring(Graphics g, RectangleF rect, float start, float sweep, float width, int semantic, Color surface)
         {
-            if (semantic <= 0 || sweep < 2f) return;
+            if(sweep<2f)return;
+            bool material;
             using(GraphicsPath band=new GraphicsPath())using(Pen widthPen=new Pen(Color.Black,width))
             {
-                band.AddArc(rect,start,sweep);band.Widen(widthPen);GraphicsState imageState=g.Save();g.SetClip(band,CombineMode.Intersect);
-                bool material=ThemePattern.Draw(g,rect,semantic,true);g.Restore(imageState);
-                if(material)
-                {
-                    Color edge=ArtTheme.Mix(surface,ArtTheme.Current.Text,.62),shade=ArtTheme.Mix(surface,ArtTheme.Current.Background,.72);
-                    RectangleF outer=RectangleF.Inflate(rect,width*.48f,width*.48f),inner=RectangleF.Inflate(rect,-width*.48f,-width*.48f);
-                    using(Pen dark=new Pen(Color.FromArgb(205,shade),2.2f))using(Pen light=new Pen(Color.FromArgb(210,edge),1.25f))
-                    {g.DrawArc(dark,outer,start+.7f,Math.Max(.1f,sweep-1.4f));g.DrawArc(light,inner,start+.7f,Math.Max(.1f,sweep-1.4f));}
-                    float cx=rect.X+rect.Width/2,cy=rect.Y+rect.Height/2,rad=rect.Width/2,angle=(float)((start+sweep/2)*Math.PI/180.0);
-                    float rr=rad-width*.18f,px=cx+(float)Math.Cos(angle)*rr,py=cy+(float)Math.Sin(angle)*rr;
-                    using(SolidBrush led=new SolidBrush(Color.FromArgb(210,edge)))g.FillEllipse(led,px-1.7f,py-1.7f,3.4f,3.4f);
-                    return;
-                }
+                band.AddArc(rect,start,sweep);band.Widen(widthPen);GraphicsState state=g.Save();g.SetClip(band,CombineMode.Intersect);
+                material=ThemePattern.Draw(g,rect,semantic,true);g.Restore(state);
             }
-            Color ink = ArtTheme.Mix(surface, ArtTheme.Current.Text, ThemeArt.Dark ? .72 : .58);
-            using (Pen mark = new Pen(Color.FromArgb(205, ink), Math.Max(1.2f, width * .13f)))
+            Color edge=ArtTheme.Mix(surface,ArtTheme.Current.Text,.64),shade=ArtTheme.Mix(surface,ArtTheme.Current.Background,.76);
+            RectangleF outer=RectangleF.Inflate(rect,width*.48f,width*.48f),inner=RectangleF.Inflate(rect,-width*.48f,-width*.48f);
+            using(Pen shadow=new Pen(Color.FromArgb(material?220:175,shade),2.2f))using(Pen highlight=new Pen(Color.FromArgb(material?220:165,edge),1.25f))
+            {g.DrawArc(shadow,outer,start+.7f,Math.Max(.1f,sweep-1.4f));g.DrawArc(highlight,inner,start+.7f,Math.Max(.1f,sweep-1.4f));}
+            float cx=rect.X+rect.Width/2,cy=rect.Y+rect.Height/2,rad=rect.Width/2,angle=(float)((start+sweep/2)*Math.PI/180.0),rr=rad-width*.18f;
+            float px=cx+(float)Math.Cos(angle)*rr,py=cy+(float)Math.Sin(angle)*rr;
+            using(SolidBrush led=new SolidBrush(Color.FromArgb(material?220:175,edge)))g.FillEllipse(led,px-1.7f,py-1.7f,3.4f,3.4f);
+            if(semantic<=0)return;
+            using(Pen mark=new Pen(Color.FromArgb(material?185:155,edge),Math.Max(1.1f,width*.11f)))
             {
-                mark.StartCap = LineCap.Flat; mark.EndCap = LineCap.Flat;
-                int theme = ArtTheme.Validate(Store.ThemeId);
-                if (semantic == 1) mark.DashPattern = theme == 8 ? new float[] { 2, 1 } : theme == 10 ? new float[] { 7, 3 } : new float[] { 5, 3 };
-                else if (semantic == 2) mark.DashStyle = DashStyle.Dot;
-                else mark.DashPattern = theme == 6 ? new float[] { 4, 2, 1, 2 } : new float[] { 6, 2, 1, 2 };
-                RectangleF guide = RectangleF.Inflate(rect, -width * .22f, -width * .22f);
-                g.DrawArc(mark, guide, start + .5f, Math.Max(.1f, sweep - 1f));
+                mark.StartCap=LineCap.Flat;mark.EndCap=LineCap.Flat;
+                if(semantic==1)mark.DashPattern=new float[]{5,3};else if(semantic==2)mark.DashStyle=DashStyle.Dot;else mark.DashPattern=new float[]{6,2,1,2};
+                RectangleF guide=RectangleF.Inflate(rect,-width*.22f,-width*.22f);g.DrawArc(mark,guide,start+1,Math.Max(.1f,sweep-2));
             }
         }
 
