@@ -267,7 +267,7 @@ namespace KeyMouseStats
 
         public Dashboard()
         {
-            Text = "键鼠统计 1.3.2 - 数据分析";
+            Text = "键鼠统计 1.3.3 - 数据分析";
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterScreen;
             ShowInTaskbar = true;
@@ -700,7 +700,7 @@ namespace KeyMouseStats
                 g.DrawString("Esc      关闭面板", _fSmall, b, 24, BH - 73);
             }
             using (SolidBrush b = new SolidBrush(Cgreen)) g.FillEllipse(b, 24, BH - 30, 6, 6);
-            using (SolidBrush b = new SolidBrush(Csub)) g.DrawString("1.3.2 · 本地记录 365 天", _fSmall, b, 38, BH - 36);
+            using (SolidBrush b = new SolidBrush(Csub)) g.DrawString("1.3.3 · 本地记录 365 天", _fSmall, b, 38, BH - 36);
         }
 
         private void PaintFooter(Graphics g)
@@ -898,7 +898,10 @@ namespace KeyMouseStats
                 if (vals[i] <= 0) continue;
                 float sweep = 360f * vals[i] / total;
                 if (sweep < 0.4f) sweep = 0.4f;
-                g.DrawArc(pens[i], rect, start + Math.Min(1.2f, sweep / 4), Math.Max(0.1f, sweep - Math.Min(2.4f, sweep / 2)));
+                float arcStart=start + Math.Min(1.2f, sweep / 4);
+                float arcSweep=Math.Max(0.1f, sweep - Math.Min(2.4f, sweep / 2));
+                g.DrawArc(pens[i], rect, arcStart, arcSweep);
+                AccessiblePattern.Ring(g,rect,arcStart,arcSweep,16f,i,pens[i].Color);
                 start += 360f * vals[i] / total;
             }
             foreach (Pen p in pens) p.Dispose();
@@ -968,7 +971,9 @@ namespace KeyMouseStats
                 for(int i=0;i<values.Length;i++)if(values[i]>0)
                 {
                     float sweep=(float)(360.0*values[i]/total);
-                    using(Pen pen=new Pen(i==hovered?ArtTheme.Mix(colors[i],Ctext,.25):colors[i],i==hovered?22:18))g.DrawArc(pen,ring,angle,sweep);
+                    Color arcColor=i==hovered?ArtTheme.Mix(colors[i],Ctext,.25):colors[i];float arcWidth=i==hovered?22:18;
+                    using(Pen pen=new Pen(arcColor,arcWidth))g.DrawArc(pen,ring,angle,sweep);
+                    AccessiblePattern.Ring(g,ring,angle,sweep,arcWidth,(i%4),arcColor);
                     angle+=sweep;
                 }
             }
@@ -1383,7 +1388,7 @@ namespace KeyMouseStats
                 int alpha = (int)(30 + 190 * Math.Sqrt(frac));
                 using (GraphicsPath p = RoundedRect(cellX, 167, cellW, 16, 4))
                 using (SolidBrush b = new SolidBrush(ThemeArt.Dark?(vals[i]<=0?HeatScale.Zero:HeatScale.At(frac)):Color.FromArgb(alpha, Cblue)))
-                    g.FillPath(b, p);
+                { g.FillPath(b, p); AccessiblePattern.Heat(g,p,new RectangleF(cellX,167,cellW,16),frac); }
                 if (vals[i] > 0 && frac > 0.55)
                 {
                     // 高值格子加亮边

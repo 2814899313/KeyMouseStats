@@ -45,6 +45,60 @@ namespace KeyMouseStats
             using(StringFormat format=new StringFormat{Alignment=StringAlignment.Near,LineAlignment=StringAlignment.Center,FormatFlags=StringFormatFlags.NoWrap})g.DrawString(label,font,ink,labelRect,format);
         }
     }
+    internal static class AccessiblePattern
+    {
+        // Semantic patterns stay stable across themes: primary/active is solid,
+        // secondary/idle is striped, tertiary is dotted, and auxiliary is dash-dot.
+        internal static void Ring(Graphics g, RectangleF rect, float start, float sweep, float width, int semantic, Color surface)
+        {
+            if (semantic <= 0 || sweep < 2f) return;
+            Color ink = ArtTheme.Mix(surface, ArtTheme.Current.Text, ThemeArt.Dark ? .72 : .58);
+            using (Pen mark = new Pen(Color.FromArgb(205, ink), Math.Max(1.2f, width * .13f)))
+            {
+                mark.StartCap = LineCap.Flat; mark.EndCap = LineCap.Flat;
+                int theme = ArtTheme.Validate(Store.ThemeId);
+                if (semantic == 1) mark.DashPattern = theme == 8 ? new float[] { 2, 1 } : theme == 10 ? new float[] { 7, 3 } : new float[] { 5, 3 };
+                else if (semantic == 2) mark.DashStyle = DashStyle.Dot;
+                else mark.DashPattern = theme == 6 ? new float[] { 4, 2, 1, 2 } : new float[] { 6, 2, 1, 2 };
+                RectangleF guide = RectangleF.Inflate(rect, -width * .22f, -width * .22f);
+                g.DrawArc(mark, guide, start + .5f, Math.Max(.1f, sweep - 1f));
+            }
+        }
+
+        internal static void Heat(Graphics g, RectangleF rect, double fraction)
+        {
+            if (fraction <= 0 || rect.Width < 5 || rect.Height < 5) return;
+            int tier = Math.Min(4, Math.Max(1, (int)Math.Ceiling(Math.Sqrt(Math.Min(1, fraction)) * 4)));
+            int theme = ArtTheme.Validate(Store.ThemeId);
+            Color ink = ArtTheme.Mix(HeatScale.At(fraction), ArtTheme.Current.Text, ThemeArt.Dark ? .72 : .55);
+            using (Pen pen = new Pen(Color.FromArgb(145, ink), Math.Max(1f, Math.Min(rect.Width, rect.Height) * .055f)))
+            using (GraphicsPath clip = new GraphicsPath())
+            {
+                clip.AddRectangle(rect); GraphicsState state = g.Save(); g.SetClip(clip, CombineMode.Intersect);
+                float l=rect.Left+3,t=rect.Top+3,r=rect.Right-3,b=rect.Bottom-3,cx=(l+r)/2,cy=(t+b)/2;
+                if (theme == 5) // star-stitch / Nikki
+                { g.DrawLine(pen,cx-3,cy,cx+3,cy); g.DrawLine(pen,cx,cy-3,cx,cy+3); if(tier>=3){g.DrawLine(pen,cx-2,cy-2,cx+2,cy+2);g.DrawLine(pen,cx+2,cy-2,cx-2,cy+2);} }
+                else if (theme == 6) // tactical circuit / Halo
+                { g.DrawLine(pen,l,cy,cx,cy);g.DrawLine(pen,cx,cy,r,cy);if(tier>=3){g.DrawLine(pen,cx,cy,cx,t);g.DrawEllipse(pen,cx-1.5f,cy-1.5f,3,3);} }
+                else if (theme == 7) // hazard stripes / Resident Evil
+                { for(float x=l-rect.Height;x<r;x+=tier>=3?7:11)g.DrawLine(pen,x,b,x+rect.Height,t); }
+                else if (theme == 8) // pixel checker / Minecraft
+                { float q=Math.Max(3,Math.Min(6,Math.Min(rect.Width,rect.Height)/3));using(SolidBrush dot=new SolidBrush(Color.FromArgb(115,ink)))for(int yy=0;yy<(tier>=3?2:1);yy++)for(int xx=0;xx<(tier>=4?3:2);xx++)if((xx+yy)%2==0)g.FillRectangle(dot,l+xx*q,t+yy*q,q,q); }
+                else if (theme == 9) // card diamonds / Balatro
+                { PointF[] d={new PointF(cx,cy-3),new PointF(cx+3,cy),new PointF(cx,cy+3),new PointF(cx-3,cy)};g.DrawPolygon(pen,d);if(tier>=3)g.DrawEllipse(pen,l,t,3,3); }
+                else if (theme == 10) // ink strokes / Wuxia
+                { g.DrawLine(pen,l,b,r,t);if(tier>=3)g.DrawArc(pen,cx-4,cy-4,8,8,25,245); }
+                else
+                { g.DrawLine(pen,l,b,r,t);if(tier>=3)g.DrawLine(pen,l,t,r,b);if(tier>=4)g.DrawEllipse(pen,cx-2,cy-2,4,4); }
+                g.Restore(state);
+            }
+        }
+        internal static void Heat(Graphics g, GraphicsPath path, RectangleF rect, double fraction)
+        {
+            GraphicsState state=g.Save();g.SetClip(path,CombineMode.Intersect);Heat(g,rect,fraction);g.Restore(state);
+        }
+    }
+
     internal static class HeatScale
     {
         private static readonly Color[] Stops = {

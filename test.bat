@@ -16,7 +16,7 @@ set "OUT=%TEMP%\KeyMouseStatsTests"
 if not exist "%OUT%" mkdir "%OUT%"
 set "FAIL=0"
 
-for %%T in (DistanceTests ActivityTimeTests AppActivityTests ShortcutTests StatisticsTests HourlyCompareTests KeyboardHeatTests LiveRateTests PopupLifetimeTests ReportVisualTests Report110Tests KeyRangeTests Release120Tests ThemeLoadingTests ThemeOwnershipTests WuxiaThemeTests Release100Tests AnomalyRenderTests) do (
+for %%T in (DistanceTests ActivityTimeTests AppActivityTests ShortcutTests StatisticsTests HourlyCompareTests KeyboardHeatTests LiveRateTests PopupLifetimeTests ReportVisualTests Report110Tests KeyRangeTests Release120Tests ThemeLoadingTests ThemeOwnershipTests WuxiaThemeTests Release100Tests AccessibilityPatternTests AnomalyRenderTests) do (
     if /I "%%T"=="ThemeLoadingTests" (
         "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RES% %SRC% "%~dp0tests\%%T.cs"
     ) else if /I "%%T"=="ThemeOwnershipTests" (

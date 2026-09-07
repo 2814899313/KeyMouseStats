@@ -126,6 +126,7 @@ namespace KeyMouseStats
                 bool known = _calendarMetric == 0 ? TimeInsights.HasTime(day) : day != null && !day.IsEmpty;
                 double value = !known ? 0 : _calendarMetric == 0 ? day.ActiveSeconds : day.Keys;
                 using (SolidBrush b = new SolidBrush(Heat(value, maximum, known))) g.FillRectangle(b, rect);
+                if(known && maximum>0)AccessiblePattern.Heat(g,rect,value/maximum);
                 DailySignal signal=DailySignal.Get(d);
                 if(signal.High)using(Pen anomaly=new Pen(Corange,1.6f))g.DrawRectangle(anomaly,rect.X-1,rect.Y-1,rect.Width+2,rect.Height+2);
                 if (!known) using (Pen p = new Pen(Color.FromArgb(65, Csub))) g.DrawLine(p, rect.Left + 2, rect.Bottom - 2, rect.Right - 2, rect.Top + 2);
@@ -215,6 +216,7 @@ namespace KeyMouseStats
                 RectangleF rect = new RectangleF(track.X + (float)(from / 86400 * track.Width), track.Y,
                     Math.Max(1, (float)((until - from) / 86400 * track.Width)), track.Height);
                 using (SolidBrush b = new SolidBrush(color)) g.FillRectangle(b, rect);
+                AccessiblePattern.Heat(g,rect,label=="空闲"?.58:.18);
                 if (rect.Contains(mouse)) detail = label + "  " + s.Start.ToString("HH:mm:ss") + " — " + s.End.ToString("HH:mm:ss") + "  ·  " + ActivityMonitor.FormatDuration(s.Seconds);
             }
         }
@@ -248,6 +250,7 @@ namespace KeyMouseStats
                     hours[h] += seconds;
                     RectangleF cell = new RectangleF(Cx + 112 + h * 25, y, 21, 19);
                     using (SolidBrush b = new SolidBrush(!observed ? Cbg : seconds<=0 ? HeatScale.Zero : HeatScale.At(seconds/3600))) g.FillRectangle(b, cell);
+                    if(observed && seconds>0)AccessiblePattern.Heat(g,cell,seconds/3600);
                     if (!observed) using (Pen p = new Pen(Color.FromArgb(65, Csub))) g.DrawLine(p, cell.Left + 3, cell.Bottom - 3, cell.Right - 3, cell.Top + 3);
                     if(cell.Contains(mouse))using(Pen outline=new Pen(Cblue,2))g.DrawRectangle(outline,cell.X-1,cell.Y-1,cell.Width+2,cell.Height+2);
                     if (cell.Contains(mouse)) detail = date.ToString("MM.dd ddd") + "  " + h.ToString("00") + ":00—" + (h + 1).ToString("00") + ":00  ·  点击查看当天详情  ·  " + (observed ? (seconds / 60).ToString("0.#") + " 分钟活跃（已采集部分）" : "无记录");
