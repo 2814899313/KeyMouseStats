@@ -45,6 +45,23 @@ namespace KeyMouseStats
             using(StringFormat format=new StringFormat{Alignment=StringAlignment.Near,LineAlignment=StringAlignment.Center,FormatFlags=StringFormatFlags.NoWrap})g.DrawString(label,font,ink,labelRect,format);
         }
     }
+    internal static class ThemePattern
+    {
+        internal static bool Draw(Graphics g,RectangleF target,int variant)
+        {
+            int theme=ArtTheme.Validate(Store.ThemeId);if(theme<5||theme>10)return false;
+            Image atlas=ThemeImages.Get("AccessiblePatterns");if(atlas==null)return false;
+            int tile=theme-5,col=tile%3,row=tile/3,tw=atlas.Width/3,th=atlas.Height/2;
+            int cropW=Math.Max(24,tw/2),cropH=Math.Max(24,th/2);
+            int mode=Math.Abs(variant)%4;
+            int sx=col*tw+(mode%2)*(tw-cropW),sy=row*th+(mode/2)*(th-cropH);
+            InterpolationMode old=g.InterpolationMode;
+            g.InterpolationMode=theme==8?InterpolationMode.NearestNeighbor:InterpolationMode.HighQualityBilinear;
+            g.DrawImage(atlas,target,new RectangleF(sx,sy,cropW,cropH),GraphicsUnit.Pixel);
+            g.InterpolationMode=old;return true;
+        }
+    }
+
     internal static class AccessiblePattern
     {
         // Semantic patterns stay stable across themes: primary/active is solid,
@@ -52,6 +69,11 @@ namespace KeyMouseStats
         internal static void Ring(Graphics g, RectangleF rect, float start, float sweep, float width, int semantic, Color surface)
         {
             if (semantic <= 0 || sweep < 2f) return;
+            using(GraphicsPath band=new GraphicsPath())using(Pen widthPen=new Pen(Color.Black,width))
+            {
+                band.AddArc(rect,start,sweep);band.Widen(widthPen);GraphicsState imageState=g.Save();g.SetClip(band,CombineMode.Intersect);
+                if(ThemePattern.Draw(g,rect,semantic)){g.Restore(imageState);return;}g.Restore(imageState);
+            }
             Color ink = ArtTheme.Mix(surface, ArtTheme.Current.Text, ThemeArt.Dark ? .72 : .58);
             using (Pen mark = new Pen(Color.FromArgb(205, ink), Math.Max(1.2f, width * .13f)))
             {
@@ -69,6 +91,7 @@ namespace KeyMouseStats
         {
             if (fraction <= 0 || rect.Width < 5 || rect.Height < 5) return;
             int tier = Math.Min(4, Math.Max(1, (int)Math.Ceiling(Math.Sqrt(Math.Min(1, fraction)) * 4)));
+            if(ThemePattern.Draw(g,rect,tier))return;
             int theme = ArtTheme.Validate(Store.ThemeId);
             Color ink = ArtTheme.Mix(HeatScale.At(fraction), ArtTheme.Current.Text, ThemeArt.Dark ? .72 : .55);
             using (Pen pen = new Pen(Color.FromArgb(145, ink), Math.Max(1f, Math.Min(rect.Width, rect.Height) * .055f)))
@@ -255,3 +278,4 @@ namespace KeyMouseStats
         }
     }
 }
+
