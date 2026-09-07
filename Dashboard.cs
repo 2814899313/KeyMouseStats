@@ -267,7 +267,7 @@ namespace KeyMouseStats
 
         public Dashboard()
         {
-            Text = "键鼠统计 1.3.4 - 数据分析";
+            Text = "键鼠统计 1.3.5 - 数据分析";
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterScreen;
             ShowInTaskbar = true;
@@ -700,7 +700,7 @@ namespace KeyMouseStats
                 g.DrawString("Esc      关闭面板", _fSmall, b, 24, BH - 73);
             }
             using (SolidBrush b = new SolidBrush(Cgreen)) g.FillEllipse(b, 24, BH - 30, 6, 6);
-            using (SolidBrush b = new SolidBrush(Csub)) g.DrawString("1.3.4 · 本地记录 365 天", _fSmall, b, 38, BH - 36);
+            using (SolidBrush b = new SolidBrush(Csub)) g.DrawString("1.3.5 · 本地记录 365 天", _fSmall, b, 38, BH - 36);
         }
 
         private void PaintFooter(Graphics g)
@@ -972,8 +972,9 @@ namespace KeyMouseStats
                 {
                     float sweep=(float)(360.0*values[i]/total);
                     Color arcColor=i==hovered?ArtTheme.Mix(colors[i],Ctext,.25):colors[i];float arcWidth=i==hovered?22:18;
-                    using(Pen pen=new Pen(arcColor,arcWidth))g.DrawArc(pen,ring,angle,sweep);
-                    AccessiblePattern.Ring(g,ring,angle,sweep,arcWidth,(i%4),arcColor);
+                    float gap=Math.Min(1.35f,sweep/5),segmentStart=angle+gap,segmentSweep=Math.Max(.15f,sweep-gap*2);
+                    using(Pen pen=new Pen(arcColor,arcWidth))g.DrawArc(pen,ring,segmentStart,segmentSweep);
+                    AccessiblePattern.Ring(g,ring,segmentStart,segmentSweep,arcWidth,(i%4),arcColor);
                     angle+=sweep;
                 }
             }
