@@ -28,6 +28,3 @@ if errorlevel 1 (
 )
 echo BUILD OK: KeyMouseStats.Clean.exe
 endlocal
-
-
-
