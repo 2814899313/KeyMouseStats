@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -108,7 +108,14 @@ namespace KeyMouseStats
                 Line = Hex(c[3]), Text = Hex(c[4]), Muted = Hex(c[5]), Accent = Hex(c[6]), Green = Hex(c[7]), Orange = Hex(c[8]),
                 Purple = Hex(c[9]), Red = Hex(c[10]), Cyan = Hex(c[11]), Sidebar = Hex(c[12]), OnAccent = Hex(c[13]) };
         }
-        public static int Validate(int id) { return id >= 0 && id < All.Length ? id : 0; }
+        public static int Validate(int id)
+        {
+#if CLEAN_EDITION
+            return 0;
+#else
+            return id >= 0 && id < All.Length ? id : 0;
+#endif
+        }
         public static ArtTheme Current { get { return All[Validate(Store.ThemeId)]; } }
         public static Color Mix(Color a, Color b, double amount)
         {
@@ -122,6 +129,11 @@ namespace KeyMouseStats
         private readonly RectangleF[] _themeRects = new RectangleF[ArtTheme.All.Length];
         private void PaintThemePicker(Graphics g)
         {
+#if CLEAN_EDITION
+            AppText(g, "外观 · 清爽版", _fSmall, Ctext, new RectangleF(24, 492, 132, 24), false);
+            AppText(g, "轻量基础界面", _fAxis, Csub, new RectangleF(24, 513, 132, 18), false);
+            return;
+#else
             PointF mouse = ToBase(_mouse);
             string name = WuxiaArt.Active ? "碧血丹心" : ArtTheme.Current.Name;
             for (int i = 0; i < ArtTheme.All.Length; i++)
@@ -140,9 +152,13 @@ namespace KeyMouseStats
             }
             AppText(g, "外观 · " + name, _fSmall, Ctext, new RectangleF(24, 486, 132, 24), false);
             AppText(g, "粗框 ▼ 当前主题", _fAxis, Csub, new RectangleF(24, 503, 132, 14), false);
+#endif
         }
         private bool HandleThemeClick(PointF point)
         {
+#if CLEAN_EDITION
+            return false;
+#else
             for (int i = 0; i < _themeRects.Length; i++) if (_themeRects[i].Contains(point))
             {
                 Store.ThemeId = i;NikkiArt.SyncTheme();
@@ -156,6 +172,7 @@ namespace KeyMouseStats
                 return true;
             }
             return false;
+#endif
         }
         private void PaintThemeTexture(Graphics g)
         {

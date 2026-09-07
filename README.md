@@ -10,7 +10,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/2814899313/KeyMouseStats/releases/latest/download/KeyMouseStats.exe">下载最新版</a>
+  <a href="https://github.com/2814899313/KeyMouseStats/releases/latest/download/KeyMouseStats.exe">下载完整版</a>
+  · <a href="https://github.com/2814899313/KeyMouseStats/releases/latest/download/KeyMouseStats.Clean.exe">下载清爽版</a>
   · <a href="CHANGELOG.md">查看更新日志</a>
   · <a href="https://github.com/2814899313/KeyMouseStats/issues">报告问题</a>
 </p>
@@ -35,7 +36,9 @@ KeyMouseStats 是一个单文件 Windows 桌面程序。悬浮小组件显示实
 
 ## 立即使用
 
-1. 从 [Releases](https://github.com/2814899313/KeyMouseStats/releases/latest) 下载 **KeyMouseStats.exe**。
+1. 从 [Releases](https://github.com/2814899313/KeyMouseStats/releases/latest) 选择版本：
+   - **KeyMouseStats.exe**：包含全部美术主题。
+   - **KeyMouseStats.Clean.exe**：保留全部统计功能，不包含皮肤图片和主题切换，体积更小。
 2. 放到任意可写目录后运行，无需安装。
 3. 双击桌面小组件打开数据分析；右键小组件打开托盘菜单。
 4. 在设置中填写鼠标 DPI，获得更接近实际值的移动距离。
@@ -112,7 +115,7 @@ Windows 首次运行可能显示“未知发布者”，因为当前版本尚未
 
     test.bat
 
-构建产物为根目录的 **KeyMouseStats.exe**。GitHub Actions 会在每次推送和 Pull Request 中执行独立 Windows 构建。
+构建产物为根目录的 **KeyMouseStats.exe** 和 **KeyMouseStats.Clean.exe**。GitHub Actions 会在每次推送和 Pull Request 中独立构建两种版本。
 
 ## 项目导航
 

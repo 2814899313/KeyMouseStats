@@ -18,9 +18,24 @@ jobs:
         shell: cmd
         run: build.bat
 
-      - name: Upload executable
+      - name: Build clean edition
+        shell: cmd
+        run: build-clean.bat
+
+      - name: Verify clean edition
+        shell: powershell
+        run: |
+          $file = Get-Item KeyMouseStats.Clean.exe
+          if ($file.Length -gt 2MB) { throw "Clean edition unexpectedly exceeds 2 MiB." }
+          $assembly = [Reflection.Assembly]::LoadFile($file.FullName)
+          if ($assembly.GetManifestResourceNames().Count -ne 0) { throw "Clean edition contains embedded managed resources." }
+          if ($file.VersionInfo.FileVersion -ne "1.3.2.0") { throw "Clean edition version mismatch." }
+
+      - name: Upload executables
         uses: actions/upload-artifact@v4
         with:
           name: KeyMouseStats-${{ github.sha }}
-          path: KeyMouseStats.exe
+          path: |
+            KeyMouseStats.exe
+            KeyMouseStats.Clean.exe
           if-no-files-found: error
