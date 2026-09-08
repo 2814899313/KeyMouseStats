@@ -1,7 +1,6 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Drawing.Imaging;
 using System.Windows.Forms;
 
 namespace KeyMouseStats
@@ -46,135 +45,6 @@ namespace KeyMouseStats
             using(StringFormat format=new StringFormat{Alignment=StringAlignment.Near,LineAlignment=StringAlignment.Center,FormatFlags=StringFormatFlags.NoWrap})g.DrawString(label,font,ink,labelRect,format);
         }
     }
-    internal static class ThemePattern
-    {
-        private static readonly ImageAttributes Soft=Opacity(.24f),Strong=Opacity(.38f);
-        private static ImageAttributes Opacity(float alpha){ImageAttributes a=new ImageAttributes();ColorMatrix m=new ColorMatrix();m.Matrix33=alpha;a.SetColorMatrix(m);return a;}
-        internal static bool Draw(Graphics g,RectangleF target,int variant,bool strong)
-        {
-#if CLEAN_EDITION
-            return false;
-#else
-            int theme=ArtTheme.Validate(Store.ThemeId);string resource=theme<5?"CoreMaterials":"AccessiblePatterns";
-            Image atlas=ThemeImages.Get(resource);if(atlas==null)return false;
-            int tile=theme<5?theme:theme-5,col=tile%3,row=tile/3,tw=atlas.Width/3,th=atlas.Height/2;
-            int cropW=Math.Max(24,tw/2),cropH=Math.Max(24,th/2),mode=Math.Abs(variant)%4;
-            int sx=col*tw+(mode%2)*(tw-cropW),sy=row*th+(mode/2)*(th-cropH);
-            InterpolationMode old=g.InterpolationMode;g.InterpolationMode=theme==8?InterpolationMode.NearestNeighbor:InterpolationMode.HighQualityBilinear;
-            Rectangle dest=Rectangle.Round(target);if(dest.Width>0&&dest.Height>0)g.DrawImage(atlas,dest,sx,sy,cropW,cropH,GraphicsUnit.Pixel,strong?Strong:Soft);
-            g.InterpolationMode=old;return true;
-#endif
-        }
-    }
-
-    internal static class ThemeChrome
-    {
-        private static PointF Polar(RectangleF ring,float angle,float radius)
-        {double a=angle*Math.PI/180;return new PointF(ring.X+ring.Width/2+(float)Math.Cos(a)*radius,ring.Y+ring.Height/2+(float)Math.Sin(a)*radius);}
-        internal static void Segment(Graphics g,RectangleF ring,float start,float sweep,float width,Color surface)
-        {
-            int id=ArtTheme.Validate(Store.ThemeId);float mid=start+sweep/2,r=ring.Width/2;Color light=ArtTheme.Mix(surface,ArtTheme.Current.Text,.7),dark=ArtTheme.Mix(surface,ArtTheme.Current.Background,.86);
-            PointF c=Polar(ring,mid,r),a=Polar(ring,start,r),b=Polar(ring,start+sweep,r);
-            using(Pen fine=new Pen(Color.FromArgb(190,light),1.15f))using(Pen heavy=new Pen(Color.FromArgb(205,dark),2.4f))using(SolidBrush glow=new SolidBrush(Color.FromArgb(215,light)))
-            {
-                if(id==0){PointF p1=Polar(ring,mid-3,r),p2=Polar(ring,mid+3,r);g.DrawLine(fine,p1,p2);g.FillEllipse(glow,c.X-2,c.Y-2,4,4);}
-                else if(id==1){for(int i=-1;i<=1;i++){PointF p=Polar(ring,mid+i*3.2f,r);g.FillEllipse(glow,p.X-1.2f,p.Y-1.2f,2.4f,2.4f);}}
-                else if(id==2){PointF o=Polar(ring,mid,r+width*.52f),l=Polar(ring,mid-2.2f,r+width*.25f),q=Polar(ring,mid+2.2f,r+width*.25f);g.FillPolygon(glow,new[]{o,l,q});}
-                else if(id==3){using(Pen neon=new Pen(Color.FromArgb(135,ArtTheme.Current.Cyan),2.2f)){g.DrawArc(neon,RectangleF.Inflate(ring,width*.29f,width*.29f),start+1,Math.Max(.1f,sweep-2));g.DrawArc(neon,RectangleF.Inflate(ring,-width*.28f,-width*.28f),start+1,Math.Max(.1f,sweep-2));}}
-                else if(id==4){g.DrawLine(fine,a,Polar(ring,start,r-width*.34f));g.DrawLine(fine,b,Polar(ring,start+sweep,r-width*.34f));for(int i=-1;i<=1;i++){PointF p=Polar(ring,mid+i*2.4f,r);g.FillRectangle(glow,p.X-1,p.Y-1,2,2);}}
-                else if(id==5){for(int i=-1;i<=1;i++){PointF p=Polar(ring,mid+i*3.5f,r);g.FillEllipse(glow,p.X-1.5f,p.Y-1.5f,3,3);}using(Pen soft=new Pen(Color.FromArgb(110,light),2))g.DrawArc(soft,RectangleF.Inflate(ring,-width*.28f,-width*.28f),start+2,Math.Max(.1f,sweep-4));}
-                else if(id==6){g.DrawLine(heavy,a,Polar(ring,start,r-width*.38f));g.DrawLine(heavy,b,Polar(ring,start+sweep,r-width*.38f));g.FillRectangle(glow,c.X-2.5f,c.Y-1.5f,5,3);}
-                else if(id==7){g.FillEllipse(glow,a.X-1.8f,a.Y-1.8f,3.6f,3.6f);g.FillEllipse(glow,b.X-1.8f,b.Y-1.8f,3.6f,3.6f);g.DrawLine(heavy,Polar(ring,mid-2,r+width*.35f),Polar(ring,mid+2,r+width*.35f));}
-                else if(id==8){g.FillRectangle(glow,c.X-3,c.Y-3,6,6);PointF p=Polar(ring,mid+4,r);g.FillRectangle(glow,p.X-1.5f,p.Y-1.5f,3,3);}
-                else if(id==9){using(Pen inset=new Pen(Color.FromArgb(145,light),1.7f))g.DrawArc(inset,RectangleF.Inflate(ring,-width*.3f,-width*.3f),start+2,Math.Max(.1f,sweep-4));g.FillEllipse(glow,c.X-2.2f,c.Y-2.2f,4.4f,4.4f);}
-                else {g.FillEllipse(glow,a.X-1.8f,a.Y-1.8f,3.6f,3.6f);g.FillEllipse(glow,b.X-1.8f,b.Y-1.8f,3.6f,3.6f);using(Pen brass=new Pen(Color.FromArgb(150,ArtTheme.Current.Orange),1.5f))g.DrawEllipse(brass,c.X-3,c.Y-3,6,6);}
-            }
-        }
-        internal static void KeyCap(Graphics g,RectangleF rect,Color fill,bool champion)
-        {
-            int id=ArtTheme.Validate(Store.ThemeId);Color light=ArtTheme.Mix(fill,ArtTheme.Current.Text,.55),dark=ArtTheme.Mix(fill,ArtTheme.Current.Background,.72);
-            using(Pen fine=new Pen(Color.FromArgb(145,light),1f))using(Pen heavy=new Pen(Color.FromArgb(150,dark),1.6f))using(SolidBrush dot=new SolidBrush(Color.FromArgb(175,light)))
-            {
-                if(id==0){g.DrawLine(fine,rect.Left+5,rect.Top+3,rect.Right-5,rect.Top+3);g.FillEllipse(dot,rect.Right-6,rect.Bottom-6,2.5f,2.5f);}
-                else if(id==1){fine.DashStyle=DashStyle.Dot;g.DrawLine(fine,rect.Left+5,rect.Bottom-4,rect.Right-5,rect.Bottom-4);g.DrawLines(heavy,new[]{new PointF(rect.Right-8,rect.Top+1),new PointF(rect.Right-1,rect.Top+8),new PointF(rect.Right-1,rect.Top+1)});}
-                else if(id==2){g.DrawArc(fine,rect.Left+4,rect.Top+3,10,7,190,150);g.DrawLine(heavy,rect.Left+4,rect.Bottom-3,rect.Right-4,rect.Bottom-3);}
-                else if(id==3){using(Pen neon=new Pen(Color.FromArgb(130,ArtTheme.Current.Cyan),1.5f))g.DrawRectangle(neon,rect.X+2,rect.Y+2,rect.Width-4,rect.Height-4);}
-                else if(id==4){float q=5;g.DrawLine(fine,rect.Left+2,rect.Top+q,rect.Left+2,rect.Top+2);g.DrawLine(fine,rect.Left+2,rect.Top+2,rect.Left+q,rect.Top+2);g.DrawLine(fine,rect.Right-q,rect.Bottom-2,rect.Right-2,rect.Bottom-2);g.DrawLine(fine,rect.Right-2,rect.Bottom-2,rect.Right-2,rect.Bottom-q);}
-                else if(id==5){g.FillEllipse(dot,rect.Left+4,rect.Top+4,3,3);g.FillEllipse(dot,rect.Right-7,rect.Top+4,3,3);using(Pen soft=new Pen(Color.FromArgb(90,light)))g.DrawArc(soft,rect.X+2,rect.Y+2,rect.Width-4,rect.Height-4,190,160);}
-                else if(id==6){g.DrawLines(heavy,new[]{new PointF(rect.Left+2,rect.Top+7),new PointF(rect.Left+2,rect.Top+2),new PointF(rect.Left+8,rect.Top+2)});g.DrawLines(heavy,new[]{new PointF(rect.Right-8,rect.Bottom-2),new PointF(rect.Right-2,rect.Bottom-2),new PointF(rect.Right-2,rect.Bottom-7)});}
-                else if(id==7){g.FillEllipse(dot,rect.Left+3,rect.Top+3,3,3);g.FillEllipse(dot,rect.Right-6,rect.Bottom-6,3,3);}
-                else if(id==8){g.FillRectangle(dot,rect.Left+3,rect.Top+3,4,4);g.FillRectangle(dot,rect.Right-7,rect.Bottom-7,4,4);}
-                else if(id==9){g.DrawRectangle(fine,rect.X+2,rect.Y+2,rect.Width-4,rect.Height-4);g.FillEllipse(dot,rect.Right-7,rect.Top+3,3,3);}
-                else if(!champion){g.DrawLine(fine,rect.Left+6,rect.Top+3,rect.Right-6,rect.Top+3);g.FillEllipse(dot,rect.Right-7,rect.Bottom-7,3,3);}
-            }
-        }
-    }
-
-    internal static class AccessiblePattern
-    {
-        // Semantic patterns stay stable across themes: primary/active is solid,
-        // secondary/idle is striped, tertiary is dotted, and auxiliary is dash-dot.
-        internal static void Segment(Graphics g,RectangleF centerLine,float start,float sweep,float width,int semantic,Color surface)
-        {
-            if(sweep<.2f)return;RectangleF outer=RectangleF.Inflate(centerLine,width/2,width/2),inner=RectangleF.Inflate(centerLine,-width/2,-width/2);
-            using(GraphicsPath plate=new GraphicsPath())
-            {
-                plate.AddArc(outer,start,sweep);plate.AddArc(inner,start+sweep,-sweep);plate.CloseFigure();
-                using(SolidBrush fill=new SolidBrush(surface))g.FillPath(fill,plate);
-                GraphicsState state=g.Save();g.SetClip(plate,CombineMode.Intersect);ThemePattern.Draw(g,outer,semantic,true);g.Restore(state);
-                Color dark=ArtTheme.Mix(surface,ArtTheme.Current.Background,.82),light=ArtTheme.Mix(surface,ArtTheme.Current.Text,.58);
-                using(Pen seam=new Pen(Color.FromArgb(235,dark),1.8f))g.DrawPath(seam,plate);
-                using(Pen shine=new Pen(Color.FromArgb(190,light),1.15f))g.DrawArc(shine,inner,start+.7f,Math.Max(.1f,sweep-1.4f));
-                using(Pen rim=new Pen(Color.FromArgb(115,light),.8f))g.DrawArc(rim,outer,start+.9f,Math.Max(.1f,sweep-1.8f));
-                float cx=centerLine.X+centerLine.Width/2,cy=centerLine.Y+centerLine.Height/2,rad=centerLine.Width/2;double a=(start+sweep/2)*Math.PI/180;
-                float px=cx+(float)Math.Cos(a)*rad,py=cy+(float)Math.Sin(a)*rad,size=Math.Max(2.4f,width*.14f);
-                ThemeChrome.Segment(g,centerLine,start,sweep,width,surface);
-            using(SolidBrush mark=new SolidBrush(Color.FromArgb(220,light)))using(Pen markPen=new Pen(Color.FromArgb(220,light),1.15f))
-                {
-                    if(semantic==0)g.FillEllipse(mark,px-size/2,py-size/2,size,size);
-                    else if(semantic==1){g.DrawLine(markPen,px-size,py-size/2,px+size,py-size/2);g.DrawLine(markPen,px-size,py+size/2,px+size,py+size/2);}
-                    else if(semantic==2)g.FillPolygon(mark,new[]{new PointF(px,py-size),new PointF(px+size,py+size*.75f),new PointF(px-size,py+size*.75f)});
-                    else g.DrawPolygon(markPen,new[]{new PointF(px,py-size),new PointF(px+size,py),new PointF(px,py+size),new PointF(px-size,py)});
-                }
-            }
-        }
-
-
-        internal static void Heat(Graphics g, RectangleF rect, double fraction)
-        {
-            if (fraction <= 0 || rect.Width < 5 || rect.Height < 5) return;
-            int tier = Math.Min(4, Math.Max(1, (int)Math.Ceiling(Math.Sqrt(Math.Min(1, fraction)) * 4)));
-            if(ThemePattern.Draw(g,rect,tier,false))return;
-            int theme = ArtTheme.Validate(Store.ThemeId);
-            Color ink = ArtTheme.Mix(HeatScale.At(fraction), ArtTheme.Current.Text, ThemeArt.Dark ? .72 : .55);
-            using (Pen pen = new Pen(Color.FromArgb(145, ink), Math.Max(1f, Math.Min(rect.Width, rect.Height) * .055f)))
-            using (GraphicsPath clip = new GraphicsPath())
-            {
-                clip.AddRectangle(rect); GraphicsState state = g.Save(); g.SetClip(clip, CombineMode.Intersect);
-                float l=rect.Left+3,t=rect.Top+3,r=rect.Right-3,b=rect.Bottom-3,cx=(l+r)/2,cy=(t+b)/2;
-                if (theme == 5) // star-stitch / Nikki
-                { g.DrawLine(pen,cx-3,cy,cx+3,cy); g.DrawLine(pen,cx,cy-3,cx,cy+3); if(tier>=3){g.DrawLine(pen,cx-2,cy-2,cx+2,cy+2);g.DrawLine(pen,cx+2,cy-2,cx-2,cy+2);} }
-                else if (theme == 6) // tactical circuit / Halo
-                { g.DrawLine(pen,l,cy,cx,cy);g.DrawLine(pen,cx,cy,r,cy);if(tier>=3){g.DrawLine(pen,cx,cy,cx,t);g.DrawEllipse(pen,cx-1.5f,cy-1.5f,3,3);} }
-                else if (theme == 7) // hazard stripes / Resident Evil
-                { for(float x=l-rect.Height;x<r;x+=tier>=3?7:11)g.DrawLine(pen,x,b,x+rect.Height,t); }
-                else if (theme == 8) // pixel checker / Minecraft
-                { float q=Math.Max(3,Math.Min(6,Math.Min(rect.Width,rect.Height)/3));using(SolidBrush dot=new SolidBrush(Color.FromArgb(115,ink)))for(int yy=0;yy<(tier>=3?2:1);yy++)for(int xx=0;xx<(tier>=4?3:2);xx++)if((xx+yy)%2==0)g.FillRectangle(dot,l+xx*q,t+yy*q,q,q); }
-                else if (theme == 9) // card diamonds / Balatro
-                { PointF[] d={new PointF(cx,cy-3),new PointF(cx+3,cy),new PointF(cx,cy+3),new PointF(cx-3,cy)};g.DrawPolygon(pen,d);if(tier>=3)g.DrawEllipse(pen,l,t,3,3); }
-                else if (theme == 10) // ink strokes / Wuxia
-                { g.DrawLine(pen,l,b,r,t);if(tier>=3)g.DrawArc(pen,cx-4,cy-4,8,8,25,245); }
-                else
-                { g.DrawLine(pen,l,b,r,t);if(tier>=3)g.DrawLine(pen,l,t,r,b);if(tier>=4)g.DrawEllipse(pen,cx-2,cy-2,4,4); }
-                g.Restore(state);
-            }
-        }
-        internal static void Heat(Graphics g, GraphicsPath path, RectangleF rect, double fraction)
-        {
-            GraphicsState state=g.Save();g.SetClip(path,CombineMode.Intersect);Heat(g,rect,fraction);g.Restore(state);
-        }
-    }
-
     internal static class HeatScale
     {
         private static readonly Color[] Stops = {
@@ -331,4 +201,3 @@ namespace KeyMouseStats
         }
     }
 }
-

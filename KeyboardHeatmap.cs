@@ -296,8 +296,7 @@ namespace KeyMouseStats
                 using(GraphicsPath path=RoundedRect(rect.X,rect.Y,rect.Width,rect.Height,MinecraftArt.Active?1:ThemeArt.Dark?3:ThemeArt.Active?8:5))
                 using(SolidBrush brush=new SolidBrush(fill))
                 using(Pen border=new Pen(champion?Corange:hovered?Cblue:ArtTheme.Mix(fill,Ctext,0.12),champion?2f:hovered?1.6f:0.65f))
-                { keyGraphics.FillPath(brush,path); AccessiblePattern.Heat(keyGraphics,path,rect,max>0?(double)value/max:0); keyGraphics.DrawPath(border,path); }
-                ThemeChrome.KeyCap(keyGraphics,rect,fill,champion);
+                { keyGraphics.FillPath(brush,path);keyGraphics.DrawPath(border,path); }
                 if(WuxiaArt.Active)WuxiaArt.KeyCap(keyGraphics,key,rect,champion);
                 RectangleF labelRect=rect;
                 if(champion)

@@ -154,7 +154,7 @@ namespace KeyMouseStats
                         CrossChartRow row=Data.Chart[i];float y=129+i*rowHeight;TextAt(g,row.Name,small,t.Text,new RectangleF(14,y+(rowHeight-17)/2,137,18));
                         for(int h=0;h<24;h++)
                         {
-                            RectangleF rect=new RectangleF(left+h*step,y,step-3,rowHeight-3);Fill(g,Data.Coverage[h]<=0?t.Raised:row.Values[h]<=0?HeatScale.Zero:HeatScale.At(row.Values[h]/3600),rect);if(Data.Coverage[h]>0&&row.Values[h]>0)AccessiblePattern.Heat(g,rect,row.Values[h]/3600);
+                            RectangleF rect=new RectangleF(left+h*step,y,step-3,rowHeight-3);Fill(g,Data.Coverage[h]<=0?t.Raised:row.Values[h]<=0?HeatScale.Zero:HeatScale.At(row.Values[h]/3600),rect);
                             if(Data.Coverage[h]<=0)using(Pen pen=new Pen(t.Muted))g.DrawLine(pen,rect.Left+2,rect.Bottom-2,rect.Right-2,rect.Top+2);
                             targets.Add(new KeyValuePair<RectangleF,string>(rect,row.Name+" · "+h.ToString("00")+":00 · "+(Data.Coverage[h]<=0?"无新版活跃观测":(row.Values[h]/60).ToString("0.##")+" 分钟（已观测部分）")));
                         }

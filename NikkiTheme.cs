@@ -13,17 +13,12 @@ namespace KeyMouseStats
     internal static class ThemeAssets
     {
         private static readonly Dictionary<int,string[]> Catalog=new Dictionary<int,string[]>{
-            {4,new[]{"CoreMaterials"}},
-            {3,new[]{"CoreMaterials"}},
-            {2,new[]{"CoreMaterials"}},
-            {1,new[]{"CoreMaterials"}},
-            {0,new[]{"CoreMaterials"}},
-            {5,new[]{"AccessiblePatterns","NikkiEmotes","NikkiDream","NikkiPoseTrend","NikkiPoseHours","NikkiPoseKeys","NikkiPoseApps","NikkiPoseInsights"}},
-            {6,new[]{"AccessiblePatterns","HaloIcons","HaloOverview","HaloTrend","HaloHours","HaloKeys","HaloApps","HaloInsights"}},
-            {7,new[]{"AccessiblePatterns","ResidentIcons","ResidentOverview","ResidentTrend","ResidentHours","ResidentKeys","ResidentApps","ResidentInsights"}},
-            {8,new[]{"AccessiblePatterns","MinecraftIcons","MinecraftOverview","MinecraftTrend","MinecraftHours","MinecraftKeys","MinecraftApps","MinecraftInsights"}},
-            {9,new[]{"AccessiblePatterns","BalatroIcons","BalatroBackgrounds"}},
-            {10,new[]{"AccessiblePatterns","WuxiaUi","WuxiaWidget","WuxiaBackgrounds"}}
+            {5,new[]{"NikkiEmotes","NikkiDream","NikkiPoseTrend","NikkiPoseHours","NikkiPoseKeys","NikkiPoseApps","NikkiPoseInsights"}},
+            {6,new[]{"HaloIcons","HaloOverview","HaloTrend","HaloHours","HaloKeys","HaloApps","HaloInsights"}},
+            {7,new[]{"ResidentIcons","ResidentOverview","ResidentTrend","ResidentHours","ResidentKeys","ResidentApps","ResidentInsights"}},
+            {8,new[]{"MinecraftIcons","MinecraftOverview","MinecraftTrend","MinecraftHours","MinecraftKeys","MinecraftApps","MinecraftInsights"}},
+            {9,new[]{"BalatroIcons","BalatroBackgrounds"}},
+            {10,new[]{"WuxiaUi","WuxiaWidget","WuxiaBackgrounds"}}
         };
         internal static string[] ForTheme(int id){string[] names;return Catalog.TryGetValue(id,out names)?(string[])names.Clone():new string[0];}
     }
