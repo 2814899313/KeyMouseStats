@@ -297,7 +297,8 @@ namespace KeyMouseStats
                 using(SolidBrush brush=new SolidBrush(fill))
                 using(Pen border=new Pen(champion?Corange:hovered?Cblue:ArtTheme.Mix(fill,Ctext,0.12),champion?2f:hovered?1.6f:0.65f))
                 { keyGraphics.FillPath(brush,path);keyGraphics.DrawPath(border,path); }
-                if(WuxiaArt.Active)WuxiaArt.KeyCap(keyGraphics,key,rect,champion);
+                if(EuroTruckArt.Active)EuroTruckArt.KeyCap(keyGraphics,key,rect,champion);
+                else if(WuxiaArt.Active)WuxiaArt.KeyCap(keyGraphics,key,rect,champion);
                 RectangleF labelRect=rect;
                 if(champion)
                 {
@@ -321,10 +322,11 @@ namespace KeyMouseStats
             using(GraphicsPath path=RoundedRect(badge.X,badge.Y,badge.Width,badge.Height,7))
             using(SolidBrush b=new SolidBrush(ArtTheme.Mix(Ccard,Cblue,0.12))) g.FillPath(b,path);
             using(StringFormat center=new StringFormat {Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center})
-            using(SolidBrush b=new SolidBrush(Ctext)) g.DrawString(ThemeArt.Active && hover==null?(WuxiaArt.Active?"武林盟主":BalatroArt.Active?"王牌加冕":MinecraftArt.Active?"钻石成就":ResidentArt.Active?"幸存者徽章":HaloArt.Active?"斯巴达勋章":"大喵加冕"):keyLabel,_fBody,b,badge,center);
+            using(SolidBrush b=new SolidBrush(Ctext)) g.DrawString(ThemeArt.Active && hover==null?(EuroTruckArt.Active?"黄金方向盘":WuxiaArt.Active?"武林盟主":BalatroArt.Active?"王牌加冕":MinecraftArt.Active?"钻石成就":ResidentArt.Active?"幸存者徽章":HaloArt.Active?"斯巴达勋章":"大喵加冕"):keyLabel,_fBody,b,badge,center);
             string detail=hover==null?"蓝色低频 → 红色高频 · 灰色为零次 · 悬停查看数值":hover.Scan==0?"Fn 由硬件处理，无法统计":Analysis.FmtCount(hoverCount)+" 次击键    /    占全部 "+(total>0?(100.0*hoverCount/total).ToString("0.0",CultureInfo.InvariantCulture):"0.0")+"%";
             if(ThemeArt.Active && hover==null)detail=max>0?favorite+" 是本场最爱 · "+Analysis.FmtCount(max)+" 次 · 金边键帽获得大喵徽章":"还没有击键记录，大喵等你点亮第一颗键。";
             if(ThemeArt.Dark && hover==null)detail=max>0?favorite+" 为核心按键 · "+Analysis.FmtCount(max)+" 次 · 金边标识当前最高频键":"终端待命 · 等待第一条击键记录。";
+            if(EuroTruckArt.Active && hover==null)detail=max>0?favorite+" 驶上热键榜首 · "+Analysis.FmtCount(max)+" 次 · 获得黄金方向盘":"车队待命 · 等待第一条击键记录。";
             if(WuxiaArt.Active && hover==null)detail=max>0?favorite+" 登临键谱榜首 · "+Analysis.FmtCount(max)+" 次 · 朱砂金边封为盟主键":"江湖谱尚空 · 等待第一式落键。";
             AppText(g,detail,_fBody,Ctext,new RectangleF(Cx+114,519,445,24),false);
             AppText(g,"配列覆盖 "+(total>0?(100.0*visible/total).ToString("0.0",CultureInfo.InvariantCulture):"0.0")+"%",_fSmall,Csub,new RectangleF(Cx+Cw-183,519,160,24),true);

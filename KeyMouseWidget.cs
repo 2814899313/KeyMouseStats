@@ -477,7 +477,7 @@ namespace KeyMouseStats
                 Prune();
                 if (!Directory.Exists(Dir)) Directory.CreateDirectory(Dir);
                 StringBuilder sb = new StringBuilder();
-                sb.AppendLine("# 键鼠统计数据文件 v10 / 正式版 1.3.2（多日曲线 / 交叉归因）");
+                sb.AppendLine("# 键鼠统计数据文件 v10 / 正式版 1.4.0（多日曲线 / 交叉归因）");
                 sb.AppendLine("shortcut_model_v1="+ShortcutSavings.EncodeModel());
                 sb.AppendLine("idle_threshold=" + IdleThresholdSeconds.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("art_theme=" + ArtTheme.Validate(ThemeId).ToString(CultureInfo.InvariantCulture));
@@ -1016,7 +1016,8 @@ namespace KeyMouseStats
             using (GraphicsPath path = RoundedPath(new Rectangle(Point.Empty, ClientSize), (int)Math.Round(16 * s)))
             {
                 using (SolidBrush bg = new SolidBrush(ArtTheme.Current.Card)) g.FillPath(bg, path);
-                if(WuxiaArt.Active){GraphicsState artState=g.Save();g.SetClip(path);WuxiaArt.DrawWidget(g,new RectangleF(0,0,ClientSize.Width,ClientSize.Height));g.Restore(artState);}
+                if(EuroTruckArt.Active){GraphicsState artState=g.Save();g.SetClip(path);EuroTruckArt.DrawWidget(g,new RectangleF(0,0,ClientSize.Width,ClientSize.Height));g.Restore(artState);}
+                else if(WuxiaArt.Active){GraphicsState artState=g.Save();g.SetClip(path);WuxiaArt.DrawWidget(g,new RectangleF(0,0,ClientSize.Width,ClientSize.Height));g.Restore(artState);}
                 if(ThemeArt.Active)
                 {
                     GraphicsState state=g.Save();g.SetClip(path);ThemeArt.Sticker(g,ActivityMonitor.CurrentSession==null?3:0,new RectangleF(107*s,3*s,30*s,30*s));g.Restore(state);
@@ -1244,7 +1245,7 @@ namespace KeyMouseStats
         {
             _tray = new NotifyIcon();
             _tray.Icon = MakeIcon();
-            _tray.Text = "键鼠统计 1.3.2 正式版";
+            _tray.Text = "键鼠统计 1.4.0 正式版";
             _tray.Visible = true;
             _tray.ContextMenuStrip = _menu;
             _tray.MouseDoubleClick += delegate { ToggleVisible(); };

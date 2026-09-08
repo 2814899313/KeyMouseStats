@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -209,6 +209,7 @@ internal static class RenderDashboard
                 else if (theme == 6) WaitTheme(form, new[] { "HaloIcons", "HaloOverview", "HaloTrend", "HaloHours", "HaloKeys", "HaloApps", "HaloInsights" });
                 else if (theme == 7) WaitTheme(form, new[] { "ResidentIcons", "ResidentOverview", "ResidentTrend", "ResidentHours", "ResidentKeys", "ResidentApps", "ResidentInsights" });
                 else if (theme == 8) WaitTheme(form, new[] { "MinecraftIcons", "MinecraftOverview", "MinecraftTrend", "MinecraftHours", "MinecraftKeys", "MinecraftApps", "MinecraftInsights" });
+                else if (theme == 11) WaitTheme(form, new[] { "EuroTruckIcons", "EuroTruckWidget", "EuroTruckOverview", "EuroTruckTrend", "EuroTruckHours", "EuroTruckKeys", "EuroTruckApps", "EuroTruckInsights" });
                 for (int page = 0; page < 6; page++)
                 {
                     tabField.SetValue(form, Enum.ToObject(tabField.FieldType, page));

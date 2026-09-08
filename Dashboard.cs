@@ -267,7 +267,7 @@ namespace KeyMouseStats
 
         public Dashboard()
         {
-            Text = "键鼠统计 1.3.2 - 数据分析";
+            Text = "键鼠统计 1.4.0 - 数据分析";
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterScreen;
             ShowInTaskbar = true;
@@ -597,7 +597,7 @@ namespace KeyMouseStats
         {
             float x=200,y=BH-42;
             using(SolidBrush background=new SolidBrush(Ccard))g.FillRectangle(background,x,y,270,32);
-            string label=WuxiaArt.Active?"正在展开江湖绘卷":BalatroArt.Active?"正在洗牌与准备牌桌":MinecraftArt.Active?"正在构建方块世界":ResidentArt.Active?"正在读取幸存者档案":HaloArt.Active?"正在连接战术终端":NikkiArt.Active?"正在搭配奇迹衣橱":"正在准备界面";
+            string label=EuroTruckArt.Active?"正在检查车辆与规划路线":WuxiaArt.Active?"正在展开江湖绘卷":BalatroArt.Active?"正在洗牌与准备牌桌":MinecraftArt.Active?"正在构建方块世界":ResidentArt.Active?"正在读取幸存者档案":HaloArt.Active?"正在连接战术终端":NikkiArt.Active?"正在搭配奇迹衣橱":"正在准备界面";
             using(SolidBrush ink=new SolidBrush(Csub))g.DrawString(label,_fSmall,ink,x+44,y+8);
             for(int i=0;i<8;i++)
             {
@@ -605,12 +605,14 @@ namespace KeyMouseStats
                 using(SolidBrush brush=new SolidBrush(Color.FromArgb(alpha,Cblue)))
                 {
                     double angle=i*Math.PI/4;float px=x+19+(float)Math.Cos(angle)*10,py=y+16+(float)Math.Sin(angle)*10;
-                    if(WuxiaArt.Active){using(Pen petal=new Pen(Color.FromArgb(alpha,Corange),1.2f)){g.DrawArc(petal,px-3,py-2,4,6,210,210);g.DrawArc(petal,px,py-2,4,6,120,210);}}
+                    if(EuroTruckArt.Active){using(Pen road=new Pen(Color.FromArgb(alpha,Corange),1.4f)){g.DrawLine(road,px-3,py+2,px+3,py+2);g.DrawEllipse(road,px-3,py-2,6,4);}}
+                    else if(WuxiaArt.Active){using(Pen petal=new Pen(Color.FromArgb(alpha,Corange),1.2f)){g.DrawArc(petal,px-3,py-2,4,6,210,210);g.DrawArc(petal,px,py-2,4,6,120,210);}}
                     else if(MinecraftArt.Active)g.FillRectangle(brush,px-2,py-2,5,5);
                     else if(NikkiArt.Active)NikkiArt.Star(g,px,py,3,Color.FromArgb(alpha,Cpurple));
                     else g.FillEllipse(brush,px-2,py-2,4,4);
                 }
             }
+            if(EuroTruckArt.Active)using(Pen lane=new Pen(Color.FromArgb(180,Corange),1.2f)){lane.DashStyle=DashStyle.Dash;g.DrawLine(lane,x+211,y+17,x+258,y+17);}
             if(ResidentArt.Active)using(Pen pulse=new Pen(Cred,1.4f))g.DrawLines(pulse,new[]{new PointF(x+215,y+17),new PointF(x+224,y+17),new PointF(x+229,y+9),new PointF(x+234,y+23),new PointF(x+240,y+17),new PointF(x+258,y+17)});
             if(HaloArt.Active)using(Pen radar=new Pen(Ccyan,1.2f))
             {g.DrawArc(radar,x+7,y+4,24,24,(_loadingFrame*24)%360,110);g.DrawLine(radar,x+19,y+16,x+28,y+16);}
@@ -632,10 +634,10 @@ namespace KeyMouseStats
             else if(NikkiArt.Active) NikkiArt.Star(g,36,44,11,ArtTheme.Current.OnAccent);
             else DrawGlyph(g, 0, 28, 36, ArtTheme.Current.OnAccent);
             using (SolidBrush b = new SolidBrush(Ctext)) g.DrawString("键鼠统计", _fH2, b, 62, 28);
-            using (SolidBrush b = new SolidBrush(Csub)) g.DrawString(WuxiaArt.Active?"江湖行迹":BalatroArt.Active?"JOKER ACTIVITY":MinecraftArt.Active?"BLOCK ACTIVITY":ResidentArt.Active?"SURVIVOR ARCHIVE":ThemeArt.Dark?"SPARTAN ACTIVITY":"ACTIVITY MONITOR", _fAxis, b, 62, 48);
+            using (SolidBrush b = new SolidBrush(Csub)) g.DrawString(EuroTruckArt.Active?"LONG HAUL LOG":WuxiaArt.Active?"江湖行迹":BalatroArt.Active?"JOKER ACTIVITY":MinecraftArt.Active?"BLOCK ACTIVITY":ResidentArt.Active?"SURVIVOR ARCHIVE":ThemeArt.Dark?"SPARTAN ACTIVITY":"ACTIVITY MONITOR", _fAxis, b, 62, 48);
             using (SolidBrush b = new SolidBrush(Csub)) g.DrawString("数据分析", _fSmall, b, 24, 113);
 
-            using (SolidBrush b = new SolidBrush(Csub)) g.DrawString((WuxiaArt.Active?"碧血丹心  /  ":BalatroArt.Active?"幻彩牌桌  /  ":MinecraftArt.Active?"方块世界  /  ":ResidentArt.Active?"幸存者档案  /  ":ThemeArt.Dark?"战术终端  /  ":"工作空间  /  ") + _tabNames[(int)_tab], _fSmall, b, 200, 24);
+            using (SolidBrush b = new SolidBrush(Csub)) g.DrawString((EuroTruckArt.Active?"长途之路  /  ":WuxiaArt.Active?"碧血丹心  /  ":BalatroArt.Active?"幻彩牌桌  /  ":MinecraftArt.Active?"方块世界  /  ":ResidentArt.Active?"幸存者档案  /  ":ThemeArt.Dark?"战术终端  /  ":"工作空间  /  ") + _tabNames[(int)_tab], _fSmall, b, 200, 24);
             using (SolidBrush b = new SolidBrush(Ctext)) g.DrawString(_tabNames[(int)_tab], _fTitle, b, 198, 61);
             if(_tab!=TabId.Insights || _insightView!=1 || _insightDay.Date==DateTime.Today)InteractionBadge.Draw(g,new RectangleF(336,74,112,23),_fSmall,"● 今日累积中");
             string[] descriptions = {
@@ -660,8 +662,8 @@ namespace KeyMouseStats
             }
             if(ThemeArt.Dark)
             {
-                ThemeArt.Symbol(g,WuxiaArt.Active?WuxiaArt.NavSymbols[(int)_tab]:BalatroArt.Active?BalatroArt.NavSymbols[(int)_tab]:(int)_tab,ResidentArt.Active?new RectangleF(646,6,64,64):new RectangleF(742,4,78,78));
-                AppText(g,(WuxiaArt.Active?WuxiaArt.PageLabels:BalatroArt.Active?BalatroArt.PageLabels:MinecraftArt.Active?MinecraftArt.PageLabels:ResidentArt.Active?ResidentArt.PageLabels:HaloArt.PageLabels)[(int)_tab],_fSmall,WuxiaArt.Active?Corange:Ccyan,ResidentArt.Active?new RectangleF(452,64,180,22):new RectangleF(646,78,180,22),true);
+                ThemeArt.Symbol(g,EuroTruckArt.Active?EuroTruckArt.NavSymbols[(int)_tab]:WuxiaArt.Active?WuxiaArt.NavSymbols[(int)_tab]:BalatroArt.Active?BalatroArt.NavSymbols[(int)_tab]:(int)_tab,ResidentArt.Active?new RectangleF(646,6,64,64):new RectangleF(742,4,78,78));
+                AppText(g,(EuroTruckArt.Active?EuroTruckArt.PageLabels:WuxiaArt.Active?WuxiaArt.PageLabels:BalatroArt.Active?BalatroArt.PageLabels:MinecraftArt.Active?MinecraftArt.PageLabels:ResidentArt.Active?ResidentArt.PageLabels:HaloArt.PageLabels)[(int)_tab],_fSmall,EuroTruckArt.Active?Corange:WuxiaArt.Active?Corange:Ccyan,ResidentArt.Active?new RectangleF(452,64,180,22):new RectangleF(646,78,180,22),true);
             }
             _closeRect = new RectangleF(BW - 48, 16, 28, 28);
             bool hov = Hit(_closeRect, ToBase(_mouse));
@@ -687,7 +689,7 @@ namespace KeyMouseStats
                     using (GraphicsPath p = RoundedRect(r.X, r.Y, r.Width, r.Height, 10))
                     using (SolidBrush b = new SolidBrush(sel ? ArtTheme.Mix(Ccard, Cblue, 0.18) : Ccard)) g.FillPath(b, p);
                 Color color = sel ? Cblue : hov ? Ctext : Csub;
-                if(ThemeArt.Dark)ThemeArt.Symbol(g,WuxiaArt.Active?WuxiaArt.NavSymbols[i]:BalatroArt.Active?BalatroArt.NavSymbols[i]:i,new RectangleF(23,r.Y+7,30,30));else DrawGlyph(g, i, 28, r.Y + 14, color);
+                if(ThemeArt.Dark)ThemeArt.Symbol(g,EuroTruckArt.Active?EuroTruckArt.NavSymbols[i]:WuxiaArt.Active?WuxiaArt.NavSymbols[i]:BalatroArt.Active?BalatroArt.NavSymbols[i]:i,new RectangleF(23,r.Y+7,30,30));else DrawGlyph(g, i, 28, r.Y + 14, color);
                 using (SolidBrush b = new SolidBrush(color)) g.DrawString(_tabNames[i], _fTab, b, 56, r.Y + 11);
                 if (sel)
                     using (SolidBrush b = new SolidBrush(Cblue)) g.FillRectangle(b, 14, r.Y + 13, 3, 18);
@@ -700,7 +702,7 @@ namespace KeyMouseStats
                 g.DrawString("Esc      关闭面板", _fSmall, b, 24, BH - 73);
             }
             using (SolidBrush b = new SolidBrush(Cgreen)) g.FillEllipse(b, 24, BH - 30, 6, 6);
-            using (SolidBrush b = new SolidBrush(Csub)) g.DrawString("1.3.2 · 本地记录 365 天", _fSmall, b, 38, BH - 36);
+            using (SolidBrush b = new SolidBrush(Csub)) g.DrawString("1.4.0 · 本地记录 365 天", _fSmall, b, 38, BH - 36);
         }
 
         private void PaintFooter(Graphics g)
@@ -774,7 +776,7 @@ namespace KeyMouseStats
                 LiveRate.KeysPerMin.ToString("N0", CultureInfo.InvariantCulture),
                 LiveRate.Apm.ToString("N0", CultureInfo.InvariantCulture) };
             Color[] cols = { Cblue, Cgreen, Corange, Cpurple, Cgreen, Cblue, Ccyan, Cred };
-            int[] haloSymbols = WuxiaArt.Active?WuxiaArt.MetricSymbols:BalatroArt.Active?new[]{0,1,2,3,4,5,6,7}:new[]{3,6,7,8,9,10,1,11};
+            int[] haloSymbols = EuroTruckArt.Active?EuroTruckArt.MetricSymbols:WuxiaArt.Active?WuxiaArt.MetricSymbols:BalatroArt.Active?new[]{0,1,2,3,4,5,6,7}:new[]{3,6,7,8,9,10,1,11};
 
             float gap = 16, tileW = (Cw - 3 * gap) / 4f;
             _activityRect = new RectangleF(Cx, Cy + 104, tileW, 88);
@@ -852,8 +854,9 @@ namespace KeyMouseStats
                     using(Pen light=new Pen(Color.FromArgb(210,Color.White)))g.DrawLine(light,x+radius,y+2,x+w-radius,y+2);
                     NikkiArt.Star(g,x+w-13,y+13,4,Color.FromArgb(140,Corange));
                 }
-                if(ThemeArt.Dark && !WuxiaArt.Active)
+                if(ThemeArt.Dark && !WuxiaArt.Active && !EuroTruckArt.Active)
                     using(Pen edge=new Pen(Ccyan,2)) {g.DrawLine(edge,x+8,y,x+38,y);g.DrawLine(edge,x+8,y,x+8,y+7);}
+                if(EuroTruckArt.Active)EuroTruckArt.CardOrnaments(g,new RectangleF(x,y,w,h));
                 if(WuxiaArt.Active)WuxiaArt.CardOrnaments(g,new RectangleF(x,y,w,h));
                 if (Store.ThemeId == 3)
                     using (Pen pen = new Pen(Color.FromArgb(120, Ccyan))) g.DrawLine(pen, x + 10, y, x + Math.Min(w - 10, 65), y);
@@ -1169,7 +1172,8 @@ namespace KeyMouseStats
         {
             PointF mouse = ToBase(_mouse);
             bool hov = Hit(r, new PointF(mouse.X - ContentX, mouse.Y - ContentY));
-            if(WuxiaArt.Active)WuxiaArt.Button(g,r,sel,hov);
+            if(EuroTruckArt.Active)EuroTruckArt.Button(g,r,sel,hov);
+            else if(WuxiaArt.Active)WuxiaArt.Button(g,r,sel,hov);
             else
             using (GraphicsPath p = RoundedRect(r.X, r.Y, r.Width, r.Height, 8))
             {

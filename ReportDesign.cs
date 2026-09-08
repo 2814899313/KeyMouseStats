@@ -112,7 +112,8 @@ namespace KeyMouseStats
             using(Font body=new Font("Microsoft YaHei UI",12,FontStyle.Regular,GraphicsUnit.Pixel))
             {
                 ReportDesign.Text(g,Heading,title,t.Text,new RectangleF(24,19,270,39));
-                if(WuxiaArt.Active)WuxiaArt.Symbol(g,0,new RectangleF(264,15,42,42));
+                if(EuroTruckArt.Active)EuroTruckArt.Symbol(g,6,new RectangleF(264,15,42,42));
+                else if(WuxiaArt.Active)WuxiaArt.Symbol(g,0,new RectangleF(264,15,42,42));
                 else if(BalatroArt.Active)BalatroArt.Symbol(g,8,new RectangleF(264,19,34,34));
                 ReportDesign.Text(g,Date+"   ·   "+Status,body,t.Muted,new RectangleF(24,64,width-48,23));
             }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Diagnostics;
 using System.Reflection;
@@ -23,17 +23,17 @@ internal static class ThemeLoadingTests
             FieldInfo tab=typeof(Dashboard).GetField("_tab",flags);
             MethodInfo paint=typeof(Dashboard).GetMethod("OnPaint",flags);
             object[] args={new PaintEventArgs(graphics,new Rectangle(Point.Empty,bmp.Size))};
-            for(int pass=0;pass<2;pass++)for(int theme=5;theme<=10;theme++)
+            for(int pass=0;pass<2;pass++)for(int theme=5;theme<=11;theme++)
             {
                 typeof(Dashboard).GetField("_s",flags).SetValue(form,pass==0?1f:1.5f);
                 Store.ThemeId=theme;double slowest=0;
                 for(int page=0;page<6;page++)
                 {
-                    string prefix=theme==10?"Wuxia":theme==9?"Balatro":theme==6?"Halo":theme==7?"Resident":"Minecraft";
-                    string resource=theme==10?"WuxiaBackgrounds":theme==9?"BalatroBackgrounds":theme==5?nikki[page]:prefix+pages[page];
+                    string prefix=theme==11?"EuroTruck":theme==10?"Wuxia":theme==9?"Balatro":theme==6?"Halo":theme==7?"Resident":"Minecraft";
+                    string resource=theme==11?prefix+pages[page]:theme==10?"WuxiaBackgrounds":theme==9?"BalatroBackgrounds":theme==5?nikki[page]:prefix+pages[page];
                     Stopwatch request=Stopwatch.StartNew();ThemeImages.Get(resource);request.Stop();
                     if(request.ElapsedMilliseconds>1000)throw new Exception("Image request blocked UI");
-                    Wait(resource);Wait(theme==10?"WuxiaUi":theme==5?"NikkiEmotes":prefix+"Icons");if(theme==10)Wait("WuxiaWidget");
+                    Wait(resource);Wait(theme==11?"EuroTruckIcons":theme==10?"WuxiaUi":theme==5?"NikkiEmotes":prefix+"Icons");if(theme==10)Wait("WuxiaWidget");if(theme==11)Wait("EuroTruckWidget");
                     tab.SetValue(form,Enum.ToObject(tab.FieldType,page));
                     typeof(Dashboard).GetField("_showKeyboardHeatmap",flags).SetValue(form,true);
                     graphics.ResetTransform();paint.Invoke(form,args);
@@ -56,7 +56,7 @@ internal static class ThemeLoadingTests
             if(ThemeImages.Get("MissingTestResource")!=null)throw new Exception("Missing asset fallback");
             typeof(Dashboard).GetMethod("OnFormClosed",flags).Invoke(form,new object[]{new FormClosedEventArgs(CloseReason.None)});
         }
-        Console.WriteLine("PASS: 72 page transitions, bounded original cache, async loading and missing-image fallback");
+        Console.WriteLine("PASS: 84 page transitions, bounded original cache, async loading and missing-image fallback");
     }
     static void Wait(string resource)
     {

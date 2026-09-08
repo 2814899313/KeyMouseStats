@@ -18,7 +18,8 @@ namespace KeyMouseStats
             {7,new[]{"ResidentIcons","ResidentOverview","ResidentTrend","ResidentHours","ResidentKeys","ResidentApps","ResidentInsights"}},
             {8,new[]{"MinecraftIcons","MinecraftOverview","MinecraftTrend","MinecraftHours","MinecraftKeys","MinecraftApps","MinecraftInsights"}},
             {9,new[]{"BalatroIcons","BalatroBackgrounds"}},
-            {10,new[]{"WuxiaUi","WuxiaWidget","WuxiaBackgrounds"}}
+            {10,new[]{"WuxiaUi","WuxiaWidget","WuxiaBackgrounds"}},
+            {11,new[]{"EuroTruckIcons","EuroTruckWidget","EuroTruckOverview","EuroTruckTrend","EuroTruckHours","EuroTruckKeys","EuroTruckApps","EuroTruckInsights"}}
         };
         internal static string[] ForTheme(int id){string[] names;return Catalog.TryGetValue(id,out names)?(string[])names.Clone():new string[0];}
     }

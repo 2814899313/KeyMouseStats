@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -99,7 +99,8 @@ namespace KeyMouseStats
             Create("生化危机 · 档案", 5, "111416", "1B2326", "293236", "536366", "EBEEE9", "B7C2C1", "DA7773", "8AB9A1", "D6AE72", "ACA6BA", "E27474", "7BAEBB", "0B1012", "221113"),
             Create("我的世界 · 方块", 2, "101D18", "1B2C23", "293E2D", "617458", "EDF0DB", "B5C6A5", "9BCB70", "75BDA0", "DEB26B", "B6A2D6", "DF8573", "70C9CF", "0B1711", "16220F"),
             Create("小丑牌 · 幻彩牌桌", 7, "101F23", "193037", "25424A", "507178", "F5E9CB", "ADC5C5", "F08075", "87C3A2", "E6B964", "BB99D6", "ED6F68", "6AD3DD", "0B181C", "271316"),
-            Create("大侠立志传 · 碧血丹心", 5, "091318", "122226", "1C3031", "6B6048", "F2E7CA", "BDB49D", "B7453F", "54A194", "C8A55E", "8872A4", "B74449", "62B5B3", "071014", "FFF1D2")
+            Create("大侠立志传 · 碧血丹心", 5, "091318", "122226", "1C3031", "6B6048", "F2E7CA", "BDB49D", "B7453F", "54A194", "C8A55E", "8872A4", "B74449", "62B5B3", "071014", "FFF1D2"),
+            Create("欧洲卡车 · 长途之路", 7, "07111E", "0E1C2B", "14283B", "31506A", "EDF4F8", "93A9B7", "E7A23B", "58BCA5", "F0A840", "8D86C9", "E46E5C", "3CCBE7", "08131F", "16130D")
         };
         private static Color Hex(string value) { return Color.FromArgb(255, Color.FromArgb(Convert.ToInt32(value, 16))); }
         private static ArtTheme Create(string name, int radius, params string[] c)
@@ -135,7 +136,7 @@ namespace KeyMouseStats
             return;
 #else
             PointF mouse = ToBase(_mouse);
-            string name = WuxiaArt.Active ? "碧血丹心" : ArtTheme.Current.Name;
+            string name = EuroTruckArt.Active ? "长途之路" : WuxiaArt.Active ? "碧血丹心" : ArtTheme.Current.Name;
             for (int i = 0; i < ArtTheme.All.Length; i++)
             {
                 RectangleF r = new RectangleF(24 + i % 4 * 35, 516 + i / 4 * 21, 29, 16);
@@ -148,7 +149,7 @@ namespace KeyMouseStats
                 using (Pen p = new Pen(selected || _themeRects[i].Contains(mouse) ? Ctext : Cline, selected ? 3 : 1))
                     g.DrawRectangle(p, r.X, r.Y, r.Width, r.Height);
                 if(selected)using(SolidBrush marker=new SolidBrush(Ctext))g.FillPolygon(marker,new[]{new PointF(r.Right-9,r.Bottom+1),new PointF(r.Right-3,r.Bottom+1),new PointF(r.Right-6,r.Bottom+4)});
-                if (_themeRects[i].Contains(mouse)) name = i==10 ? "碧血丹心" : theme.Name;
+                if (_themeRects[i].Contains(mouse)) name = i==11 ? "长途之路" : i==10 ? "碧血丹心" : theme.Name;
             }
             AppText(g, "外观 · " + name, _fSmall, Ctext, new RectangleF(24, 486, 132, 24), false);
             AppText(g, "粗框 ▼ 当前主题", _fAxis, Csub, new RectangleF(24, 503, 132, 14), false);
@@ -176,6 +177,7 @@ namespace KeyMouseStats
         }
         private void PaintThemeTexture(Graphics g)
         {
+            if(EuroTruckArt.Active)EuroTruckArt.DrawPage(g,(int)_tab,new RectangleF(0,0,BW,BH));
             if(WuxiaArt.Active)WuxiaArt.DrawPage(g,(int)_tab,new RectangleF(0,0,BW,BH));
             if(BalatroArt.Active)BalatroArt.DrawPage(g,(int)_tab,new RectangleF(0,0,BW,BH));
             if(MinecraftArt.Active)MinecraftArt.DrawPage(g,(int)_tab,new RectangleF(0,0,BW,BH));
