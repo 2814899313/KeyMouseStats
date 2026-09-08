@@ -267,7 +267,7 @@ namespace KeyMouseStats
 
         public Dashboard()
         {
-            Text = "键鼠统计 1.3.5 - 数据分析";
+            Text = "键鼠统计 1.3.6 - 数据分析";
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterScreen;
             ShowInTaskbar = true;
@@ -700,7 +700,7 @@ namespace KeyMouseStats
                 g.DrawString("Esc      关闭面板", _fSmall, b, 24, BH - 73);
             }
             using (SolidBrush b = new SolidBrush(Cgreen)) g.FillEllipse(b, 24, BH - 30, 6, 6);
-            using (SolidBrush b = new SolidBrush(Csub)) g.DrawString("1.3.5 · 本地记录 365 天", _fSmall, b, 38, BH - 36);
+            using (SolidBrush b = new SolidBrush(Csub)) g.DrawString("1.3.6 · 本地记录 365 天", _fSmall, b, 38, BH - 36);
         }
 
         private void PaintFooter(Graphics g)
@@ -885,9 +885,7 @@ namespace KeyMouseStats
                 return;
             }
 
-            Pen[] pens = {
-                new Pen(Cblue, 16f), new Pen(Cgreen, 16f),
-                new Pen(Corange, 16f), new Pen(Cpurple, 16f) };
+            Color[] segmentColors = { Cblue, Cgreen, Corange, Cpurple };
             long[] vals = { left, right, mid, xb };
             float start = -90f;
             // 底环
@@ -900,11 +898,9 @@ namespace KeyMouseStats
                 if (sweep < 0.4f) sweep = 0.4f;
                 float arcStart=start + Math.Min(1.2f, sweep / 4);
                 float arcSweep=Math.Max(0.1f, sweep - Math.Min(2.4f, sweep / 2));
-                g.DrawArc(pens[i], rect, arcStart, arcSweep);
-                AccessiblePattern.Ring(g,rect,arcStart,arcSweep,16f,i,pens[i].Color);
+                AccessiblePattern.Segment(g,rect,arcStart,arcSweep,16f,i,segmentColors[i]);
                 start += 360f * vals[i] / total;
             }
-            foreach (Pen p in pens) p.Dispose();
 
             string v = Analysis.FmtCount(total);
             using (SolidBrush b = new SolidBrush(Ctext))
@@ -973,8 +969,7 @@ namespace KeyMouseStats
                     float sweep=(float)(360.0*values[i]/total);
                     Color arcColor=i==hovered?ArtTheme.Mix(colors[i],Ctext,.25):colors[i];float arcWidth=i==hovered?22:18;
                     float gap=Math.Min(1.35f,sweep/5),segmentStart=angle+gap,segmentSweep=Math.Max(.15f,sweep-gap*2);
-                    using(Pen pen=new Pen(arcColor,arcWidth))g.DrawArc(pen,ring,segmentStart,segmentSweep);
-                    AccessiblePattern.Ring(g,ring,segmentStart,segmentSweep,arcWidth,(i%4),arcColor);
+                    AccessiblePattern.Segment(g,ring,segmentStart,segmentSweep,arcWidth,(i%4),arcColor);
                     angle+=sweep;
                 }
             }

@@ -123,6 +123,7 @@ Windows 首次运行可能显示“未知发布者”，因为当前版本尚未
 - [主题资源规范](THEME_RESOURCES.md)
 - [隐私与安全](SECURITY.md)
 - [参与开发](CONTRIBUTING.md)
+- [1.3.6 发布说明](docs/releases/v1.3.6.md)
 - [1.3.5 发布说明](docs/releases/v1.3.5.md)
 - [1.3.4 发布说明](docs/releases/v1.3.4.md)
 - [1.3.3 发布说明](docs/releases/v1.3.3.md)

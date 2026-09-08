@@ -71,30 +71,30 @@ namespace KeyMouseStats
     {
         // Semantic patterns stay stable across themes: primary/active is solid,
         // secondary/idle is striped, tertiary is dotted, and auxiliary is dash-dot.
-        internal static void Ring(Graphics g, RectangleF rect, float start, float sweep, float width, int semantic, Color surface)
+        internal static void Segment(Graphics g,RectangleF centerLine,float start,float sweep,float width,int semantic,Color surface)
         {
-            if(sweep<2f)return;
-            bool material;
-            using(GraphicsPath band=new GraphicsPath())using(Pen widthPen=new Pen(Color.Black,width))
+            if(sweep<.2f)return;RectangleF outer=RectangleF.Inflate(centerLine,width/2,width/2),inner=RectangleF.Inflate(centerLine,-width/2,-width/2);
+            using(GraphicsPath plate=new GraphicsPath())
             {
-                band.AddArc(rect,start,sweep);band.Widen(widthPen);GraphicsState state=g.Save();g.SetClip(band,CombineMode.Intersect);
-                material=ThemePattern.Draw(g,rect,semantic,true);g.Restore(state);
-            }
-            Color edge=ArtTheme.Mix(surface,ArtTheme.Current.Text,.64),shade=ArtTheme.Mix(surface,ArtTheme.Current.Background,.76);
-            RectangleF outer=RectangleF.Inflate(rect,width*.48f,width*.48f),inner=RectangleF.Inflate(rect,-width*.48f,-width*.48f);
-            using(Pen shadow=new Pen(Color.FromArgb(material?220:175,shade),2.2f))using(Pen highlight=new Pen(Color.FromArgb(material?220:165,edge),1.25f))
-            {g.DrawArc(shadow,outer,start+.7f,Math.Max(.1f,sweep-1.4f));g.DrawArc(highlight,inner,start+.7f,Math.Max(.1f,sweep-1.4f));}
-            float cx=rect.X+rect.Width/2,cy=rect.Y+rect.Height/2,rad=rect.Width/2,angle=(float)((start+sweep/2)*Math.PI/180.0),rr=rad-width*.18f;
-            float px=cx+(float)Math.Cos(angle)*rr,py=cy+(float)Math.Sin(angle)*rr;
-            using(SolidBrush led=new SolidBrush(Color.FromArgb(material?220:175,edge)))g.FillEllipse(led,px-1.7f,py-1.7f,3.4f,3.4f);
-            if(semantic<=0)return;
-            using(Pen mark=new Pen(Color.FromArgb(material?185:155,edge),Math.Max(1.1f,width*.11f)))
-            {
-                mark.StartCap=LineCap.Flat;mark.EndCap=LineCap.Flat;
-                if(semantic==1)mark.DashPattern=new float[]{5,3};else if(semantic==2)mark.DashStyle=DashStyle.Dot;else mark.DashPattern=new float[]{6,2,1,2};
-                RectangleF guide=RectangleF.Inflate(rect,-width*.22f,-width*.22f);g.DrawArc(mark,guide,start+1,Math.Max(.1f,sweep-2));
+                plate.AddArc(outer,start,sweep);plate.AddArc(inner,start+sweep,-sweep);plate.CloseFigure();
+                using(SolidBrush fill=new SolidBrush(surface))g.FillPath(fill,plate);
+                GraphicsState state=g.Save();g.SetClip(plate,CombineMode.Intersect);ThemePattern.Draw(g,outer,semantic,true);g.Restore(state);
+                Color dark=ArtTheme.Mix(surface,ArtTheme.Current.Background,.82),light=ArtTheme.Mix(surface,ArtTheme.Current.Text,.58);
+                using(Pen seam=new Pen(Color.FromArgb(235,dark),1.8f))g.DrawPath(seam,plate);
+                using(Pen shine=new Pen(Color.FromArgb(190,light),1.15f))g.DrawArc(shine,inner,start+.7f,Math.Max(.1f,sweep-1.4f));
+                using(Pen rim=new Pen(Color.FromArgb(115,light),.8f))g.DrawArc(rim,outer,start+.9f,Math.Max(.1f,sweep-1.8f));
+                float cx=centerLine.X+centerLine.Width/2,cy=centerLine.Y+centerLine.Height/2,rad=centerLine.Width/2;double a=(start+sweep/2)*Math.PI/180;
+                float px=cx+(float)Math.Cos(a)*rad,py=cy+(float)Math.Sin(a)*rad,size=Math.Max(2.4f,width*.14f);
+                using(SolidBrush mark=new SolidBrush(Color.FromArgb(220,light)))using(Pen markPen=new Pen(Color.FromArgb(220,light),1.15f))
+                {
+                    if(semantic==0)g.FillEllipse(mark,px-size/2,py-size/2,size,size);
+                    else if(semantic==1){g.DrawLine(markPen,px-size,py-size/2,px+size,py-size/2);g.DrawLine(markPen,px-size,py+size/2,px+size,py+size/2);}
+                    else if(semantic==2)g.FillPolygon(mark,new[]{new PointF(px,py-size),new PointF(px+size,py+size*.75f),new PointF(px-size,py+size*.75f)});
+                    else g.DrawPolygon(markPen,new[]{new PointF(px,py-size),new PointF(px+size,py),new PointF(px,py+size),new PointF(px-size,py)});
+                }
             }
         }
+
 
         internal static void Heat(Graphics g, RectangleF rect, double fraction)
         {

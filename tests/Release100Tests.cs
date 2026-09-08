@@ -62,7 +62,7 @@ internal static class Release100Tests
         for(int i=0;i<100000;i++)fast.Move(performance,i/8,1,1,i%3-1,1600);
         watch.Stop();Check(performance.Cross.Packets==100000,"high polling preserves packet count");
         Console.WriteLine("100,000 vector packets: "+watch.Elapsed.TotalMilliseconds.ToString("0.0")+" ms (synthetic 8 kHz timestamps)");
-        Check(typeof(CrossDay).Assembly.GetName().Version.ToString()=="1.3.5.0","release assembly version");
+        Check(typeof(CrossDay).Assembly.GetName().Version.ToString()=="1.3.6.0","release assembly version");
         Console.WriteLine("PASS: "+checks+" release 1.0.0 attribution / vector / semantics / anomaly / persistence checks");
     }
 }
