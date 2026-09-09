@@ -127,28 +127,36 @@ namespace KeyMouseStats
         private readonly ReportHeader _header=new ReportHeader();private readonly FlowLayoutPanel _navigation=new FlowLayoutPanel{FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoScroll=true};
         private readonly Button _compact=new Button{FlatStyle=FlatStyle.Flat,TextAlign=ContentAlignment.MiddleLeft,Cursor=Cursors.Hand};
         private readonly ContextMenuStrip _navMenu=new ContextMenuStrip();
-        private readonly Button _export=new Button{Text="导出 CSV"},_image=new Button{Text="导出图片"},_copy=new Button{Text="复制指标"},_help=new Button{Text="说明"},_refresh=new Button{Text="刷新"};
+        private readonly Button _export=new Button{Text="导出 ▾"},_copy=new Button{Text="复制指标"},_help=new Button{Text="说明"},_refresh=new Button{Text="刷新"};
+        private readonly ContextMenuStrip _exportMenu=new ContextMenuStrip();
         private readonly Label _feedback=new Label();private readonly List<Button> _navButtons=new List<Button>();
         private readonly ComboBox _range=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,FlatStyle=FlatStyle.Flat};
-        private DateTime _rangeStart,_rangeEnd;private int _rangePreset;
+        private readonly ComboBox _compare=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,FlatStyle=FlatStyle.Flat};
+        private DateTime _rangeStart,_rangeEnd,_compareStart,_compareEnd;private int _rangePreset,_comparePreset;
+        private string _compareLabel="紧随其前";
         private ListView _live;private float _scale=1;private bool _ready,_reportStyled;
         public StatisticsReport(DateTime date,int initialTab=0)
         {
             _date=date.Date;Text="统计报告";Font=new Font("Microsoft YaHei UI",10f);AutoScaleMode=AutoScaleMode.None;
             ClientSize=new Size(1140,800);MinimumSize=new Size(720,480);StartPosition=FormStartPosition.CenterParent;ShowInTaskbar=false;KeyPreview=true;DoubleBuffered=true;
             _feedback.Visible=false;_feedback.TextChanged+=delegate{_feedback.Visible=!string.IsNullOrEmpty(_feedback.Text);};
-            Controls.AddRange(new Control[]{_header,_navigation,_tabs,_compact,_export,_image,_copy,_help,_refresh,_feedback});
-            _header.Controls.AddRange(new Control[]{_feedback,_compact,_export,_image,_copy,_help,_refresh,_range});
+            Controls.AddRange(new Control[]{_header,_navigation,_tabs,_compact,_export,_copy,_help,_refresh,_feedback});
+            _header.Controls.AddRange(new Control[]{_feedback,_compact,_export,_copy,_help,_refresh,_range,_compare});
             _range.Items.AddRange(new object[]{"近 7 天","近 30 天","本月","上月","本季度","今年","自定义…"});
             _range.SelectedIndexChanged+=delegate{if(!_ready||_suppressRange)return;if(_range.SelectedIndex==6){ChooseRange();return;}_rangePreset=_range.SelectedIndex;RebuildRangePages();};
+            _compare.Items.AddRange(new object[]{"对比：紧随其前","对比：去年同期","对比：自定义…"});
+            _compare.SelectedIndexChanged+=delegate{if(!_ready||_suppressRange)return;if(_compare.SelectedIndex==2){ChooseCompareRange();return;}_comparePreset=_compare.SelectedIndex;RebuildRangePages();};
+            _exportMenu.Items.Add(new ToolStripMenuItem("导出 CSV…",null,delegate{Export();}));
+            _exportMenu.Items.Add(new ToolStripMenuItem("导出图片 PNG…",null,delegate{ExportImage();}));
+            _exportMenu.Items.Add(new ToolStripMenuItem("导出网页 HTML…",null,delegate{ExportHtml();}));
             _navMenu.Renderer=new ToolStripProfessionalRenderer(new NikkiMenuColors());
             for(int i=0;i<ReportDesign.Names.Length;i++){int index=i;ToolStripMenuItem item=new ToolStripMenuItem(ReportDesign.Names[i]);item.Click+=delegate{_tabs.SelectedIndex=index;};_navMenu.Items.Add(item);}
             _compact.Click+=delegate{ArtTheme t=ArtTheme.Current;_navMenu.BackColor=t.Card;_navMenu.ForeColor=t.Text;for(int i=0;i<_navMenu.Items.Count;i++){ToolStripMenuItem item=(ToolStripMenuItem)_navMenu.Items[i];item.Checked=i==_tabs.SelectedIndex;item.ForeColor=t.Text;}_navMenu.Show(_compact,new Point(0,_compact.Height));};
             _tabs.SelectedIndexChanged+=delegate{UpdateSelection();};
-            _export.Click+=delegate{Export();};_image.Click+=delegate{ExportImage();};_copy.Click+=delegate{CopyMetric();};_help.Click+=delegate{if(_tabs.SelectedTab!=null){_tabs.SelectedTab.HelpOpen=!_tabs.SelectedTab.HelpOpen;_tabs.PerformLayout();}};
+            _export.Click+=delegate{ArtTheme t=ArtTheme.Current;_exportMenu.BackColor=t.Card;_exportMenu.ForeColor=t.Text;foreach(ToolStripItem item in _exportMenu.Items)item.ForeColor=t.Text;_exportMenu.Show(_export,new Point(0,_export.Height));};_copy.Click+=delegate{CopyMetric();};_help.Click+=delegate{if(_tabs.SelectedTab!=null){_tabs.SelectedTab.HelpOpen=!_tabs.SelectedTab.HelpOpen;_tabs.PerformLayout();}};
             _refresh.Click+=delegate{int index=_tabs.SelectedIndex;if(index==10)using(ShortcutSavingsSettings settings=new ShortcutSavingsSettings()){if(settings.ShowDialog(this)!=DialogResult.OK)return;}bool details=_tabs.SelectedTab.DetailsOpen,help=_tabs.SelectedTab.HelpOpen;BuildPages();_tabs.SelectedIndex=index;_tabs.SelectedTab.DetailsOpen=details;_tabs.SelectedTab.HelpOpen=help;_tabs.PerformLayout();_feedback.Text="已刷新";};
-            foreach(Button button in new[]{_export,_image,_copy,_help,_refresh}){button.FlatStyle=FlatStyle.Flat;button.Cursor=Cursors.Hand;}
-            BuildNavigation();BuildPages();_tabs.SelectedIndex=Math.Max(0,Math.Min(ReportDesign.Names.Length-1,initialTab));_range.SelectedIndex=0;
+            foreach(Button button in new[]{_export,_copy,_help,_refresh}){button.FlatStyle=FlatStyle.Flat;button.Cursor=Cursors.Hand;}
+            BuildNavigation();BuildPages();_tabs.SelectedIndex=Math.Max(0,Math.Min(ReportDesign.Names.Length-1,initialTab));_range.SelectedIndex=0;_compare.SelectedIndex=0;
             _timer.Tick+=delegate{if(Visible&&WindowState!=FormWindowState.Minimized&&_tabs.SelectedIndex==4){PopulateLiveRows();_tabs.SelectedTab.Chart.Invalidate();UpdateHeader();}};
             _timer.Start();_ready=true;
         }
@@ -157,7 +165,7 @@ namespace KeyMouseStats
             _tabs.ClearPages();_snapshot=DateTime.Now;ResolveRange();
             PopulateRatios();PopulateChanges();PopulateApps();PopulateSessions();PopulateLive();
             for(int index=5;index<=10;index++){CrossReportData data=CrossReportData.Build(_date,index);ListView list=PageCore(data.Title,data.Note,data,data.Headings);foreach(string[] fields in data.Rows)Row(list,fields);}
-            RangeReportData range=RangeReportData.Build(_rangeStart,_rangeEnd);ListView rangeList=PageCore(ReportDesign.Names[11],RangeReportData.Note,null,range.Headings);foreach(string[] fields in range.Rows)Row(rangeList,fields);
+            RangeReportData range=RangeReportData.Build(_rangeStart,_rangeEnd,_compareStart,_compareEnd,_compareLabel);ListView rangeList=PageCore(ReportDesign.Names[11],RangeReportData.Note,null,range.Headings);foreach(string[] fields in range.Rows)Row(rangeList,fields);
             RhythmReportData rhythm=RhythmReportData.Build(_date);ListView rhythmList=PageCore(ReportDesign.Names[12],RhythmReportData.Note,null,rhythm.Headings);foreach(string[] fields in rhythm.Rows)Row(rhythmList,fields);
             DistributionReportData distribution=DistributionReportData.Build(_rangeStart,_rangeEnd);ListView distributionList=PageCore(ReportDesign.Names[13],DistributionReportData.Note,null,distribution.Headings);foreach(string[] fields in distribution.Rows)Row(distributionList,fields);
             if(IsHandleCreated)foreach(ReportPage page in _tabs.TabPages)Style(page);
@@ -176,6 +184,44 @@ namespace KeyMouseStats
                 case 6:break;   // 自定义:沿用对话框设定的区间
                 default:_rangeStart=anchor.AddDays(-6);_rangeEnd=anchor;break;
             }
+            // 对比区间:紧随其前 / 去年同期(按 365 天前) / 自定义
+            if(_comparePreset==1)
+            {
+                _compareStart=_rangeStart.AddDays(-365);
+                _compareEnd=_rangeEnd.AddDays(-365);
+            }
+            else if(_comparePreset==0)
+            {
+                _compareEnd=_rangeStart.AddDays(-1);
+                _compareStart=_compareEnd.AddDays(-((_rangeEnd-_rangeStart).Days));
+            }
+            _compareLabel=_comparePreset==1?"去年同期":_comparePreset==2?"自定义":"紧随其前";
+        }
+        /// <summary>图上拖拽选择子区间:直接切换为自定义区间。</summary>
+        private void SetCustomRange(DateTime start,DateTime end)
+        {
+            if(end<start){DateTime swap=start;start=end;end=swap;}
+            _rangeStart=start;_rangeEnd=end;_rangePreset=6;
+            _suppressRange=true;
+            try{_range.SelectedIndex=6;}finally{_suppressRange=false;}
+            RebuildRangePages();
+        }
+        private void ChooseCompareRange()
+        {
+            DateTime start=_compareStart,end=_compareEnd;
+            using(RangePickerDialog dialog=new RangePickerDialog(start,end))
+            {
+                if(dialog.ShowDialog(this)!=DialogResult.OK)
+                {
+                    _suppressRange=true;
+                    try{_compare.SelectedIndex=_comparePreset;}finally{_suppressRange=false;}
+                    return;
+                }
+                start=dialog.Start;end=dialog.End;
+            }
+            if(end<start){DateTime swap=start;start=end;end=swap;}
+            _compareStart=start;_compareEnd=end;_comparePreset=2;
+            RebuildRangePages();
         }
         private bool _suppressRange;
         private void ChooseRange()
@@ -224,8 +270,9 @@ namespace KeyMouseStats
             _compact.Text=ReportDesign.Names[Math.Max(0,_tabs.SelectedIndex)]+"   ▾";_copy.Enabled=true;_feedback.Text="";
             ArtTheme t=ArtTheme.Current;
             foreach(Button b in _navButtons){bool selected=(int)b.Tag==_tabs.SelectedIndex;b.BackColor=selected?ArtTheme.Mix(t.Card,t.Accent,.18):t.Background;b.ForeColor=selected?t.Accent:t.Muted;b.FlatAppearance.BorderSize=selected?1:0;b.FlatAppearance.BorderColor=t.Line;}
-            // 区间选择器只在用到区间的两页显示;窄窗口没有空间放置。
+            // 区间选择器只在用到区间的两页显示;对比选择器只在区间回顾显示;窄窗口没有空间放置。
             _range.Visible=UsesRange(_tabs.SelectedIndex)&&ClientSize.Width/_scale>=1000;
+            _compare.Visible=_tabs.SelectedIndex==11&&ClientSize.Width/_scale>=1000;
             UpdateHeader();
         }
         private static bool UsesRange(int index){return index==11||index==13;}
@@ -241,9 +288,10 @@ namespace KeyMouseStats
         {
             float s=_scale;bool compact=ClientSize.Width/s<1000;int header=(int)((compact?142:106)*s);ArtTheme t=ArtTheme.Current;BackColor=t.Background;
             _header.UiScale=s;_header.SetBounds(0,0,ClientSize.Width,header);
-            Button[] actions={_export,_image,_copy,_help,_refresh};int[] widths={102,96,96,64,64};int right=ClientSize.Width-(int)(24*s);
+            Button[] actions={_export,_copy,_help,_refresh};int[] widths={104,96,64,64};int right=ClientSize.Width-(int)(24*s);
             for(int i=0;i<actions.Length;i++){int w=(int)(widths[i]*s);right-=w;actions[i].SetBounds(right,(int)(25*s),w,(int)(33*s));right-=(int)(8*s);actions[i].ForeColor=i==0?t.OnAccent:t.Text;actions[i].BackColor=i==0?t.Accent:t.Card;actions[i].FlatAppearance.BorderColor=t.Line;}
             _range.BackColor=t.Card;_range.ForeColor=t.Text;_range.SetBounds((int)(302*s),(int)(26*s),(int)(168*s),(int)(28*s));
+            _compare.BackColor=t.Card;_compare.ForeColor=t.Text;_compare.SetBounds((int)(478*s),(int)(26*s),(int)(168*s),(int)(28*s));
             _navigation.Visible=!compact;_navigation.BackColor=t.Background;int nav=compact?0:(int)(178*s);
             _navigation.SetBounds((int)(20*s),header,Math.Max(1,nav-(int)(20*s)),ClientSize.Height-header-(int)(12*s));
             foreach(Control c in _navigation.Controls){c.Width=(int)(146*s);c.Height=(int)((c is Button?34:24)*s);if(c is Label){c.ForeColor=t.Muted;c.BackColor=t.Background;}}
@@ -257,7 +305,8 @@ namespace KeyMouseStats
             int index=_tabs.TabPages.Count;ReportPage page=new ReportPage{Text=title,Note=note,Index=index};_tabs.AddPage(page);
             ReportList list=new ReportList{View=View.Details,FullRowSelect=true,HideSelection=false,ShowItemToolTips=true,BorderStyle=BorderStyle.None};
             foreach(string heading in headings)list.Columns.Add(heading,180);
-            Control chart;if(index<5)chart=new ReportVisual(_date,index);else if(index==11)chart=new RangeReportVisual(_rangeStart,_rangeEnd);else if(index==12)chart=new RhythmReportVisual(_date);else if(index==13)chart=new DistributionReportVisual(_rangeStart,_rangeEnd);else chart=new CrossReportVisual(_date,index,snapshot);
+            Control chart;if(index<5)chart=new ReportVisual(_date,index);else if(index==11)chart=new RangeReportVisual(_rangeStart,_rangeEnd,_compareStart,_compareEnd,_compareLabel);else if(index==12)chart=new RhythmReportVisual(_date);else if(index==13)chart=new DistributionReportVisual(_rangeStart,_rangeEnd);else chart=new CrossReportVisual(_date,index,snapshot);
+            RangeReportVisual brush=chart as RangeReportVisual;if(brush!=null)brush.RangeSelected+=delegate(DateTime start,DateTime end){SetCustomRange(start,end);};
             page.List=list;page.Chart=chart;page.Controls.Add(list);page.Controls.Add(chart);
             ReportVisual visual=chart as ReportVisual;if(visual!=null)visual.MetricSelected+=delegate{list.SelectedItems.Clear();_copy.Enabled=true;_feedback.Text="已选中指标 · Ctrl+C 复制";};
             list.SelectedIndexChanged+=delegate{_copy.Enabled=true;};

@@ -21,7 +21,7 @@ namespace KeyMouseStats
     {
         public const string Note = "当前区间为最近若干个完整日,对比区间是紧随其前的等长区间;今日尚未结束,不计入。\n缺失日不补零,日均按有效天数计算。合计变化只在两期有效天数相同时才可直接比较,因此同时给出日均变化。基准为 0 或缺少记录时显示「基准不足」。";
 
-        public string Caption, Footer, RangeLabel;
+        public string Caption, Footer, RangeLabel, ComparisonLabel = "紧随其前";
         public string[] Cards = new string[4], CardValues = new string[4];
         public string[] Headings = { "指标", "本期", "上期", "变化", "覆盖" };
         public readonly List<string[]> Rows = new List<string[]>();
@@ -45,14 +45,32 @@ namespace KeyMouseStats
 
         public static RangeReportData Build(DateTime start, DateTime end)
         {
+            return Build(start, end, DateTime.MinValue, DateTime.MinValue, "紧随其前");
+        }
+
+        public static RangeReportData Build(DateTime start, DateTime end, DateTime comparisonStart, DateTime comparisonEnd)
+        {
+            return Build(start, end, comparisonStart, comparisonEnd, "自定义");
+        }
+
+        /// <summary>comparison 为空(MinValue)时对比紧随其前的等长区间。</summary>
+        public static RangeReportData Build(DateTime start, DateTime end, DateTime comparisonStart, DateTime comparisonEnd, string comparisonLabel)
+        {
             RangeReportData data = new RangeReportData();
+            data.ComparisonLabel = comparisonLabel;
             data.Current = RangeStats.Of(start, end);
             data.Previous = new RangeMetrics();
             if (data.Current.Days > 0)
             {
-                DateTime previousEnd = data.Current.Start.AddDays(-1);
-                DateTime previousStart = previousEnd.AddDays(-(data.Current.Days - 1));
-                data.Previous = RangeStats.Of(previousStart, previousEnd);
+                if (comparisonStart == DateTime.MinValue)
+                {
+                    DateTime previousEnd = data.Current.Start.AddDays(-1);
+                    data.Previous = RangeStats.Of(previousEnd.AddDays(-(data.Current.Days - 1)), previousEnd);
+                }
+                else
+                {
+                    data.Previous = RangeStats.Of(comparisonStart, comparisonEnd);
+                }
             }
             data.HasPrevious = !data.Previous.IsEmpty;
             data.PreviousDailyMean = data.Previous.KeysPerDay;
@@ -64,7 +82,7 @@ namespace KeyMouseStats
             data.RangeLabel = now.Days == 0 ? "无完整日"
                 : now.Start.ToString("MM.dd") + "—" + now.End.ToString("MM.dd") + " · " + now.Days + " 天";
             data.Caption = now.Days == 0 ? "所选区间没有完整日"
-                : data.RangeLabel + "，对比紧随其前的 " + now.Days + " 天 · 逐日击键";
+                : data.RangeLabel + "，对比「" + data.ComparisonLabel + "」· 逐日击键（可在图上拖动选择子区间）";
 
             data.Cards = new string[] { "本期击键", "日均较上期", "本期活跃时长", "有效天数" };
             data.CardValues = new string[] { now.IsEmpty ? "无记录" : Analysis.FmtCount(now.Keys),
@@ -85,7 +103,7 @@ namespace KeyMouseStats
             data.Rows.Add(new string[] { "单日峰值 APM", now.PeakApm.ToString(), before.PeakApm.ToString(), Percent(RangeMath.Relative(now.PeakApm, before.PeakApm)), "峰值从新版开始记录" });
 
             data.Footer = now.IsEmpty ? "所选区间没有任何完整日记录,先在活跃使用中积累数据。"
-                : "对比区间截至 " + before.End.ToString("MM.dd") + "；缺失日不补零,日均按有效天数计算。";
+                : "对比区间(" + data.ComparisonLabel + ")截至 " + before.End.ToString("MM.dd") + "；缺失日不补零,日均按有效天数计算。";
             return data;
         }
     }
@@ -123,22 +141,48 @@ namespace KeyMouseStats
     internal sealed class RangeReportVisual : Control
     {
         internal float UiScale;
+        /// <summary>在图上拖拽选择的子区间(含起止日)。</summary>
+        internal event Action<DateTime, DateTime> RangeSelected;
+        private float _chartLeft, _chartRight, _dragFrom, _dragTo;
+        private int _chartDays;
+        private DateTime _chartStart;
+        private bool _dragging;
         private readonly RangeReportData data;
         private readonly List<KeyValuePair<RectangleF, string>> targets = new List<KeyValuePair<RectangleF, string>>();
         private readonly ToolTip tip = new ToolTip { InitialDelay = 250, ReshowDelay = 100, AutoPopDelay = 20000 };
         private int hover = -1;
 
         public RangeReportVisual(DateTime start, DateTime end)
+            : this(start, end, DateTime.MinValue, DateTime.MinValue, "紧随其前")
         {
-            data = RangeReportData.Build(start, end);
+        }
+
+        public RangeReportVisual(DateTime start, DateTime end, DateTime comparisonStart, DateTime comparisonEnd, string comparisonLabel)
+        {
+            data = RangeReportData.Build(start, end, comparisonStart, comparisonEnd, comparisonLabel);
             DoubleBuffered = true; ResizeRedraw = true;
             MouseMove += delegate(object sender, MouseEventArgs e)
             {
                 float scale = UiScale > 0 ? UiScale : 1f;
                 PointF point = new PointF(e.X / scale, e.Y / scale);
+                if (_dragging) { _dragTo = point.X; Invalidate(); return; }
                 int next = -1;
                 for (int i = 0; i < targets.Count; i++) if (targets[i].Key.Contains(point)) { next = i; break; }
                 if (next != hover) { hover = next; tip.SetToolTip(this, next >= 0 ? targets[next].Value : ""); Invalidate(); }
+            };
+            MouseDown += delegate(object sender, MouseEventArgs e)
+            {
+                if (e.Button != MouseButtons.Left || _chartDays <= 0) return;
+                float scale = UiScale > 0 ? UiScale : 1f;
+                _dragging = true; _dragFrom = _dragTo = e.X / scale; Invalidate();
+            };
+            MouseUp += delegate(object sender, MouseEventArgs e)
+            {
+                if (!_dragging) return;
+                _dragging = false;
+                _dragTo = e.X / (UiScale > 0 ? UiScale : 1f);
+                Invalidate();
+                SelectByX(_dragFrom, _dragTo);
             };
             MouseLeave += delegate { hover = -1; Invalidate(); };
         }
@@ -152,6 +196,23 @@ namespace KeyMouseStats
                     Math.Max(1, (int)(ClientSize.Width * scale)), Math.Max(1, (int)(ClientSize.Height * scale))))) OnPaint(args);
             }
             finally { UiScale = previous; }
+        }
+
+        /// <summary>按控件坐标(未缩放)选择子区间并触发 RangeSelected。需要先渲染一次以获得图表几何。</summary>
+        internal bool SelectByX(float fromX, float toX)
+        {
+            if (_chartDays <= 0 || RangeSelected == null) return false;
+            float left = Math.Min(fromX, toX), right = Math.Max(fromX, toX);
+            if (right - left < 4) return false;
+            float step = (_chartRight - _chartLeft) / _chartDays;
+            if (step <= 0) return false;
+            int first = (int)Math.Floor((left - _chartLeft) / step);
+            int last = (int)Math.Floor((right - _chartLeft) / step);
+            if (first < 0) first = 0;
+            if (last > _chartDays - 1) last = _chartDays - 1;
+            if (last < first) { int swap = first; first = last; last = swap; }
+            RangeSelected(_chartStart.AddDays(first), _chartStart.AddDays(last));
+            return true;
         }
 
         protected override void Dispose(bool disposing)
@@ -199,6 +260,7 @@ namespace KeyMouseStats
                 if (data.HasPrevious && data.PreviousDailyMean > maximum) maximum = (long)Math.Ceiling(data.PreviousDailyMean);
 
                 float left = 56, right = w - 20, top = 126, bottom = 250;
+                _chartLeft = left; _chartRight = right; _chartDays = data.Current.Days; _chartStart = data.Current.Start;
                 using (Pen axis = new Pen(t.Line)) g.DrawLine(axis, left - 4, bottom, right, bottom);
                 TextAt(g, Analysis.FmtCount(maximum), small, t.Muted, new RectangleF(8, top - 8, 44, 18));
                 TextAt(g, "0", small, t.Muted, new RectangleF(34, bottom - 16, 20, 18));
@@ -248,6 +310,12 @@ namespace KeyMouseStats
                         RectangleF r = targets[hover].Key;
                         g.DrawRectangle(outline, r.X + 1, r.Y + 2, Math.Max(2, r.Width - 2), r.Height - 4);
                     }
+                if (_dragging && _chartDays > 0)
+                {
+                    float dragLeft = Math.Min(_dragFrom, _dragTo), dragRight = Math.Max(_dragFrom, _dragTo);
+                    using (SolidBrush brush = new SolidBrush(Color.FromArgb(60, t.Accent)))
+                        g.FillRectangle(brush, dragLeft, top - 6, Math.Max(1, dragRight - dragLeft), bottom - top + 12);
+                }
                 TextAt(g, hover >= 0 && hover < targets.Count ? targets[hover].Value : data.Footer, small, t.Muted,
                     new RectangleF(14, 274, w - 28, 20));
             }

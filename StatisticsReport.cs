@@ -370,35 +370,102 @@ namespace KeyMouseStats
             {
                 ReportPage page = _tabs.SelectedTab;
                 if (page == null || page.Chart == null || page.Chart.Width <= 0 || page.Chart.Height <= 0) return;
-                Control chart = page.Chart;
-                const float scale = 2f;
                 DateTime reportDate = _tabs.SelectedIndex == 4 ? DateTime.Today : _date;
-                using (Bitmap bitmap = new Bitmap(Math.Max(1, (int)(chart.Width * scale)), Math.Max(1, (int)(chart.Height * scale))))
+                using (Bitmap bitmap = RenderChart(page.Chart, 2f))
+                using (SaveFileDialog dialog = new SaveFileDialog { Title = "导出当前页图表", Filter = "PNG 图片 (*.png)|*.png", FileName = "统计报告_" + reportDate.ToString("yyyyMMdd") + "_" + ReportDesign.Names[_tabs.SelectedIndex] + ".png", DefaultExt = "png", AddExtension = true })
                 {
-                    bitmap.SetResolution(96f * scale, 96f * scale);
-                    using (Graphics graphics = Graphics.FromImage(bitmap))
-                    {
-                        ReportVisual habit = chart as ReportVisual;
-                        CrossReportVisual cross = chart as CrossReportVisual;
-                        RangeReportVisual range = chart as RangeReportVisual;
-                        RhythmReportVisual rhythm = chart as RhythmReportVisual;
-                        DistributionReportVisual distribution = chart as DistributionReportVisual;
-                        if (habit != null) habit.RenderTo(graphics, scale);
-                        else if (cross != null) cross.RenderTo(graphics, scale);
-                        else if (range != null) range.RenderTo(graphics, scale);
-                        else if (rhythm != null) rhythm.RenderTo(graphics, scale);
-                        else if (distribution != null) distribution.RenderTo(graphics, scale);
-                        else chart.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size));
-                    }
-                    using (SaveFileDialog dialog = new SaveFileDialog { Title = "导出当前页图表", Filter = "PNG 图片 (*.png)|*.png", FileName = "统计报告_" + reportDate.ToString("yyyyMMdd") + "_" + ReportDesign.Names[_tabs.SelectedIndex] + ".png", DefaultExt = "png", AddExtension = true })
-                    {
-                        if (dialog.ShowDialog(this) != DialogResult.OK) return;
-                        bitmap.Save(dialog.FileName, ImageFormat.Png);
-                        _feedback.Text = "当前页图片已导出";
-                    }
+                    if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                    bitmap.Save(dialog.FileName, ImageFormat.Png);
+                    _feedback.Text = "当前页图片已导出";
                 }
             }
             catch (Exception ex) { ThemeMessage.Show(this, ex.Message, "导出失败"); }
+        }
+
+        private Bitmap RenderChart(Control chart, float scale)
+        {
+            Bitmap bitmap = new Bitmap(Math.Max(1, (int)(chart.Width * scale)), Math.Max(1, (int)(chart.Height * scale)));
+            bitmap.SetResolution(96f * scale, 96f * scale);
+            using (Graphics graphics = Graphics.FromImage(bitmap))
+            {
+                ReportVisual habit = chart as ReportVisual;
+                CrossReportVisual cross = chart as CrossReportVisual;
+                RangeReportVisual range = chart as RangeReportVisual;
+                RhythmReportVisual rhythm = chart as RhythmReportVisual;
+                DistributionReportVisual distribution = chart as DistributionReportVisual;
+                if (habit != null) habit.RenderTo(graphics, scale);
+                else if (cross != null) cross.RenderTo(graphics, scale);
+                else if (range != null) range.RenderTo(graphics, scale);
+                else if (rhythm != null) rhythm.RenderTo(graphics, scale);
+                else if (distribution != null) distribution.RenderTo(graphics, scale);
+                else chart.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size));
+            }
+            return bitmap;
+        }
+
+        /// <summary>把当前页导出为自包含 HTML:图表以 base64 内嵌,明细以表格呈现,离线可开、不含脚本。</summary>
+        private void ExportHtml()
+        {
+            try
+            {
+                ReportPage page = _tabs.SelectedTab;
+                if (page == null || page.Chart == null || page.Chart.Width <= 0 || page.Chart.Height <= 0) return;
+                DateTime reportDate = _tabs.SelectedIndex == 4 ? DateTime.Today : _date;
+                string title = ReportDesign.Names[Math.Max(0, _tabs.SelectedIndex)];
+                string subtitle = _header.Date + " · " + _header.Status;
+
+                string base64;
+                using (Bitmap bitmap = RenderChart(page.Chart, 2f))
+                using (System.IO.MemoryStream stream = new System.IO.MemoryStream())
+                {
+                    bitmap.Save(stream, ImageFormat.Png);
+                    base64 = Convert.ToBase64String(stream.ToArray());
+                }
+
+                StringBuilder html = new StringBuilder();
+                html.AppendLine("<!DOCTYPE html>");
+                html.AppendLine("<html lang=\"zh-CN\"><head><meta charset=\"utf-8\">");
+                html.AppendLine("<title>" + Escape("键鼠统计 · " + title) + "</title>");
+                html.AppendLine("<style>body{background:#12161d;color:#e9edf6;font-family:\"Microsoft YaHei UI\",\"Segoe UI\",sans-serif;margin:24px auto;max-width:1100px;padding:0 16px}");
+                html.AppendLine("h1{font-size:22px;margin:0 0 4px}p.sub{color:#a0abbc;margin:0 0 18px;font-size:13px}");
+                html.AppendLine("img{max-width:100%;border-radius:8px;display:block;margin:0 0 20px}");
+                html.AppendLine("table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-bottom:1px solid #303f54;padding:7px 10px;text-align:left}");
+                html.AppendLine("th{color:#a0abbc;font-weight:600}tr:nth-child(even) td{background:#18202e}");
+                html.AppendLine("p.note{color:#a0abbc;font-size:12px;margin-top:20px}</style></head><body>");
+                html.AppendLine("<h1>" + Escape(title) + "</h1>");
+                html.AppendLine("<p class=\"sub\">" + Escape(subtitle) + "</p>");
+                html.AppendLine("<img alt=\"" + Escape(title) + "\" src=\"data:image/png;base64," + base64 + "\">");
+                if (page.List != null && page.List.Columns.Count > 0)
+                {
+                    html.AppendLine("<table><thead><tr>");
+                    foreach (ColumnHeader column in page.List.Columns) html.Append("<th>" + Escape(column.Text) + "</th>");
+                    html.AppendLine("</tr></thead><tbody>");
+                    foreach (ListViewItem row in page.List.Items)
+                    {
+                        html.Append("<tr>");
+                        for (int i = 0; i < page.List.Columns.Count; i++)
+                            html.Append("<td>" + Escape(i < row.SubItems.Count ? row.SubItems[i].Text : "") + "</td>");
+                        html.AppendLine("</tr>");
+                    }
+                    html.AppendLine("</tbody></table>");
+                }
+                html.AppendLine("<p class=\"note\">本文件由键鼠统计导出,图片与数据均已内嵌,不联网、不含脚本。数据只来自本机记录,缺失日不补零。</p>");
+                html.AppendLine("</body></html>");
+
+                using (SaveFileDialog dialog = new SaveFileDialog { Title = "导出为网页", Filter = "网页 (*.html)|*.html", FileName = "键鼠统计_" + reportDate.ToString("yyyyMMdd") + "_" + title + ".html", DefaultExt = "html", AddExtension = true })
+                {
+                    if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                    File.WriteAllText(dialog.FileName, html.ToString(), new UTF8Encoding(true));
+                    _feedback.Text = "当前页已导出为网页";
+                }
+            }
+            catch (Exception ex) { ThemeMessage.Show(this, ex.Message, "导出失败"); }
+        }
+
+        private static string Escape(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return "";
+            return text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
         }
     }
 }

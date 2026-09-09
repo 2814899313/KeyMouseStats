@@ -123,6 +123,31 @@ internal static class RangeReportTests
             Check(rhythm.Rows[i][5].StartsWith("09:00"), "peak hour is the busiest recorded hour");
         }
 
+        // ---- 对比区间:可指定为任意区间 ----
+        RangeReportData compared = RangeReportData.Build(rangeStart, rangeEnd, DateTime.Today.AddDays(-30), DateTime.Today.AddDays(-24), "自定义");
+        Check(compared.ComparisonLabel == "自定义", "comparison label is kept");
+        Check(compared.Previous.Start == DateTime.Today.AddDays(-30), "custom comparison start");
+        Check(compared.Previous.End == DateTime.Today.AddDays(-24), "custom comparison end");
+        Check(compared.Previous.Observed == 7, "custom comparison window counts its own days");
+        Check(compared.Footer.Contains("自定义"), "footer names the comparison window");
+
+        // ---- 拖拽刷选 ----
+        using (RangeReportVisual brush = new RangeReportVisual(rangeStart, rangeEnd))
+        {
+            brush.Size = new Size(1000, 300);
+            DateTime selectedStart = DateTime.MinValue, selectedEnd = DateTime.MinValue;
+            int raised = 0;
+            brush.RangeSelected += delegate(DateTime start, DateTime end) { selectedStart = start; selectedEnd = end; raised++; };
+            using (Bitmap bitmap = new Bitmap(1000, 300))
+            using (Graphics graphics = Graphics.FromImage(bitmap)) brush.RenderTo(graphics, 1f);
+            Check(!brush.SelectByX(100, 102), "a too-narrow drag is ignored");
+            float chartLeft = 56, chartRight = 980, step = (chartRight - chartLeft) / 7f;
+            Check(brush.SelectByX(chartLeft + 2 * step + 10, chartLeft + 4 * step + 10), "a drag reports a selection");
+            Check(raised == 1, "a drag raises the event once");
+            Check(selectedStart == range.Current.Start.AddDays(2), "selection maps to the third day");
+            Check(selectedEnd == range.Current.Start.AddDays(4), "selection maps to the fifth day");
+        }
+
         // ---- 渲染 ----
         Directory.CreateDirectory("previews");
         using (RangeReportVisual visual = new RangeReportVisual(rangeStart, rangeEnd))
