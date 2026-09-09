@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -13,23 +13,13 @@ namespace KeyMouseStats
     {
         public static double Ratio(double numerator, double denominator)
         { return denominator > 0 ? numerator / denominator : double.NaN; }
+        // 均值 / 分位数 / 标准差统一委托给 RangeMath,口径只保留一份实现。
         public static double Mean(List<double> values)
-        { double sum = 0; foreach (double v in values) sum += v; return Ratio(sum, values.Count); }
+        { return RangeMath.Mean(values); }
         public static double Quantile(List<double> values, double p)
-        {
-            if (values.Count == 0) return double.NaN;
-            List<double> sorted = new List<double>(values); sorted.Sort();
-            double position = Math.Max(0, Math.Min(1, p)) * (sorted.Count - 1);
-            int lo = (int)position, hi = Math.Min(sorted.Count - 1, lo + 1);
-            return sorted[lo] + (sorted[hi] - sorted[lo]) * (position - lo);
-        }
+        { return RangeMath.Quantile(values, p); }
         public static double Sd(List<double> values)
-        {
-            if (values.Count < 2) return double.NaN;
-            double mean = Mean(values), sum = 0;
-            foreach (double v in values) sum += (v - mean) * (v - mean);
-            return Math.Sqrt(sum / (values.Count - 1));
-        }
+        { return RangeMath.Sd(values); }
         public static long Combos(DayRecord day)
         { long n = 0; foreach (long v in day.ComboCounts.Values) n += v; return n; }
         public static double Metric(DayRecord day, int metric)
@@ -390,12 +380,14 @@ namespace KeyMouseStats
                     {
                         ReportVisual habit = chart as ReportVisual;
                         CrossReportVisual cross = chart as CrossReportVisual;
-                        WeeklyReportVisual week = chart as WeeklyReportVisual;
+                        RangeReportVisual range = chart as RangeReportVisual;
                         RhythmReportVisual rhythm = chart as RhythmReportVisual;
+                        DistributionReportVisual distribution = chart as DistributionReportVisual;
                         if (habit != null) habit.RenderTo(graphics, scale);
                         else if (cross != null) cross.RenderTo(graphics, scale);
-                        else if (week != null) week.RenderTo(graphics, scale);
+                        else if (range != null) range.RenderTo(graphics, scale);
                         else if (rhythm != null) rhythm.RenderTo(graphics, scale);
+                        else if (distribution != null) distribution.RenderTo(graphics, scale);
                         else chart.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size));
                     }
                     using (SaveFileDialog dialog = new SaveFileDialog { Title = "导出当前页图表", Filter = "PNG 图片 (*.png)|*.png", FileName = "统计报告_" + reportDate.ToString("yyyyMMdd") + "_" + ReportDesign.Names[_tabs.SelectedIndex] + ".png", DefaultExt = "png", AddExtension = true })
