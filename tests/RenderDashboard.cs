@@ -221,8 +221,10 @@ internal static class RenderDashboard
             }
             // Post-loop checks: the LRU cache may have evicted each art theme's
             // images while later themes rendered, so wait again before asserting.
-            WaitTheme(form, new[] { "NikkiDream", "NikkiPoseTrend", "NikkiPoseHours", "NikkiPoseKeys", "NikkiPoseApps", "NikkiPoseInsights", "NikkiEmotes" });
+            // Activate the theme first: ThemeImages only decodes the active theme's catalog,
+            // so waiting while another theme is active can never resolve.
             Store.ThemeId = 5;
+            WaitTheme(form, new[] { "NikkiDream", "NikkiPoseTrend", "NikkiPoseHours", "NikkiPoseKeys", "NikkiPoseApps", "NikkiPoseInsights", "NikkiEmotes" });
             if(!NikkiArt.HasArtwork)throw new Exception("Embedded Nikki artwork missing");
             if(!NikkiArt.HasEmotes)throw new Exception("Embedded emote atlas missing");
             for(int page=0;page<6;page++)if(!NikkiArt.HasPageArtwork(page))throw new Exception("Missing page portrait "+page);
@@ -248,8 +250,8 @@ internal static class RenderDashboard
             using(AppCategoryDialog themedRules=new AppCategoryDialog(ruleRow)) RenderDialog(themedRules,"nikki-rules");
             using(StatisticsReport themedReport=new StatisticsReport(DateTime.Today)) RenderDialog(themedReport,"nikki-report");
             tabField.SetValue(form,Enum.ToObject(tabField.FieldType,5));Set(form,"_insightView",0);Render(form,"nikki-calendar",1f);
-            WaitTheme(form, new[] { "HaloIcons", "HaloOverview", "HaloTrend", "HaloHours", "HaloKeys", "HaloApps", "HaloInsights" });
             Store.ThemeId=6;
+            WaitTheme(form, new[] { "HaloIcons", "HaloOverview", "HaloTrend", "HaloHours", "HaloKeys", "HaloApps", "HaloInsights" });
             if(!HaloArt.HasIcons)throw new Exception("Missing Halo icons");
             for(int page=0;page<6;page++)if(!HaloArt.HasScene(page))throw new Exception("Missing Halo scene "+page);
             tabField.SetValue(form,Enum.ToObject(tabField.FieldType,3));Set(form,"_showKeyboardHeatmap",true);
@@ -261,8 +263,8 @@ internal static class RenderDashboard
             using(StatisticsReport report=new StatisticsReport(DateTime.Today))RenderDialog(report,"halo-report");
             using(ActivitySettings settings=new ActivitySettings())RenderDialog(settings,"halo-settings");
             using(AppCategoryDialog rules=new AppCategoryDialog(ruleRow))RenderDialog(rules,"halo-rules");
-            WaitTheme(form, new[] { "ResidentIcons", "ResidentOverview", "ResidentTrend", "ResidentHours", "ResidentKeys", "ResidentApps", "ResidentInsights" });
             Store.ThemeId=7;
+            WaitTheme(form, new[] { "ResidentIcons", "ResidentOverview", "ResidentTrend", "ResidentHours", "ResidentKeys", "ResidentApps", "ResidentInsights" });
             tabField.SetValue(form,Enum.ToObject(tabField.FieldType,0));Set(form,"_overviewKeyboard",true);Render(form,"overview-keyboard",1f);Render(form,"overview-keyboard-150",1.5f);Set(form,"_mouse",new Point(370,413));Render(form,"overview-keyboard-hover",1f);Set(form,"_mouse",new Point(-100,-100));Set(form,"_overviewKeyboard",false);
             if(!ResidentArt.HasIcons)throw new Exception("Missing Resident icons");
             for(int page=0;page<6;page++)if(!ResidentArt.HasScene(page))throw new Exception("Missing Resident scene "+page);
@@ -285,8 +287,8 @@ internal static class RenderDashboard
                 RenderDialog(hud,"game-hud-edit");hud.Editing=false;
                 if((((CreateParams)styles.GetValue(hud,null)).ExStyle&0x20)==0)throw new Exception("HUD pass through restored");
             }
-            WaitTheme(form, new[] { "MinecraftIcons", "MinecraftOverview", "MinecraftTrend", "MinecraftHours", "MinecraftKeys", "MinecraftApps", "MinecraftInsights" });
             Store.ThemeId=8;
+            WaitTheme(form, new[] { "MinecraftIcons", "MinecraftOverview", "MinecraftTrend", "MinecraftHours", "MinecraftKeys", "MinecraftApps", "MinecraftInsights" });
             if(!MinecraftArt.HasIcons)throw new Exception("Minecraft icons missing");
             for(int i=0;i<6;i++)if(!MinecraftArt.HasScene(i))throw new Exception("Minecraft scene missing");
             tabField.SetValue(form,Enum.ToObject(tabField.FieldType,3));Set(form,"_showKeyboardHeatmap",true);
