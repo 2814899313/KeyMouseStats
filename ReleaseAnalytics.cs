@@ -12,6 +12,24 @@ namespace KeyMouseStats
         public readonly double[] Direction=new double[4]; // left, right, up, down: absolute axis counts
         public double PathCounts,DragCounts;
         public long Packets,CalibratedPackets,Flicks,Reversals,Clicks,MoveClicks;
+
+        /// <summary>合并另一份同日交叉观测(多机合并的「相加」策略)。</summary>
+        public void AddFrom(CrossDay other)
+        {
+            if (other == null) return;
+            for (int i = 0; i < 24; i++) ObservedHours[i] += other.ObservedHours[i];
+            foreach (KeyValuePair<string, double[]> app in other.AppHours)
+            {
+                double[] hours;
+                if (!AppHours.TryGetValue(app.Key, out hours)) { hours = new double[24]; AppHours[app.Key] = hours; }
+                for (int i = 0; i < 24; i++) hours[i] += app.Value[i];
+            }
+            for (int i = 0; i < 4; i++) Direction[i] += other.Direction[i];
+            PathCounts += other.PathCounts; DragCounts += other.DragCounts;
+            Packets += other.Packets; CalibratedPackets += other.CalibratedPackets;
+            Flicks += other.Flicks; Reversals += other.Reversals;
+            Clicks += other.Clicks; MoveClicks += other.MoveClicks;
+        }
     }
     internal static class CrossTelemetry
     {

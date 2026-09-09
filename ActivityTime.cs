@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -20,6 +20,16 @@ namespace KeyMouseStats
         public double PeakOffsetSeconds;
         public double CrossObservedSeconds;
         public readonly Dictionary<string,double> AppSeconds=new Dictionary<string,double>(StringComparer.OrdinalIgnoreCase);
+
+        public ActiveSession Copy()
+        {
+            ActiveSession copy = new ActiveSession();
+            copy.Start = Start; copy.End = End; copy.StartReason = StartReason; copy.Seconds = Seconds;
+            copy.RateMeasured = RateMeasured; copy.PeakApm = PeakApm; copy.LastApm = LastApm;
+            copy.PeakOffsetSeconds = PeakOffsetSeconds; copy.CrossObservedSeconds = CrossObservedSeconds;
+            foreach (KeyValuePair<string, double> app in AppSeconds) copy.AppSeconds[app.Key] = app.Value;
+            return copy;
+        }
     }
 
     // Interval integration is separate from Win32 sampling so boundaries can be tested deterministically.

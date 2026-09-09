@@ -14,6 +14,13 @@ namespace KeyMouseStats
         public long Keys, Clicks, Wheel;
         public double ActiveSeconds;
         public string Id { get { return ProcessPath.ToLowerInvariant() + "\n" + Title; } }
+        public AppUsage Copy()
+        {
+            AppUsage copy = new AppUsage();
+            copy.ProcessPath = ProcessPath; copy.Title = Title;
+            copy.Keys = Keys; copy.Clicks = Clicks; copy.Wheel = Wheel; copy.ActiveSeconds = ActiveSeconds;
+            return copy;
+        }
         public string AppName
         {
             get { return ProcessPath.Length == 0 ? "未识别应用" : Path.GetFileName(ProcessPath); }

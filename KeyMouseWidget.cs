@@ -129,6 +129,54 @@ namespace KeyMouseStats
         {
             get { return Keys == 0 && Clicks == 0 && Wheel == 0 && MovePx < 0.5 && MoveMeters == 0 && ActiveSeconds == 0 && IdleSeconds == 0 && Cross.Packets==0 && Cross.Clicks==0; }
         }
+
+        /// <summary>合并另一份同日记录(多机合并的「相加」策略)。</summary>
+        public void AddFrom(DayRecord other)
+        {
+            if (other == null) return;
+            Keys += other.Keys; Clicks += other.Clicks; Left += other.Left; Right += other.Right;
+            Middle += other.Middle; XButtons += other.XButtons; Wheel += other.Wheel;
+            MovePx += other.MovePx; MoveMeters += other.MoveMeters;
+            ActiveSeconds += other.ActiveSeconds; IdleSeconds += other.IdleSeconds;
+            AppObservedSeconds += other.AppObservedSeconds; AppSwitches += other.AppSwitches;
+            if (other.PeakApm > PeakApm) PeakApm = other.PeakApm;
+            for (int i = 0; i < 24; i++)
+            {
+                HourKeys[i] += other.HourKeys[i];
+                HourClicks[i] += other.HourClicks[i];
+                ActiveHours[i] += other.ActiveHours[i];
+            }
+            AddCounts(KeyCounts, other.KeyCounts);
+            AddCounts(PhysicalKeys, other.PhysicalKeys);
+            AddCounts(PhysicalVks, other.PhysicalVks);
+            foreach (KeyValuePair<string, long> combo in other.ComboCounts)
+            {
+                long value; ComboCounts.TryGetValue(combo.Key, out value);
+                ComboCounts[combo.Key] = value + combo.Value;
+            }
+            foreach (ActiveSession session in other.Sessions) Sessions.Add(session.Copy());
+            foreach (ActiveSession period in other.IdlePeriods) IdlePeriods.Add(period.Copy());
+            foreach (AppUsage app in other.Apps.Values)
+            {
+                AppUsage existing;
+                if (Apps.TryGetValue(app.Id, out existing))
+                {
+                    existing.Keys += app.Keys; existing.Clicks += app.Clicks;
+                    existing.Wheel += app.Wheel; existing.ActiveSeconds += app.ActiveSeconds;
+                }
+                else Apps[app.Id] = app.Copy();
+            }
+            Cross.AddFrom(other.Cross);
+        }
+
+        private static void AddCounts(Dictionary<int, long> target, Dictionary<int, long> source)
+        {
+            foreach (KeyValuePair<int, long> pair in source)
+            {
+                long value; target.TryGetValue(pair.Key, out value);
+                target[pair.Key] = value + pair.Value;
+            }
+        }
     }
 
     /// <summary>实时速率(最近 60 秒滑动窗口)。</summary>
@@ -239,6 +287,8 @@ namespace KeyMouseStats
         public static int PosY = -1;
         public static double MouseDpi; // 0: 用户尚未设置，不猜测硬件 DPI。
         public static int IdleThresholdSeconds = 60;
+        /// <summary>备份轮转保留的份数。</summary>
+        public static int BackupKeep = 7;
 
         static Store()
         {
@@ -268,173 +318,219 @@ namespace KeyMouseStats
             double v; double.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out v); return v;
         }
 
+        /// <summary>解析结果。解析过程不触碰任何静态状态,便于导入、合并与校验。</summary>
+        internal sealed class Parsed
+        {
+            public readonly Dictionary<DateTime, DayRecord> History = new Dictionary<DateTime, DayRecord>();
+            public readonly List<string> AppRules = new List<string>();
+            public Counters Total = new Counters();
+            public string StoredDate = "", ShortcutModel;
+            public DayRecord LegacyToday;
+            public int PosX = -1, PosY = -1, ThemeId, KeyboardLayout, IdleThresholdSeconds = 60;
+            public long AllTimePeakApm;
+            public double MouseDpi;
+            public int BackupKeep = 7;
+            public bool HasMouseDpi, HasIdleThreshold, HasBackupKeep;
+        }
+
+        private static Parsed Parse(string[] lines)
+        {
+            Parsed result = new Parsed();
+            DayRecord cur = null;
+
+            foreach (string raw in lines)
+            {
+                string line = raw.Trim();
+                if (line.Length == 0 || line.StartsWith("#") || line.StartsWith(";")) continue;
+
+                if (line.StartsWith("[day=") && line.EndsWith("]"))
+                {
+                    DateTime d;
+                    string ds = line.Substring(5, line.Length - 6).Trim();
+                    if (DateTime.TryParseExact(ds, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                            DateTimeStyles.None, out d))
+                    {
+                        if (!result.History.ContainsKey(d))
+                        {
+                            DayRecord r = new DayRecord();
+                            r.Date = d;
+                            result.History[d] = r;
+                        }
+                        cur = result.History[d];
+                    }
+                    continue;
+                }
+
+                int eq = line.IndexOf('=');
+                if (eq <= 0) continue;
+                string key = line.Substring(0, eq).Trim();
+                string val = line.Substring(eq + 1).Trim();
+
+                if (cur != null)
+                {
+                    switch (key)
+                    {
+                        case "keys": cur.Keys = ParseL(val); break;
+                        case "clicks": cur.Clicks = ParseL(val); break;
+                        case "left": cur.Left = ParseL(val); break;
+                        case "right": cur.Right = ParseL(val); break;
+                        case "middle": cur.Middle = ParseL(val); break;
+                        case "xbuttons": cur.XButtons = ParseL(val); break;
+                        case "wheel": cur.Wheel = ParseL(val); break;
+                        case "move": cur.MovePx = ParseD(val); break;
+                        case "move_m": cur.MoveMeters = NonNegative(ParseD(val)); break;
+                        case "hk": ParseHourBuckets(val, cur.HourKeys); break;
+                        case "hc": ParseHourBuckets(val, cur.HourClicks); break;
+                        case "kk": ParseKeyCounts(val, cur.KeyCounts); break;
+                        case "physical_keys": ParseKeyCounts(val, cur.PhysicalKeys, 768); break;
+                        case "physical_vks": ParseKeyCounts(val, cur.PhysicalVks); break;
+                        case "combo": ShortcutStats.Load(cur, val); break;
+                        case "app": AppActivity.LoadRecord(cur, val); break;
+                        case "active_seconds": cur.ActiveSeconds = ActivityMonitor.ParseSeconds(val); break;
+                        case "app_observed_seconds": cur.AppObservedSeconds = ActivityMonitor.ParseSeconds(val); break;
+                        case "app_switches": cur.AppSwitches = Math.Max(0, ParseL(val)); break;
+                        case "peak_apm": cur.PeakApm = Math.Max(0, ParseL(val)); break;
+                        case "idle_seconds": cur.IdleSeconds = ActivityMonitor.ParseSeconds(val); break;
+                        case "active_hours": ActivityMonitor.LoadHours(cur.ActiveHours, val); break;
+                        case "idle_period": ActivityMonitor.LoadPeriod(cur, val, true); break;
+                        case "session": ActivityMonitor.LoadSession(cur, val); break;
+                        case "session_reason_v1": ActivityMonitor.LoadSessionReason(cur,val);break;
+                        case "cross_hours_v1": case "app_hours_v1": case "session_coverage_v1": case "session_app_v1": case "mouse_vector_v1": CrossTelemetry.Load(cur,key,val);break;
+                    }
+                }
+                else
+                {
+                    switch (key)
+                    {
+                        case "date": result.StoredDate = val; break;
+                        case "art_theme": result.ThemeId = ArtTheme.Validate((int)ParseL(val)); break;
+                        case "keyboard_layout": result.KeyboardLayout = KeyboardHeat.Valid((int)ParseL(val)); break;
+                        case "all_time_peak_apm": result.AllTimePeakApm = Math.Max(0, ParseL(val)); break;
+                        case "app_rule": result.AppRules.Add(val); break;
+                        case "backup_keep":
+                            int keep = (int)ParseL(val);
+                            result.BackupKeep = keep >= 1 && keep <= 60 ? keep : 7;
+                            result.HasBackupKeep = true;
+                            break;
+                        case "shortcut_model_v1": result.ShortcutModel = val;break;
+                        case "idle_threshold":
+                            long seconds = ParseL(val);
+                            result.IdleThresholdSeconds = seconds >= 10 && seconds <= 3600 ? (int)seconds : 60;
+                            result.HasIdleThreshold = true;
+                            break;
+                        case "pos_x": result.PosX = (int)ParseL(val); break;
+                        case "pos_y": result.PosY = (int)ParseL(val); break;
+                        // v1 total_*
+                        case "total_keys": result.Total.Keys = ParseL(val); break;
+                        case "total_clicks": result.Total.Clicks = ParseL(val); break;
+                        case "total_left": result.Total.Left = ParseL(val); break;
+                        case "total_right": result.Total.Right = ParseL(val); break;
+                        case "total_middle": result.Total.Middle = ParseL(val); break;
+                        case "total_xbuttons": result.Total.XButtons = ParseL(val); break;
+                        case "total_wheel": result.Total.Wheel = ParseL(val); break;
+                        case "total_move": result.Total.MovePx = ParseD(val); break;
+                        case "total_move_m": result.Total.MoveMeters = NonNegative(ParseD(val)); break;
+                        case "mouse_dpi":
+                            double dpi = ParseD(val);
+                            result.MouseDpi = MouseDistance.ValidDpi(dpi) ? dpi : 0;
+                            result.HasMouseDpi = true;
+                            break;
+                        // v1 today_* → 暂存,稍后并入分节
+                        case "today_keys":
+                            if (result.LegacyToday == null) result.LegacyToday = new DayRecord();
+                            result.LegacyToday.Keys = ParseL(val); break;
+                        case "today_clicks":
+                            if (result.LegacyToday == null) result.LegacyToday = new DayRecord();
+                            result.LegacyToday.Clicks = ParseL(val); break;
+                        case "today_left":
+                            if (result.LegacyToday == null) result.LegacyToday = new DayRecord();
+                            result.LegacyToday.Left = ParseL(val); break;
+                        case "today_right":
+                            if (result.LegacyToday == null) result.LegacyToday = new DayRecord();
+                            result.LegacyToday.Right = ParseL(val); break;
+                        case "today_middle":
+                            if (result.LegacyToday == null) result.LegacyToday = new DayRecord();
+                            result.LegacyToday.Middle = ParseL(val); break;
+                        case "today_xbuttons":
+                            if (result.LegacyToday == null) result.LegacyToday = new DayRecord();
+                            result.LegacyToday.XButtons = ParseL(val); break;
+                        case "today_wheel":
+                            if (result.LegacyToday == null) result.LegacyToday = new DayRecord();
+                            result.LegacyToday.Wheel = ParseL(val); break;
+                        case "today_move":
+                            if (result.LegacyToday == null) result.LegacyToday = new DayRecord();
+                            result.LegacyToday.MovePx = ParseD(val); break;
+                    }
+                }
+            }
+            return result;
+        }
+
+        /// <summary>从文本解析,供导入与校验使用。</summary>
+        internal static Parsed ParseText(string text)
+        {
+            string normalized = (text ?? "").Replace("\r\n", "\n").Replace("\r", "\n");
+            return Parse(normalized.Split('\n'));
+        }
+
         public static void Load()
         {
-            ThemeId = 0;
-            KeyboardLayout = 0;
-            AllTimePeakApm = 0;
             try
             {
                 if (!File.Exists(FilePath)) return;
-
-                string storedDate = "";
-                Counters total = new Counters();
-                DayRecord legacyToday = null;   // v1 扁平格式里的 today_*
-                int posX = -1, posY = -1;
-                DayRecord cur = null;
-
-                foreach (string raw in File.ReadAllLines(FilePath, Encoding.UTF8))
-                {
-                    string line = raw.Trim();
-                    if (line.Length == 0 || line.StartsWith("#") || line.StartsWith(";")) continue;
-
-                    if (line.StartsWith("[day=") && line.EndsWith("]"))
-                    {
-                        DateTime d;
-                        string ds = line.Substring(5, line.Length - 6).Trim();
-                        if (DateTime.TryParseExact(ds, "yyyy-MM-dd", CultureInfo.InvariantCulture,
-                                DateTimeStyles.None, out d))
-                        {
-                            if (!History.ContainsKey(d))
-                            {
-                                DayRecord r = new DayRecord();
-                                r.Date = d;
-                                History[d] = r;
-                            }
-                            cur = History[d];
-                        }
-                        continue;
-                    }
-
-                    int eq = line.IndexOf('=');
-                    if (eq <= 0) continue;
-                    string key = line.Substring(0, eq).Trim();
-                    string val = line.Substring(eq + 1).Trim();
-
-                    if (cur != null)
-                    {
-                        switch (key)
-                        {
-                            case "keys": cur.Keys = ParseL(val); break;
-                            case "clicks": cur.Clicks = ParseL(val); break;
-                            case "left": cur.Left = ParseL(val); break;
-                            case "right": cur.Right = ParseL(val); break;
-                            case "middle": cur.Middle = ParseL(val); break;
-                            case "xbuttons": cur.XButtons = ParseL(val); break;
-                            case "wheel": cur.Wheel = ParseL(val); break;
-                            case "move": cur.MovePx = ParseD(val); break;
-                            case "move_m": cur.MoveMeters = NonNegative(ParseD(val)); break;
-                            case "hk": ParseHourBuckets(val, cur.HourKeys); break;
-                            case "hc": ParseHourBuckets(val, cur.HourClicks); break;
-                            case "kk": ParseKeyCounts(val, cur.KeyCounts); break;
-                            case "physical_keys": ParseKeyCounts(val, cur.PhysicalKeys, 768); break;
-                            case "physical_vks": ParseKeyCounts(val, cur.PhysicalVks); break;
-                            case "combo": ShortcutStats.Load(cur, val); break;
-                            case "app": AppActivity.LoadRecord(cur, val); break;
-                            case "active_seconds": cur.ActiveSeconds = ActivityMonitor.ParseSeconds(val); break;
-                            case "app_observed_seconds": cur.AppObservedSeconds = ActivityMonitor.ParseSeconds(val); break;
-                            case "app_switches": cur.AppSwitches = Math.Max(0, ParseL(val)); break;
-                            case "peak_apm": cur.PeakApm = Math.Max(0, ParseL(val)); break;
-                            case "idle_seconds": cur.IdleSeconds = ActivityMonitor.ParseSeconds(val); break;
-                            case "active_hours": ActivityMonitor.LoadHours(cur.ActiveHours, val); break;
-                            case "idle_period": ActivityMonitor.LoadPeriod(cur, val, true); break;
-                            case "session": ActivityMonitor.LoadSession(cur, val); break;
-                            case "session_reason_v1": ActivityMonitor.LoadSessionReason(cur,val);break;
-                            case "cross_hours_v1": case "app_hours_v1": case "session_coverage_v1": case "session_app_v1": case "mouse_vector_v1": CrossTelemetry.Load(cur,key,val);break;
-                        }
-                    }
-                    else
-                    {
-                        switch (key)
-                        {
-                            case "date": storedDate = val; break;
-                            case "art_theme": ThemeId = ArtTheme.Validate((int)ParseL(val)); break;
-                            case "keyboard_layout": KeyboardLayout = KeyboardHeat.Valid((int)ParseL(val)); break;
-                            case "all_time_peak_apm": AllTimePeakApm = Math.Max(0, ParseL(val)); break;
-                            case "app_rule": AppActivity.LoadRule(val); break;
-                            case "shortcut_model_v1": ShortcutSavings.LoadModel(val);break;
-                            case "idle_threshold":
-                                long seconds = ParseL(val);
-                                IdleThresholdSeconds = seconds >= 10 && seconds <= 3600 ? (int)seconds : 60;
-                                break;
-                            case "pos_x": posX = (int)ParseL(val); break;
-                            case "pos_y": posY = (int)ParseL(val); break;
-                            // v1 total_*
-                            case "total_keys": total.Keys = ParseL(val); break;
-                            case "total_clicks": total.Clicks = ParseL(val); break;
-                            case "total_left": total.Left = ParseL(val); break;
-                            case "total_right": total.Right = ParseL(val); break;
-                            case "total_middle": total.Middle = ParseL(val); break;
-                            case "total_xbuttons": total.XButtons = ParseL(val); break;
-                            case "total_wheel": total.Wheel = ParseL(val); break;
-                            case "total_move": total.MovePx = ParseD(val); break;
-                            case "total_move_m": total.MoveMeters = NonNegative(ParseD(val)); break;
-                            case "mouse_dpi":
-                                double dpi = ParseD(val);
-                                MouseDpi = MouseDistance.ValidDpi(dpi) ? dpi : 0;
-                                break;
-                            // v1 today_* → 暂存,稍后并入分节
-                            case "today_keys":
-                                if (legacyToday == null) legacyToday = new DayRecord();
-                                legacyToday.Keys = ParseL(val); break;
-                            case "today_clicks":
-                                if (legacyToday == null) legacyToday = new DayRecord();
-                                legacyToday.Clicks = ParseL(val); break;
-                            case "today_left":
-                                if (legacyToday == null) legacyToday = new DayRecord();
-                                legacyToday.Left = ParseL(val); break;
-                            case "today_right":
-                                if (legacyToday == null) legacyToday = new DayRecord();
-                                legacyToday.Right = ParseL(val); break;
-                            case "today_middle":
-                                if (legacyToday == null) legacyToday = new DayRecord();
-                                legacyToday.Middle = ParseL(val); break;
-                            case "today_xbuttons":
-                                if (legacyToday == null) legacyToday = new DayRecord();
-                                legacyToday.XButtons = ParseL(val); break;
-                            case "today_wheel":
-                                if (legacyToday == null) legacyToday = new DayRecord();
-                                legacyToday.Wheel = ParseL(val); break;
-                            case "today_move":
-                                if (legacyToday == null) legacyToday = new DayRecord();
-                                legacyToday.MovePx = ParseD(val); break;
-                        }
-                    }
-                }
-
-                DailySignal.Clear();
-                Total = total;
-                PosX = posX; PosY = posY;
-
-                // v1 数据迁移:把扁平 today_* 并入对应日期的分节(已存在则合并)
-                DateTime legacyDay;
-                if (legacyToday != null && DateTime.TryParseExact(storedDate, "yyyy-MM-dd",
-                        CultureInfo.InvariantCulture, DateTimeStyles.None, out legacyDay))
-                {
-                    legacyToday.Date = legacyDay;
-                    DayRecord existing;
-                    if (History.TryGetValue(legacyDay, out existing))
-                    {
-                        existing.Keys += legacyToday.Keys;
-                        existing.Clicks += legacyToday.Clicks;
-                        existing.Left += legacyToday.Left;
-                        existing.Right += legacyToday.Right;
-                        existing.Middle += legacyToday.Middle;
-                        existing.XButtons += legacyToday.XButtons;
-                        existing.Wheel += legacyToday.Wheel;
-                        existing.MovePx += legacyToday.MovePx;
-                    }
-                    else if (!legacyToday.IsEmpty)
-                    {
-                        History[legacyDay] = legacyToday;
-                    }
-                }
-
-                foreach(DayRecord record in History.Values)ActivityMonitor.RemoveLegacyPhantomSessions(record);
-                RollDay(DateTime.Today);
-                Prune();
+                ApplyParsed(Parse(File.ReadAllLines(FilePath, Encoding.UTF8)), true);
             }
             catch { }
+        }
+
+        /// <summary>把解析结果写入静态状态。applySettings 为 false 时只接管日记录(导入合并用)。</summary>
+        internal static void ApplyParsed(Parsed parsed, bool applySettings)
+        {
+            History.Clear();
+            foreach (KeyValuePair<DateTime, DayRecord> day in parsed.History) History[day.Key] = day.Value;
+            Total = parsed.Total;
+            if (applySettings)
+            {
+                ThemeId = parsed.ThemeId;
+                KeyboardLayout = parsed.KeyboardLayout;
+                AllTimePeakApm = parsed.AllTimePeakApm;
+                if (parsed.HasMouseDpi) MouseDpi = parsed.MouseDpi;
+                if (parsed.HasIdleThreshold) IdleThresholdSeconds = parsed.IdleThresholdSeconds;
+                if (parsed.HasBackupKeep) BackupKeep = parsed.BackupKeep;
+                PosX = parsed.PosX; PosY = parsed.PosY;
+                AppActivity.Rules.Clear();
+                foreach (string rule in parsed.AppRules) AppActivity.LoadRule(rule);
+                if (!string.IsNullOrEmpty(parsed.ShortcutModel)) ShortcutSavings.LoadModel(parsed.ShortcutModel);
+            }
+
+            // v1 数据迁移:把扁平 today_* 并入对应日期的分节(已存在则合并)
+            DateTime legacyDay;
+            if (parsed.LegacyToday != null && DateTime.TryParseExact(parsed.StoredDate, "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture, DateTimeStyles.None, out legacyDay))
+            {
+                parsed.LegacyToday.Date = legacyDay;
+                DayRecord existing;
+                if (History.TryGetValue(legacyDay, out existing))
+                {
+                    existing.Keys += parsed.LegacyToday.Keys;
+                    existing.Clicks += parsed.LegacyToday.Clicks;
+                    existing.Left += parsed.LegacyToday.Left;
+                    existing.Right += parsed.LegacyToday.Right;
+                    existing.Middle += parsed.LegacyToday.Middle;
+                    existing.XButtons += parsed.LegacyToday.XButtons;
+                    existing.Wheel += parsed.LegacyToday.Wheel;
+                    existing.MovePx += parsed.LegacyToday.MovePx;
+                }
+                else if (!parsed.LegacyToday.IsEmpty)
+                {
+                    History[legacyDay] = parsed.LegacyToday;
+                }
+            }
+
+            DailySignal.Clear();
+            foreach(DayRecord record in History.Values)ActivityMonitor.RemoveLegacyPhantomSessions(record);
+            RollDay(DateTime.Today);
+            Prune();
         }
 
         private static void ParseHourBuckets(string val, long[] buckets)
@@ -578,12 +674,19 @@ namespace KeyMouseStats
             }
         }
 
+        /// <summary>导出用的文本,与落盘内容一致;失败返回 null。</summary>
+        internal static string ExportPayload()
+        {
+            return Prepare();
+        }
+
         private static string Serialize()
         {
             StringBuilder sb = new StringBuilder();
                 sb.AppendLine("# 键鼠统计数据文件 v10 / 正式版 1.7.0（区间分析 / 分布）");
                 sb.AppendLine("shortcut_model_v1="+ShortcutSavings.EncodeModel());
                 sb.AppendLine("idle_threshold=" + IdleThresholdSeconds.ToString(CultureInfo.InvariantCulture));
+                sb.AppendLine("backup_keep=" + BackupKeep.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("art_theme=" + ArtTheme.Validate(ThemeId).ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("keyboard_layout=" + KeyboardHeat.Valid(KeyboardLayout).ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("all_time_peak_apm=" + AllTimePeakApm.ToString(CultureInfo.InvariantCulture));
@@ -786,6 +889,8 @@ namespace KeyMouseStats
         public StatsWidget()
         {
             Store.Load();
+            // 每天首次启动留一份带日期的备份,并按保留份数清理旧备份。
+            try { DataManagement.EnsureDailyBackup(); } catch { }
 
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.Manual;
@@ -1336,6 +1441,7 @@ namespace KeyMouseStats
                 miDash, new ToolStripMenuItem("鼠标 DPI / 距离校准...", null, delegate { OpenDistanceSettings(); }), new ToolStripSeparator(),
                 new ToolStripMenuItem("空闲阈值 / 活跃时长...", null, delegate { using (ActivitySettings dialog = new ActivitySettings()) dialog.ShowDialog(this); }),
                 new ToolStripMenuItem("今日连续使用段...", null, delegate { using (SessionDetails dialog = new SessionDetails()) dialog.ShowDialog(this); }),
+                new ToolStripMenuItem("数据管理(备份 / 导入 / 校验)...", null, delegate { using (DataSettingsDialog dialog = new DataSettingsDialog()) dialog.ShowDialog(this); }),
                 _miShow, hudMenu, sep1, _miTopMost, _miClickThrough, _miAutoStart,
                 sep2, miResetToday, miResetAll, sep3, miExit });
         }
