@@ -1,5 +1,5 @@
 @echo off
-rem One-click compile and run all tests (19 logic/render tests + 1 desktop render test).
+rem One-click compile and run all tests (21 logic/render tests + 1 desktop render test).
 rem Usage: double-click test.bat, or run from the command line.
 rem   test.bat --logic-only   skips RenderDashboard and ThemePerf, which need an
 rem                           interactive desktop session; used by CI.
