@@ -4,37 +4,37 @@
 
 ## overview
 
-文件：minecraft-overview.png
+文件：minecraft-overview.jpg
 
 Minecraft cinematic voxel game wallpaper for a desktop statistics app: Steve standing with a friendly wolf on a grassy hill above an oak forest at sunset. All characters and scenery unmistakably Minecraft block geometry with crisp pixel textures, beautiful ambient light and atmospheric depth, premium game promotional art. Hero and distinctive props on the far right 30 percent, left and central 65 percent open dark desaturated forest-green atmospheric space for readable interface panels. Cohesive collection in forest green, slate stone, warm torch amber and restrained diamond cyan. Peaceful adventurous atmosphere. Wide landscape 1536x1024, no words, no logo, no UI, no watermarks.
 
 ## trend
 
-文件：minecraft-trend.png
+文件：minecraft-trend.jpg
 
 Minecraft cinematic voxel game wallpaper for a desktop statistics app: Alex riding a minecart beside a mountain railway with distant waterfalls. All characters and scenery unmistakably Minecraft block geometry with crisp pixel textures, beautiful ambient light and atmospheric depth, premium game promotional art. Hero and distinctive props on the far right 30 percent, left and central 65 percent open dark desaturated forest-green atmospheric space for readable interface panels. Cohesive collection in forest green, slate stone, warm torch amber and restrained diamond cyan. Peaceful adventurous atmosphere. Wide landscape 1536x1024, no words, no logo, no UI, no watermarks.
 
 ## hours
 
-文件：minecraft-hours.png
+文件：minecraft-hours.jpg
 
 Minecraft cinematic voxel game wallpaper for a desktop statistics app: Steve holding a lantern at the entrance of a glowing amethyst cave. All characters and scenery unmistakably Minecraft block geometry with crisp pixel textures, beautiful ambient light and atmospheric depth, premium game promotional art. Hero and distinctive props on the far right 30 percent, left and central 65 percent open dark desaturated forest-green atmospheric space for readable interface panels. Cohesive collection in forest green, slate stone, warm torch amber and restrained diamond cyan. Peaceful adventurous atmosphere. Wide landscape 1536x1024, no words, no logo, no UI, no watermarks.
 
 ## keys
 
-文件：minecraft-keys.png
+文件：minecraft-keys.jpg
 
 Minecraft cinematic voxel game wallpaper for a desktop statistics app: Alex crafting at a wooden crafting table inside a cozy oak cabin. All characters and scenery unmistakably Minecraft block geometry with crisp pixel textures, beautiful ambient light and atmospheric depth, premium game promotional art. Hero and distinctive props on the far right 30 percent, left and central 65 percent open dark desaturated forest-green atmospheric space for readable interface panels. Cohesive collection in forest green, slate stone, warm torch amber and restrained diamond cyan. Peaceful adventurous atmosphere. Wide landscape 1536x1024, no words, no logo, no UI, no watermarks.
 
 ## apps
 
-文件：minecraft-apps.png
+文件：minecraft-apps.jpg
 
 Minecraft cinematic voxel game wallpaper for a desktop statistics app: a friendly villager beside trading chests in a lantern-lit village square. All characters and scenery unmistakably Minecraft block geometry with crisp pixel textures, beautiful ambient light and atmospheric depth, premium game promotional art. Hero and distinctive props on the far right 30 percent, left and central 65 percent open dark desaturated forest-green atmospheric space for readable interface panels. Cohesive collection in forest green, slate stone, warm torch amber and restrained diamond cyan. Peaceful adventurous atmosphere. Wide landscape 1536x1024, no words, no logo, no UI, no watermarks.
 
 ## insights
 
-文件：minecraft-insights.png
+文件：minecraft-insights.jpg
 
 Minecraft cinematic voxel game wallpaper for a desktop statistics app: Alex studying an enchanting table and floating book beside a quiet lake under stars. All characters and scenery unmistakably Minecraft block geometry with crisp pixel textures, beautiful ambient light and atmospheric depth, premium game promotional art. Hero and distinctive props on the far right 30 percent, left and central 65 percent open dark desaturated forest-green atmospheric space for readable interface panels. Cohesive collection in forest green, slate stone, warm torch amber and restrained diamond cyan. Peaceful adventurous atmosphere. Wide landscape 1536x1024, no words, no logo, no UI, no watermarks.
 

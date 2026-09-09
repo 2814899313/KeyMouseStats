@@ -2,7 +2,7 @@
 
 使用内置 image_gen 工具生成，未使用 CLI / API 回退。原始输出复制到项目内，运行时从 EXE 资源取用。
 
-- balatro-backgrounds.png → BalatroBackgrounds：2 列 × 3 行，依次为总览、趋势、时段、按键、应用、洞察。保留生成尺寸，以整数区域取图。
+- balatro-backgrounds.jpg → BalatroBackgrounds：2 列 × 3 行，依次为总览、趋势、时段、按键、应用、洞察。保留生成尺寸，以整数区域取图。
 - balatro-icons.png → BalatroIcons：4 列 × 4 行，透明背景；键盘、鼠标、轮盘、路径、沙漏、会话牌组、闪电小丑、计算器、表情及花色徽章。
 
 ## 背景图集最终提示词

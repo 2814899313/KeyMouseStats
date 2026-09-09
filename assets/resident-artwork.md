@@ -6,37 +6,37 @@
 
 ## overview
 
-文件：resident-overview.png
+文件：resident-overview.jpg
 
 Cinematic Resident Evil inspired desktop dashboard wallpaper featuring Leon S. Kennedy, his iconic brown shearling jacket, ash blond side-parted hair, standing in a rainy European village at night. The recognizable adult video game character is a large three-quarter portrait occupying the rightmost 30 percent, head visible near upper right, calm alert pose. Left 65 percent remains dark and uncluttered atmospheric charcoal space for data panels. Premium realistic video game key art, detailed face and clothing, moody cold steel gray and muted crimson lighting, subtle desaturated teal highlights, consistent coherent collection. Landscape 1536x1024. No text, no logos, no weapons, no gore, no zombies.
 
 ## trend
 
-文件：resident-trend.png
+文件：resident-trend.jpg
 
 Cinematic Resident Evil inspired desktop dashboard wallpaper featuring Jill Valentine, her blue tank top and tactical trousers, short brown bob hair, standing in a deserted Raccoon City street with wet reflections. The recognizable adult video game character is a large three-quarter portrait occupying the rightmost 30 percent, head visible near upper right, calm alert pose. Left 65 percent remains dark and uncluttered atmospheric charcoal space for data panels. Premium realistic video game key art, detailed face and clothing, moody cold steel gray and muted crimson lighting, subtle desaturated teal highlights, consistent coherent collection. Landscape 1536x1024. No text, no logos, no weapons, no gore, no zombies.
 
 ## hours
 
-文件：resident-hours.png
+文件：resident-hours.jpg
 
 Cinematic Resident Evil inspired desktop dashboard wallpaper featuring Chris Redfield, dark BSAA tactical clothing, muscular build and short dark hair, standing in an abandoned industrial control room. The recognizable adult video game character is a large three-quarter portrait occupying the rightmost 30 percent, head visible near upper right, calm alert pose. Left 65 percent remains dark and uncluttered atmospheric charcoal space for data panels. Premium realistic video game key art, detailed face and clothing, moody cold steel gray and muted crimson lighting, subtle desaturated teal highlights, consistent coherent collection. Landscape 1536x1024. No text, no logos, no weapons, no gore, no zombies.
 
 ## keys
 
-文件：resident-keys.png
+文件：resident-keys.jpg
 
 Cinematic Resident Evil inspired desktop dashboard wallpaper featuring Claire Redfield, her red leather jacket and auburn ponytail, standing beside a vintage typewriter in a police station safe room. The recognizable adult video game character is a large three-quarter portrait occupying the rightmost 30 percent, head visible near upper right, calm alert pose. Left 65 percent remains dark and uncluttered atmospheric charcoal space for data panels. Premium realistic video game key art, detailed face and clothing, moody cold steel gray and muted crimson lighting, subtle desaturated teal highlights, consistent coherent collection. Landscape 1536x1024. No text, no logos, no weapons, no gore, no zombies.
 
 ## apps
 
-文件：resident-apps.png
+文件：resident-apps.jpg
 
 Cinematic Resident Evil inspired desktop dashboard wallpaper featuring Ada Wong, her red high-neck knit dress, black bob hairstyle, standing beside a dark window in an elegant old castle. The recognizable adult video game character is a large three-quarter portrait occupying the rightmost 30 percent, head visible near upper right, calm alert pose. Left 65 percent remains dark and uncluttered atmospheric charcoal space for data panels. Premium realistic video game key art, detailed face and clothing, moody cold steel gray and muted crimson lighting, subtle desaturated teal highlights, consistent coherent collection. Landscape 1536x1024. No text, no logos, no weapons, no gore, no zombies.
 
 ## insights
 
-文件：resident-insights.png
+文件：resident-insights.jpg
 
 Cinematic Resident Evil inspired desktop dashboard wallpaper featuring Rebecca Chambers, her white and green medic uniform, short brown hair, standing in a quiet vintage medical laboratory. The recognizable adult video game character is a large three-quarter portrait occupying the rightmost 30 percent, head visible near upper right, calm alert pose. Left 65 percent remains dark and uncluttered atmospheric charcoal space for data panels. Premium realistic video game key art, detailed face and clothing, moody cold steel gray and muted crimson lighting, subtle desaturated teal highlights, consistent coherent collection. Landscape 1536x1024. No text, no logos, no weapons, no gore, no zombies.
 

@@ -4,7 +4,7 @@
 
 ## trend
 
-文件：[nikki-pose-trend.png](nikki-pose-trend.png)
+文件：[nikki-pose-trend.jpg](nikki-pose-trend.jpg)
 
 最终提示词：
 
@@ -12,7 +12,7 @@ Production illustrated background for a desktop statistics app, inspired by Infi
 
 ## hours
 
-文件：[nikki-pose-hours.png](nikki-pose-hours.png)
+文件：[nikki-pose-hours.jpg](nikki-pose-hours.jpg)
 
 最终提示词：
 
@@ -20,7 +20,7 @@ Production illustrated background for a desktop statistics app, inspired by Infi
 
 ## keys
 
-文件：[nikki-pose-keys.png](nikki-pose-keys.png)
+文件：[nikki-pose-keys.jpg](nikki-pose-keys.jpg)
 
 最终提示词：
 
@@ -28,7 +28,7 @@ Production illustrated background for a desktop statistics app, inspired by Infi
 
 ## apps
 
-文件：[nikki-pose-apps.png](nikki-pose-apps.png)
+文件：[nikki-pose-apps.jpg](nikki-pose-apps.jpg)
 
 最终提示词：
 
@@ -36,7 +36,7 @@ Production illustrated background for a desktop statistics app, inspired by Infi
 
 ## insights
 
-文件：[nikki-pose-insights.png](nikki-pose-insights.png)
+文件：[nikki-pose-insights.jpg](nikki-pose-insights.jpg)
 
 最终提示词：
 
