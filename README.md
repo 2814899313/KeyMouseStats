@@ -38,8 +38,8 @@ KeyMouseStats 是一个单文件 Windows 桌面程序。悬浮小组件显示实
 ## 立即使用
 
 1. 从 [Releases](https://github.com/2814899313/KeyMouseStats/releases/latest) 选择版本：
-   - **KeyMouseStats.exe**：包含全部美术主题。
-   - **KeyMouseStats.Clean.exe**：保留全部统计功能，不包含皮肤图片和主题切换，体积更小。
+   - **KeyMouseStats.exe**（约 22.6 MiB）：包含全部美术主题。
+   - **KeyMouseStats.Clean.exe**（约 0.3 MiB）：保留全部统计功能，不包含皮肤图片和主题切换，体积更小。
 2. 放到任意可写目录后运行，无需安装。
 3. 双击桌面小组件打开数据分析；右键小组件打开托盘菜单。
 4. 在设置中填写鼠标 DPI，获得更接近实际值的移动距离。
@@ -72,7 +72,7 @@ Windows 首次运行可能显示“未知发布者”，因为当前版本尚未
 
 ## 主题
 
-程序内置 12 套主题。主题覆盖页面背景、卡片、图标、键盘热力和加载视觉；图片采用后台加载与有界缓存。
+程序内置 12 套主题。主题覆盖页面背景、卡片、图标、键盘热力和加载视觉；图片采用后台加载与有界缓存，背景与立绘以 JPEG 嵌入以控制体积。
 
 <table>
 <tr>
@@ -124,6 +124,7 @@ Windows 首次运行可能显示“未知发布者”，因为当前版本尚未
 - [主题资源规范](THEME_RESOURCES.md)
 - [隐私与安全](SECURITY.md)
 - [参与开发](CONTRIBUTING.md)
+- [1.6.0 发布说明](docs/releases/v1.6.0.md)
 - [1.5.0 发布说明](docs/releases/v1.5.0.md)
 - [1.4.0 发布说明](docs/releases/v1.4.0.md)
 - [1.3.2 发布说明](docs/releases/v1.3.2.md)
