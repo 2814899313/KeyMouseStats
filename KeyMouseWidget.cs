@@ -581,7 +581,7 @@ namespace KeyMouseStats
         private static string Serialize()
         {
             StringBuilder sb = new StringBuilder();
-                sb.AppendLine("# 键鼠统计数据文件 v10 / 正式版 1.4.0（多日曲线 / 交叉归因）");
+                sb.AppendLine("# 键鼠统计数据文件 v10 / 正式版 1.5.0（本周回顾 / 星期节律）");
                 sb.AppendLine("shortcut_model_v1="+ShortcutSavings.EncodeModel());
                 sb.AppendLine("idle_threshold=" + IdleThresholdSeconds.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("art_theme=" + ArtTheme.Validate(ThemeId).ToString(CultureInfo.InvariantCulture));
@@ -1344,7 +1344,7 @@ namespace KeyMouseStats
         {
             _tray = new NotifyIcon();
             _tray.Icon = MakeIcon();
-            _tray.Text = "键鼠统计 1.4.0 正式版";
+            _tray.Text = "键鼠统计 1.5.0 正式版";
             _tray.Visible = true;
             _tray.ContextMenuStrip = _menu;
             _tray.MouseDoubleClick += delegate { ToggleVisible(); };
