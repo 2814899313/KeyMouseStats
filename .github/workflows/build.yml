@@ -29,7 +29,10 @@ jobs:
           if ($file.Length -gt 2MB) { throw "Clean edition unexpectedly exceeds 2 MiB." }
           $assembly = [Reflection.Assembly]::LoadFile($file.FullName)
           if ($assembly.GetManifestResourceNames().Count -ne 0) { throw "Clean edition contains embedded managed resources." }
-          if ($file.VersionInfo.FileVersion -ne "1.5.0.0") { throw "Clean edition version mismatch." }
+          # Read the expected version from its single source so a release no longer
+          # requires editing this workflow by hand.
+          $expected = (Select-String -Path AssemblyInfo.cs -Pattern 'AssemblyFileVersion\("([\d.]+)"\)').Matches[0].Groups[1].Value
+          if ($file.VersionInfo.FileVersion -ne $expected) { throw "Clean edition reports $($file.VersionInfo.FileVersion) but AssemblyInfo.cs declares $expected." }
 
       - name: Upload executables
         uses: actions/upload-artifact@v4
