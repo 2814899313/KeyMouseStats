@@ -14,6 +14,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Run before the build so a broken commit fails fast. --logic-only skips
+      # RenderDashboard and ThemePerf, which need an interactive desktop session.
+      - name: Run logic tests
+        shell: cmd
+        run: test.bat --logic-only
+
       - name: Build release executable
         shell: cmd
         run: build.bat

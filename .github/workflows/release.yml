@@ -15,6 +15,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Never publish a tag whose tests fail.
+      - name: Run logic tests
+        shell: cmd
+        run: test.bat --logic-only
+
       - name: Build release executable
         shell: cmd
         run: build.bat

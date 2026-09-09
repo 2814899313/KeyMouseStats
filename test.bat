@@ -1,8 +1,12 @@
 @echo off
-rem One-click compile and run all tests (5 logic tests + 1 render test).
+rem One-click compile and run all tests (19 logic/render tests + 1 desktop render test).
 rem Usage: double-click test.bat, or run from the command line.
+rem   test.bat --logic-only   skips RenderDashboard and ThemePerf, which need an
+rem                           interactive desktop session; used by CI.
 rem The render test refreshes the previews/ screenshots.
 setlocal enabledelayedexpansion
+set "LOGIC_ONLY="
+if /I "%~1"=="--logic-only" set "LOGIC_ONLY=1"
 set "CSC=%SystemRoot%\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 if not exist "%CSC%" set "CSC=%SystemRoot%\Microsoft.NET\Framework\v4.0.30319\csc.exe"
 if not exist "%CSC%" (
@@ -40,6 +44,7 @@ for %%T in (DistanceTests SaveReliabilityTests WeeklyReportTests ActivityTimeTes
     )
 )
 
+if defined LOGIC_ONLY goto skipvisual
 echo [Render] RenderDashboard (refreshes previews/)
 "%CSC%" /nologo /target:exe /optimize+ /main:RenderDashboard /out:"%OUT%\RenderDashboard.exe" %RES% %SRC% "%~dp0tests\RenderDashboard.cs"
 if !ERRORLEVEL! neq 0 (
@@ -67,6 +72,7 @@ if !ERRORLEVEL! equ 0 (
     popd
 )
 
+:skipvisual
 echo.
 if "!FAIL!"=="1" (
     echo ============ SOME TESTS FAILED ============
