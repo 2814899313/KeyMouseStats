@@ -330,6 +330,7 @@ namespace KeyMouseStats
             public long AllTimePeakApm;
             public double MouseDpi;
             public int BackupKeep = 7;
+            public string Wellbeing;
             public bool HasMouseDpi, HasIdleThreshold, HasBackupKeep;
         }
 
@@ -407,6 +408,7 @@ namespace KeyMouseStats
                         case "keyboard_layout": result.KeyboardLayout = KeyboardHeat.Valid((int)ParseL(val)); break;
                         case "all_time_peak_apm": result.AllTimePeakApm = Math.Max(0, ParseL(val)); break;
                         case "app_rule": result.AppRules.Add(val); break;
+                        case "wellbeing_v1": result.Wellbeing = val; break;
                         case "backup_keep":
                             int keep = (int)ParseL(val);
                             result.BackupKeep = keep >= 1 && keep <= 60 ? keep : 7;
@@ -497,6 +499,7 @@ namespace KeyMouseStats
                 if (parsed.HasMouseDpi) MouseDpi = parsed.MouseDpi;
                 if (parsed.HasIdleThreshold) IdleThresholdSeconds = parsed.IdleThresholdSeconds;
                 if (parsed.HasBackupKeep) BackupKeep = parsed.BackupKeep;
+                if (!string.IsNullOrEmpty(parsed.Wellbeing)) WellbeingSettings.Load(parsed.Wellbeing);
                 PosX = parsed.PosX; PosY = parsed.PosY;
                 AppActivity.Rules.Clear();
                 foreach (string rule in parsed.AppRules) AppActivity.LoadRule(rule);
@@ -683,10 +686,11 @@ namespace KeyMouseStats
         private static string Serialize()
         {
             StringBuilder sb = new StringBuilder();
-                sb.AppendLine("# 键鼠统计数据文件 v10 / 正式版 1.7.1（数据管理 / 交互）");
+                sb.AppendLine("# 键鼠统计数据文件 v10 / 正式版 " + BuildInfo.Version);
                 sb.AppendLine("shortcut_model_v1="+ShortcutSavings.EncodeModel());
                 sb.AppendLine("idle_threshold=" + IdleThresholdSeconds.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("backup_keep=" + BackupKeep.ToString(CultureInfo.InvariantCulture));
+                sb.AppendLine("wellbeing_v1=" + WellbeingSettings.Encode());
                 sb.AppendLine("art_theme=" + ArtTheme.Validate(ThemeId).ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("keyboard_layout=" + KeyboardHeat.Valid(KeyboardLayout).ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("all_time_peak_apm=" + AllTimePeakApm.ToString(CultureInfo.InvariantCulture));
@@ -854,7 +858,7 @@ namespace KeyMouseStats
         private IntPtr _msHook = IntPtr.Zero;
 
         private float _s = 1f;
-        private bool _showTotal = false;
+        private int _mode;   // 0 今日 / 1 目标 / 2 累计
         private bool _clickThrough = false;
         private bool _initialized = false;
         private Dashboard _dash;
@@ -1232,7 +1236,8 @@ namespace KeyMouseStats
             using (SolidBrush b = new SolidBrush(ArtTheme.Current.Text))
                 g.DrawString("键鼠统计", _fTitle, b, 16 * s, 9 * s);
 
-            string modeText = string.Format("{0} · {1:MM-dd}", _showTotal ? "累计" : "今日", Store.Day);
+            string modeName = _mode == 2 ? "累计" : _mode == 1 ? "目标" : "今日";
+            string modeText = string.Format("{0} · {1:MM-dd}", modeName, Store.Day);
             RectangleF modeRect = new RectangleF(0, 13 * s, ClientSize.Width - 16 * s, 20 * s);
             using (SolidBrush b = new SolidBrush(ArtTheme.Current.Muted))
                 g.DrawString(modeText, _fMode, b, modeRect, _rightAlign);
@@ -1240,7 +1245,8 @@ namespace KeyMouseStats
             using (Pen pen = new Pen(ArtTheme.Current.Line))
                 g.DrawLine(pen, 14 * s, 36 * s, ClientSize.Width - 14 * s, 36 * s);
 
-            DayRecord c = _showTotal ? ToDayRecord(Store.Total) : Store.Today;
+            if (_mode == 1) { PaintGoal(g); return; }
+            DayRecord c = _mode == 2 ? ToDayRecord(Store.Total) : Store.Today;
             float col2 = ClientSize.Width / 2f + 6;
 
             DrawCard(g, 18 * s, 46 * s, ArtTheme.Current.Accent, "键盘击键", Analysis.FmtCount(c.Keys));
@@ -1281,6 +1287,68 @@ namespace KeyMouseStats
                 g.DrawString(label, _fLabel, lb, x + 13 * s, y);
             using (SolidBrush vb = new SolidBrush(ArtTheme.Current.Text))
                 g.DrawString(value, _fValue, vb, x, y + 15 * s);
+        }
+
+        /// <summary>目标模式:进度环 + 已用 / 目标 / 剩余。</summary>
+        private void PaintGoal(Graphics g)
+        {
+            float s = _s;
+            ArtTheme theme = ArtTheme.Current;
+            DayRecord day = Store.Today;
+            if (!WellbeingSettings.GoalEnabled)
+            {
+                using (SolidBrush text = new SolidBrush(theme.Muted))
+                using (StringFormat center = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap })
+                {
+                    g.DrawString("未设置每日目标", _fMode, text, new RectangleF(16 * s, 78 * s, ClientSize.Width - 32 * s, 24 * s), center);
+                    g.DrawString("右键小组件 → 目标 / 提醒…", _fMode, text, new RectangleF(16 * s, 108 * s, ClientSize.Width - 32 * s, 24 * s), center);
+                }
+                return;
+            }
+
+            double progress = WellbeingSettings.Progress(day);
+            if (!RangeMath.IsNumber(progress)) progress = 0;
+            bool done = progress >= 1;
+            float size = 88 * s;
+            RectangleF ring = new RectangleF(ClientSize.Width / 2f - size / 2f, 44 * s, size, size);
+            using (Pen track = new Pen(Color.FromArgb(70, theme.Line), 9 * s)) g.DrawArc(track, ring, -90, 360);
+            using (Pen arc = new Pen(done ? theme.Green : theme.Accent, 9 * s))
+            {
+                arc.StartCap = LineCap.Round;
+                arc.EndCap = LineCap.Round;
+                g.DrawArc(arc, ring, -90, (float)(360 * Math.Min(1, progress)));
+            }
+            using (Font percent = new Font("Segoe UI", 20 * s, FontStyle.Bold, GraphicsUnit.Pixel))
+            using (SolidBrush text = new SolidBrush(theme.Text))
+            using (StringFormat center = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+                g.DrawString((progress * 100).ToString("0") + "%", percent, text, ring, center);
+
+            using (SolidBrush text = new SolidBrush(theme.Muted))
+            using (StringFormat center = new StringFormat { Alignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap })
+            {
+                g.DrawString(WellbeingSettings.UsedText(day) + " / " + WellbeingSettings.TargetText, _fMode, text,
+                    new RectangleF(12 * s, 140 * s, ClientSize.Width - 24 * s, 20 * s), center);
+                g.DrawString(WellbeingSettings.RemainingText(day), _fMode, text,
+                    new RectangleF(12 * s, 160 * s, ClientSize.Width - 24 * s, 20 * s), center);
+                g.DrawString("目标：" + WellbeingSettings.GoalName + " · 右键修改", _fMode, text,
+                    new RectangleF(12 * s, 182 * s, ClientSize.Width - 24 * s, 20 * s), center);
+            }
+        }
+
+        /// <summary>目标达成、连续使用与每日摘要的提示。三者都默认关闭。</summary>
+        private void CheckWellbeing()
+        {
+            try
+            {
+                DateTime now = DateTime.Now;
+                string message = Wellbeing.GoalMessage(now, Store.Today);
+                if (message == null) message = Wellbeing.ContinuousMessage(now, ActivityMonitor.CurrentSession);
+                if (message == null) message = Wellbeing.SummaryMessage(now);
+                if (message == null) return;
+                if (_tray != null) _tray.ShowBalloonTip(8000, "键鼠统计", message, ToolTipIcon.Info);
+                MarkDirty();
+            }
+            catch { }
         }
 
         internal static GraphicsPath RoundedPath(Rectangle r, int radius)
@@ -1338,7 +1406,7 @@ namespace KeyMouseStats
                 }
                 else
                 {
-                    _showTotal = !_showTotal;
+                    _mode = (_mode + 1) % 3;
                     _dirtyUI = true;
                 }
             }
@@ -1442,6 +1510,7 @@ namespace KeyMouseStats
                 new ToolStripMenuItem("空闲阈值 / 活跃时长...", null, delegate { using (ActivitySettings dialog = new ActivitySettings()) dialog.ShowDialog(this); }),
                 new ToolStripMenuItem("今日连续使用段...", null, delegate { using (SessionDetails dialog = new SessionDetails()) dialog.ShowDialog(this); }),
                 new ToolStripMenuItem("数据管理(备份 / 导入 / 校验)...", null, delegate { using (DataSettingsDialog dialog = new DataSettingsDialog()) dialog.ShowDialog(this); }),
+                new ToolStripMenuItem("目标 / 提醒...", null, delegate { using (WellbeingSettingsDialog dialog = new WellbeingSettingsDialog()) dialog.ShowDialog(this); }),
                 _miShow, hudMenu, sep1, _miTopMost, _miClickThrough, _miAutoStart,
                 sep2, miResetToday, miResetAll, sep3, miExit });
         }
@@ -1450,7 +1519,7 @@ namespace KeyMouseStats
         {
             _tray = new NotifyIcon();
             _tray.Icon = MakeIcon();
-            _tray.Text = "键鼠统计 1.7.1 正式版";
+            _tray.Text = "键鼠统计 " + BuildInfo.Version + " 正式版";
             _tray.Visible = true;
             _tray.ContextMenuStrip = _menu;
             _tray.MouseDoubleClick += delegate { ToggleVisible(); };
@@ -1558,6 +1627,7 @@ namespace KeyMouseStats
             long previousApm = LiveRate.Apm;
             ActiveSession previousSession = ActivityMonitor.CurrentSession;
             LiveRate.Tick();
+            CheckWellbeing();
             if (ActivityMonitor.Tick()) MarkDirty();
             if (previousTrend != LiveRate.TrendVersion || previousApm != LiveRate.Apm || !object.ReferenceEquals(previousSession, ActivityMonitor.CurrentSession)) _dirtyUI = true;
 

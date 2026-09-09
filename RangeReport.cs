@@ -102,6 +102,19 @@ namespace KeyMouseStats
             data.Rows.Add(new string[] { "移动距离", dpi ? Analysis.FmtMeters(now.MoveMeters) : "未设置 DPI", dpi ? Analysis.FmtMeters(before.MoveMeters) : "未设置 DPI", dpi ? Percent(RangeMath.Relative(now.MoveMeters, before.MoveMeters)) : "基准不足", "受 DPI 设置影响" });
             data.Rows.Add(new string[] { "单日峰值 APM", now.PeakApm.ToString(), before.PeakApm.ToString(), Percent(RangeMath.Relative(now.PeakApm, before.PeakApm)), "峰值从新版开始记录" });
 
+            if (WellbeingSettings.GoalEnabled)
+            {
+                int met, observedDays, streak, previousMet, previousObserved, previousStreak;
+                Wellbeing.GoalStats(now.Start, now.End, out met, out observedDays, out streak);
+                if (before.Days > 0) Wellbeing.GoalStats(before.Start, before.End, out previousMet, out previousObserved, out previousStreak);
+                else { previousMet = 0; previousObserved = 0; previousStreak = 0; }
+                double currentRate = observedDays > 0 ? (double)met / observedDays : double.NaN;
+                double previousRate = previousObserved > 0 ? (double)previousMet / previousObserved : double.NaN;
+                data.Rows.Add(new string[] { "目标达成天数", met + " / " + observedDays + " 天", previousMet + " / " + previousObserved + " 天",
+                    Percent(RangeMath.Relative(currentRate, previousRate)), "目标：" + WellbeingSettings.TargetText });
+                data.Rows.Add(new string[] { "连续达成天数", streak + " 天", previousStreak + " 天", "—", "从区间末尾往前数,缺失日跳过" });
+            }
+
             data.Footer = now.IsEmpty ? "所选区间没有任何完整日记录,先在活跃使用中积累数据。"
                 : "对比区间(" + data.ComparisonLabel + ")截至 " + before.End.ToString("MM.dd") + "；缺失日不补零,日均按有效天数计算。";
             return data;

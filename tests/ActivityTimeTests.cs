@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -167,8 +167,7 @@ internal static class ActivityTimeTests
         // Redirect all persistence to an isolated directory before reading or writing Store.
         string directory = Path.Combine(Path.GetTempPath(), "ActivityTimeTests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory); string file = Path.Combine(directory, "stats.txt");
-        typeof(Store).GetField("Dir", BindingFlags.NonPublic | BindingFlags.Static).SetValue(null, directory);
-        typeof(Store).GetField("FilePath", BindingFlags.NonPublic | BindingFlags.Static).SetValue(null, file);
+        Store.DataDirectory = directory;
         try
         {
             Store.History.Clear(); Store.Total = new Counters(); Store.RollDay(DateTime.Today);

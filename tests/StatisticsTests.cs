@@ -68,8 +68,7 @@ internal static class StatisticsTests
 
         string directory = Path.Combine(Path.GetTempPath(), "StatisticsTests-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(directory);
         string file = Path.Combine(directory, "stats.txt");
-        typeof(Store).GetField("Dir", BindingFlags.NonPublic | BindingFlags.Static).SetValue(null, directory);
-        typeof(Store).GetField("FilePath", BindingFlags.NonPublic | BindingFlags.Static).SetValue(null, file);
+        Store.DataDirectory = directory;
         try
         {
             day.Sessions.Add(newer); Store.Save(); Store.History.Clear(); Store.RollDay(DateTime.Today); Store.AllTimePeakApm = 0; Store.Load();

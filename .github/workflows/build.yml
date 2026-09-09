@@ -37,7 +37,7 @@ jobs:
           if ($assembly.GetManifestResourceNames().Count -ne 0) { throw "Clean edition contains embedded managed resources." }
           # Read the expected version from its single source so a release no longer
           # requires editing this workflow by hand.
-          $expected = (Select-String -Path AssemblyInfo.cs -Pattern 'AssemblyFileVersion\("([\d.]+)"\)').Matches[0].Groups[1].Value
+          $expected = (Select-String -Path Version.cs -Pattern 'FileVersion = "([\d.]+)"').Matches[0].Groups[1].Value
           if ($file.VersionInfo.FileVersion -ne $expected) { throw "Clean edition reports $($file.VersionInfo.FileVersion) but AssemblyInfo.cs declares $expected." }
 
       - name: Upload executables

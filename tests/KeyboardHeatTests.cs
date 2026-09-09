@@ -34,8 +34,7 @@ internal static class KeyboardHeatTests
         tracker.Reset();tracker.Process(Native.WM_KEYDOWN,97,79,0,out first);
         tracker.Process(Native.WM_KEYUP,35,79,0);tracker.Process(Native.WM_KEYDOWN,97,79,0,out first);Check(first,"NumLock changes VK during release");
         string dir=Path.Combine(Path.GetTempPath(),"KeyboardHeatTests-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(dir);
-        typeof(Store).GetField("Dir",BindingFlags.NonPublic|BindingFlags.Static).SetValue(null,dir);
-        typeof(Store).GetField("FilePath",BindingFlags.NonPublic|BindingFlags.Static).SetValue(null,Path.Combine(dir,"stats.txt"));
+        Store.DataDirectory = dir;
         try
         {
             Store.History.Clear();Store.Total=new Counters();Store.RollDay(DateTime.Today);

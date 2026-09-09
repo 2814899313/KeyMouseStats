@@ -43,7 +43,7 @@ internal static class Release100Tests
         Store.Today.Keys=10000;Check(!DailySignal.Calculate(DateTime.Today).High,"partial today never anomalous");Store.History.Clear();Store.History[day.Date]=day;Check(!DailySignal.Calculate(day.Date.AddDays(-1)).High,"missing day not anomalous");
         // Full application persistence, isolated from real user data.
         string folder=Path.Combine(Path.GetTempPath(),"Release100-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(folder);string file=Path.Combine(folder,"stats.txt");
-        typeof(Store).GetField("Dir",BindingFlags.Static|BindingFlags.NonPublic).SetValue(null,folder);typeof(Store).GetField("FilePath",BindingFlags.Static|BindingFlags.NonPublic).SetValue(null,file);
+        Store.DataDirectory = folder;
         try
         {
             Store.History.Clear();Store.RollDay(DateTime.Today);DayRecord saved=Store.Today;saved.Keys=120;saved.ActiveSeconds=2;
@@ -62,7 +62,7 @@ internal static class Release100Tests
         for(int i=0;i<100000;i++)fast.Move(performance,i/8,1,1,i%3-1,1600);
         watch.Stop();Check(performance.Cross.Packets==100000,"high polling preserves packet count");
         Console.WriteLine("100,000 vector packets: "+watch.Elapsed.TotalMilliseconds.ToString("0.0")+" ms (synthetic 8 kHz timestamps)");
-        Check(typeof(CrossDay).Assembly.GetName().Version.ToString()=="1.7.1.0","release assembly version");
+        Check(typeof(CrossDay).Assembly.GetName().Version.ToString()==BuildInfo.FileVersion,"release assembly version");
         Console.WriteLine("PASS: "+checks+" release 1.0.0 attribution / vector / semantics / anomaly / persistence checks");
     }
 }

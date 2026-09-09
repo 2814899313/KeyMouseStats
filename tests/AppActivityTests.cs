@@ -125,8 +125,7 @@ internal static class AppActivityTests
         string directory = Path.Combine(Path.GetTempPath(), "AppActivityTests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         string file = Path.Combine(directory, "stats.txt");
-        typeof(Store).GetField("Dir", BindingFlags.Static | BindingFlags.NonPublic).SetValue(null, directory);
-        typeof(Store).GetField("FilePath", BindingFlags.Static | BindingFlags.NonPublic).SetValue(null, file);
+        Store.DataDirectory = directory;
         try
         {
             Store.Save(); Reset(); Store.Load();
