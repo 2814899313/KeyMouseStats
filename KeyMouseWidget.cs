@@ -211,9 +211,22 @@ namespace KeyMouseStats
     internal static class Store
     {
         private const int KeepDays = 365;
-        private static readonly string Dir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "键鼠统计");
-        private static readonly string FilePath = Path.Combine(Dir, "stats.txt");
+        private static string Dir = DefaultDirectory();
+        private static string FilePath = Path.Combine(Dir, "stats.txt");
+
+        private static string DefaultDirectory()
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "键鼠统计");
+        }
+
+        /// <summary>
+        /// 数据目录。仅供测试在首次读写之前重定向到自己的临时目录,产品代码不要修改。
+        /// </summary>
+        internal static string DataDirectory
+        {
+            get { return Dir; }
+            set { Dir = value; FilePath = Path.Combine(value, "stats.txt"); }
+        }
 
         public static Dictionary<DateTime, DayRecord> History = new Dictionary<DateTime, DayRecord>();
         public static DayRecord Today = new DayRecord();
@@ -470,13 +483,104 @@ namespace KeyMouseStats
             return double.IsNaN(value) || double.IsInfinity(value) || value < 0 ? 0 : value;
         }
 
+        // ---------------------------------------------------------------- 保存
+        // 序列化在调用线程完成(它读取的是活动中的记录对象),落盘可以交给后台线程。
+        // 每个快照带一个递增序号:旧快照永远不能覆盖新快照,后台写入也不会与同步写入交错。
+        private static readonly object WriteGate = new object(), FileGate = new object();
+        private static string _pendingText;
+        private static long _pendingSequence, _saveSequence, _writtenSequence;
+        private static bool _writerActive;
+
+        /// <summary>同步保存:返回时文件已落盘。设置对话框与测试使用。</summary>
         public static void Save()
         {
-            try
+            string text = Prepare();
+            if (text == null) return;
+            long sequence;
+            lock (WriteGate)
             {
-                Prune();
-                if (!Directory.Exists(Dir)) Directory.CreateDirectory(Dir);
-                StringBuilder sb = new StringBuilder();
+                sequence = ++_saveSequence;
+                _pendingText = null;   // 同步写入的状态不旧于任何待写快照
+            }
+            WriteSnapshot(text, sequence);
+        }
+
+        /// <summary>异步保存:序列化仍在调用线程完成,写盘交给后台线程,不阻塞输入处理。</summary>
+        public static void SaveAsync()
+        {
+            string text = Prepare();
+            if (text == null) return;
+            lock (WriteGate)
+            {
+                _pendingText = text;
+                _pendingSequence = ++_saveSequence;
+                if (_writerActive) return;   // 已有写入线程会取走这份最新快照
+                _writerActive = true;
+            }
+            ThreadPool.QueueUserWorkItem(WriteWorker);
+        }
+
+        /// <summary>等待后台写入完成,超时返回 false。退出前调用。</summary>
+        public static bool Flush(int timeoutMs)
+        {
+            DateTime deadline = DateTime.UtcNow.AddMilliseconds(Math.Max(0, timeoutMs));
+            for (; ; )
+            {
+                lock (WriteGate) { if (_pendingText == null && !_writerActive) return true; }
+                if (DateTime.UtcNow > deadline) return false;
+                Thread.Sleep(5);
+            }
+        }
+
+        private static string Prepare()
+        {
+            try { Prune(); return Serialize(); }
+            catch { return null; }
+        }
+
+        private static void WriteWorker(object state)
+        {
+            for (; ; )
+            {
+                string text;
+                long sequence;
+                lock (WriteGate)
+                {
+                    text = _pendingText;
+                    sequence = _pendingSequence;
+                    _pendingText = null;
+                    if (text == null) { _writerActive = false; return; }
+                }
+                WriteSnapshot(text, sequence);
+            }
+        }
+
+        private static void WriteSnapshot(string text, long sequence)
+        {
+            // 状态锁只保护计数与待写快照;真正写盘用独立的 FileGate,
+            // 这样 UI 线程排队保存时不会等在前一次磁盘写入后面。
+            lock (FileGate)
+            {
+                lock (WriteGate)
+                {
+                    if (sequence <= _writtenSequence) return;   // 更新的快照已经落盘
+                    _writtenSequence = sequence;
+                }
+                try
+                {
+                    if (!Directory.Exists(Dir)) Directory.CreateDirectory(Dir);
+                    string tmp = FilePath + ".tmp";
+                    File.WriteAllText(tmp, text, Encoding.UTF8);
+                    if (File.Exists(FilePath)) File.Replace(tmp, FilePath, FilePath + ".bak");
+                    else File.Move(tmp, FilePath);
+                }
+                catch { }
+            }
+        }
+
+        private static string Serialize()
+        {
+            StringBuilder sb = new StringBuilder();
                 sb.AppendLine("# 键鼠统计数据文件 v10 / 正式版 1.4.0（多日曲线 / 交叉归因）");
                 sb.AppendLine("shortcut_model_v1="+ShortcutSavings.EncodeModel());
                 sb.AppendLine("idle_threshold=" + IdleThresholdSeconds.ToString(CultureInfo.InvariantCulture));
@@ -531,12 +635,7 @@ namespace KeyMouseStats
                     CrossTelemetry.Save(sb,r);
                 }
 
-                string tmp = FilePath + ".tmp";
-                File.WriteAllText(tmp, sb.ToString(), Encoding.UTF8);
-                if (File.Exists(FilePath)) File.Replace(tmp, FilePath, FilePath + ".bak");
-                else File.Move(tmp, FilePath);
-            }
-            catch { }
+                return sb.ToString();
         }
 
         private static void AppendTotals(StringBuilder sb, Counters c)
@@ -795,7 +894,7 @@ namespace KeyMouseStats
                 finally { _distanceSettings = null; }
             }
             MarkDirty();
-            SaveNow();
+            SaveNow(true);   // 用户刚改完 DPI/校准,等它真正落盘
         }
 
         protected override CreateParams CreateParams
@@ -1358,7 +1457,7 @@ namespace KeyMouseStats
 
             if (Store.Day != DateTime.Today)
             {
-                Store.Save();
+                Store.SaveAsync();   // 序列化已捕获昨天,滚动日期不会影响它
                 Store.RollDay(DateTime.Today);
                 _dirtySave = true;
                 _dirtyUI = true;
@@ -1368,23 +1467,28 @@ namespace KeyMouseStats
                 _dirtyUI = false;
                 Invalidate();
             }
-            if (_dirtySave && (DateTime.Now - _lastSave).TotalSeconds >= 3)
+            // 保存间隔决定磁盘写入量:每次保存都会重写整份历史(含 .bak)。
+            // 30 秒意味着崩溃最多丢失 30 秒计数,写入量约为原来每 3 秒保存的十分之一。
+            if (_dirtySave && (DateTime.Now - _lastSave).TotalSeconds >= SaveIntervalSeconds)
             {
-                SaveNow();
+                SaveNow(false);
             }
         }
 
-        private void SaveNow()
+        private const int SaveIntervalSeconds = 30;
+
+        private void SaveNow(bool waitForDisk)
         {
             _lastSave = DateTime.Now;
             _dirtySave = false;
-            Store.Save();
+            Store.SaveAsync();
+            if (waitForDisk) Store.Flush(3000);
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             base.OnFormClosing(e);
-            SaveNow();
+            SaveNow(true);
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
