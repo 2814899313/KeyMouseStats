@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -125,6 +126,12 @@ namespace KeyMouseStats
         }
         private static void Fill(Graphics g,Color color,float x,float y,float w,float h)
         {if(w>0&&h>0)using(SolidBrush brush=new SolidBrush(color))g.FillRectangle(brush,x,y,w,h);}
+        internal void RenderTo(Graphics g,float scale)
+        {
+            float previous=UiScale;UiScale=scale;
+            try{using(PaintEventArgs args=new PaintEventArgs(g,new Rectangle(0,0,Math.Max(1,(int)(ClientSize.Width*scale)),Math.Max(1,(int)(ClientSize.Height*scale)))))OnPaint(args);}
+            finally{UiScale=previous;}
+        }
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g=e.Graphics;float scale=UiScale>0?UiScale:g.DpiX/96f;g.ScaleTransform(scale,scale);float width=ClientSize.Width/scale;
@@ -363,6 +370,41 @@ namespace KeyMouseStats
                 using(SaveFileDialog dialog=new SaveFileDialog{Title="导出当前报告明细",Filter="CSV 文件 (*.csv)|*.csv",FileName="统计报告_"+reportDate.ToString("yyyyMMdd")+"_"+ReportDesign.Names[_tabs.SelectedIndex]+".csv",DefaultExt="csv",AddExtension=true})
                 {if(dialog.ShowDialog(this)!=DialogResult.OK)return;File.WriteAllText(dialog.FileName,csv,new UTF8Encoding(true));_feedback.Text="当前页明细已导出";}
 
+            }
+            catch (Exception ex) { ThemeMessage.Show(this, ex.Message, "导出失败"); }
+        }
+        /// <summary>把当前页图表渲染成 scale 倍尺寸,供 PNG 导出使用。</summary>
+        private void ExportImage()
+        {
+            try
+            {
+                ReportPage page = _tabs.SelectedTab;
+                if (page == null || page.Chart == null || page.Chart.Width <= 0 || page.Chart.Height <= 0) return;
+                Control chart = page.Chart;
+                const float scale = 2f;
+                DateTime reportDate = _tabs.SelectedIndex == 4 ? DateTime.Today : _date;
+                using (Bitmap bitmap = new Bitmap(Math.Max(1, (int)(chart.Width * scale)), Math.Max(1, (int)(chart.Height * scale))))
+                {
+                    bitmap.SetResolution(96f * scale, 96f * scale);
+                    using (Graphics graphics = Graphics.FromImage(bitmap))
+                    {
+                        ReportVisual habit = chart as ReportVisual;
+                        CrossReportVisual cross = chart as CrossReportVisual;
+                        WeeklyReportVisual week = chart as WeeklyReportVisual;
+                        RhythmReportVisual rhythm = chart as RhythmReportVisual;
+                        if (habit != null) habit.RenderTo(graphics, scale);
+                        else if (cross != null) cross.RenderTo(graphics, scale);
+                        else if (week != null) week.RenderTo(graphics, scale);
+                        else if (rhythm != null) rhythm.RenderTo(graphics, scale);
+                        else chart.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size));
+                    }
+                    using (SaveFileDialog dialog = new SaveFileDialog { Title = "导出当前页图表", Filter = "PNG 图片 (*.png)|*.png", FileName = "统计报告_" + reportDate.ToString("yyyyMMdd") + "_" + ReportDesign.Names[_tabs.SelectedIndex] + ".png", DefaultExt = "png", AddExtension = true })
+                    {
+                        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                        bitmap.Save(dialog.FileName, ImageFormat.Png);
+                        _feedback.Text = "当前页图片已导出";
+                    }
+                }
             }
             catch (Exception ex) { ThemeMessage.Show(this, ex.Message, "导出失败"); }
         }

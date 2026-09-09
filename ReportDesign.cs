@@ -10,8 +10,8 @@ namespace KeyMouseStats
 {
     internal static class ReportDesign
     {
-        public static readonly string[] Names={"输入习惯","每日趋势","应用时间","使用节奏","实时状态","应用时段","应用操作","会话应用","鼠标动作","键位分布","快捷键节省"};
-        public static readonly string[] Scope={"操作强度描述使用方式，不代表工作效率。","今日只展示已累计部分；缺失日期不补零。","按活跃观测归因，无法识别的时间单独保留。","连续使用段包含空闲阈值内的短暂停顿。","APM = 最近 60 秒击键与点击；下图观察最近 5 分钟。","只展示实际观测到的应用时间，不从旧汇总反推。","比较各应用的输入构成，不将滚轮次数视为距离。","每一段独立分析，不按全天占比分摊应用时间。","方向和快速移动是行为描述，不推断左右手或操作效果。","按默认键位分组，不代表这些按键用于游戏。","情景估算，不是实际测得的省时；点击「模型」调整假设。"};
+        public static readonly string[] Names={"输入习惯","每日趋势","应用时间","使用节奏","实时状态","应用时段","应用操作","会话应用","鼠标动作","键位分布","快捷键节省","本周回顾","星期节律"};
+        public static readonly string[] Scope={"操作强度描述使用方式，不代表工作效率。","今日只展示已累计部分；缺失日期不补零。","按活跃观测归因，无法识别的时间单独保留。","连续使用段包含空闲阈值内的短暂停顿。","APM = 最近 60 秒击键与点击；下图观察最近 5 分钟。","只展示实际观测到的应用时间，不从旧汇总反推。","比较各应用的输入构成，不将滚轮次数视为距离。","每一段独立分析，不按全天占比分摊应用时间。","方向和快速移动是行为描述，不推断左右手或操作效果。","按默认键位分组，不代表这些按键用于游戏。","情景估算，不是实际测得的省时；点击「模型」调整假设。","只比较完整日合计，今日未结束不参与。","按星期聚合，样本天数决定结果可信度。"};
         public static readonly string[] Metrics={"每次点击的击键数","每秒活跃击键","每分钟活跃点击","每次操作移动","每分钟滚轮事件","组合键使用占比"};
         public static readonly string[] Units={"次击键 / 点击","次 / 活跃秒","次 / 活跃分钟","厘米 / 操作","次 / 活跃分钟","%"};
         public static readonly string[] Definitions={
@@ -127,7 +127,7 @@ namespace KeyMouseStats
         private readonly ReportHeader _header=new ReportHeader();private readonly FlowLayoutPanel _navigation=new FlowLayoutPanel{FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoScroll=true};
         private readonly Button _compact=new Button{FlatStyle=FlatStyle.Flat,TextAlign=ContentAlignment.MiddleLeft,Cursor=Cursors.Hand};
         private readonly ContextMenuStrip _navMenu=new ContextMenuStrip();
-        private readonly Button _export=new Button{Text="导出 CSV"},_copy=new Button{Text="复制指标"},_help=new Button{Text="说明"},_refresh=new Button{Text="刷新"};
+        private readonly Button _export=new Button{Text="导出 CSV"},_image=new Button{Text="导出图片"},_copy=new Button{Text="复制指标"},_help=new Button{Text="说明"},_refresh=new Button{Text="刷新"};
         private readonly Label _feedback=new Label();private readonly List<Button> _navButtons=new List<Button>();
         private ListView _live;private float _scale=1;private bool _ready,_reportStyled;
         public StatisticsReport(DateTime date,int initialTab=0)
@@ -135,16 +135,16 @@ namespace KeyMouseStats
             _date=date.Date;Text="统计报告";Font=new Font("Microsoft YaHei UI",10f);AutoScaleMode=AutoScaleMode.None;
             ClientSize=new Size(1140,800);MinimumSize=new Size(720,480);StartPosition=FormStartPosition.CenterParent;ShowInTaskbar=false;KeyPreview=true;DoubleBuffered=true;
             _feedback.Visible=false;_feedback.TextChanged+=delegate{_feedback.Visible=!string.IsNullOrEmpty(_feedback.Text);};
-            Controls.AddRange(new Control[]{_header,_navigation,_tabs,_compact,_export,_copy,_help,_refresh,_feedback});
-            _header.Controls.AddRange(new Control[]{_feedback,_compact,_export,_copy,_help,_refresh});
+            Controls.AddRange(new Control[]{_header,_navigation,_tabs,_compact,_export,_image,_copy,_help,_refresh,_feedback});
+            _header.Controls.AddRange(new Control[]{_feedback,_compact,_export,_image,_copy,_help,_refresh});
             _navMenu.Renderer=new ToolStripProfessionalRenderer(new NikkiMenuColors());
             for(int i=0;i<ReportDesign.Names.Length;i++){int index=i;ToolStripMenuItem item=new ToolStripMenuItem(ReportDesign.Names[i]);item.Click+=delegate{_tabs.SelectedIndex=index;};_navMenu.Items.Add(item);}
             _compact.Click+=delegate{ArtTheme t=ArtTheme.Current;_navMenu.BackColor=t.Card;_navMenu.ForeColor=t.Text;for(int i=0;i<_navMenu.Items.Count;i++){ToolStripMenuItem item=(ToolStripMenuItem)_navMenu.Items[i];item.Checked=i==_tabs.SelectedIndex;item.ForeColor=t.Text;}_navMenu.Show(_compact,new Point(0,_compact.Height));};
             _tabs.SelectedIndexChanged+=delegate{UpdateSelection();};
-            _export.Click+=delegate{Export();};_copy.Click+=delegate{CopyMetric();};_help.Click+=delegate{if(_tabs.SelectedTab!=null){_tabs.SelectedTab.HelpOpen=!_tabs.SelectedTab.HelpOpen;_tabs.PerformLayout();}};
+            _export.Click+=delegate{Export();};_image.Click+=delegate{ExportImage();};_copy.Click+=delegate{CopyMetric();};_help.Click+=delegate{if(_tabs.SelectedTab!=null){_tabs.SelectedTab.HelpOpen=!_tabs.SelectedTab.HelpOpen;_tabs.PerformLayout();}};
             _refresh.Click+=delegate{int index=_tabs.SelectedIndex;if(index==10)using(ShortcutSavingsSettings settings=new ShortcutSavingsSettings()){if(settings.ShowDialog(this)!=DialogResult.OK)return;}bool details=_tabs.SelectedTab.DetailsOpen,help=_tabs.SelectedTab.HelpOpen;BuildPages();_tabs.SelectedIndex=index;_tabs.SelectedTab.DetailsOpen=details;_tabs.SelectedTab.HelpOpen=help;_tabs.PerformLayout();_feedback.Text="已刷新";};
-            foreach(Button button in new[]{_export,_copy,_help,_refresh}){button.FlatStyle=FlatStyle.Flat;button.Cursor=Cursors.Hand;}
-            BuildNavigation();BuildPages();_tabs.SelectedIndex=Math.Max(0,Math.Min(10,initialTab));
+            foreach(Button button in new[]{_export,_image,_copy,_help,_refresh}){button.FlatStyle=FlatStyle.Flat;button.Cursor=Cursors.Hand;}
+            BuildNavigation();BuildPages();_tabs.SelectedIndex=Math.Max(0,Math.Min(ReportDesign.Names.Length-1,initialTab));
             _timer.Tick+=delegate{if(Visible&&WindowState!=FormWindowState.Minimized&&_tabs.SelectedIndex==4){PopulateLiveRows();_tabs.SelectedTab.Chart.Invalidate();UpdateHeader();}};
             _timer.Start();_ready=true;
         }
@@ -153,11 +153,13 @@ namespace KeyMouseStats
             _tabs.ClearPages();_snapshot=DateTime.Now;
             PopulateRatios();PopulateChanges();PopulateApps();PopulateSessions();PopulateLive();
             for(int index=5;index<=10;index++){CrossReportData data=CrossReportData.Build(_date,index);ListView list=PageCore(data.Title,data.Note,data,data.Headings);foreach(string[] fields in data.Rows)Row(list,fields);}
+            WeeklyReportData week=WeeklyReportData.Build(_date);ListView weekList=PageCore(ReportDesign.Names[11],WeeklyReportData.Note,null,week.Headings);foreach(string[] fields in week.Rows)Row(weekList,fields);
+            RhythmReportData rhythm=RhythmReportData.Build(_date);ListView rhythmList=PageCore(ReportDesign.Names[12],RhythmReportData.Note,null,rhythm.Headings);foreach(string[] fields in rhythm.Rows)Row(rhythmList,fields);
             if(IsHandleCreated)foreach(ReportPage page in _tabs.TabPages)Style(page);
         }
         private void BuildNavigation()
         {
-            string[] groups={"时间与节奏","应用使用","输入方式"};int[][] ids={new[]{0,1,3,4},new[]{2,5,6,7},new[]{8,9,10}};
+            string[] groups={"时间与节奏","应用使用","输入方式","周期回顾"};int[][] ids={new[]{0,1,3,4},new[]{2,5,6,7},new[]{8,9,10},new[]{11,12}};
             for(int group=0;group<groups.Length;group++)
             {
                 _navigation.Controls.Add(new Label{Text=groups[group],Tag="group",TextAlign=ContentAlignment.MiddleLeft,Margin=new Padding(0,14,0,3)});
@@ -189,7 +191,7 @@ namespace KeyMouseStats
         {
             float s=_scale;bool compact=ClientSize.Width/s<1000;int header=(int)((compact?142:106)*s);ArtTheme t=ArtTheme.Current;BackColor=t.Background;
             _header.UiScale=s;_header.SetBounds(0,0,ClientSize.Width,header);
-            Button[] actions={_export,_copy,_help,_refresh};int[] widths={102,96,64,64};int right=ClientSize.Width-(int)(24*s);
+            Button[] actions={_export,_image,_copy,_help,_refresh};int[] widths={102,96,96,64,64};int right=ClientSize.Width-(int)(24*s);
             for(int i=0;i<actions.Length;i++){int w=(int)(widths[i]*s);right-=w;actions[i].SetBounds(right,(int)(25*s),w,(int)(33*s));right-=(int)(8*s);actions[i].ForeColor=i==0?t.OnAccent:t.Text;actions[i].BackColor=i==0?t.Accent:t.Card;actions[i].FlatAppearance.BorderColor=t.Line;}
             _navigation.Visible=!compact;_navigation.BackColor=t.Background;int nav=compact?0:(int)(178*s);
             _navigation.SetBounds((int)(20*s),header,Math.Max(1,nav-(int)(20*s)),ClientSize.Height-header-(int)(12*s));
@@ -204,7 +206,7 @@ namespace KeyMouseStats
             int index=_tabs.TabPages.Count;ReportPage page=new ReportPage{Text=title,Note=note,Index=index};_tabs.AddPage(page);
             ReportList list=new ReportList{View=View.Details,FullRowSelect=true,HideSelection=false,ShowItemToolTips=true,BorderStyle=BorderStyle.None};
             foreach(string heading in headings)list.Columns.Add(heading,180);
-            Control chart=index<5?(Control)new ReportVisual(_date,index):new CrossReportVisual(_date,index,snapshot);
+            Control chart;if(index<5)chart=new ReportVisual(_date,index);else if(index==11)chart=new WeeklyReportVisual(_date);else if(index==12)chart=new RhythmReportVisual(_date);else chart=new CrossReportVisual(_date,index,snapshot);
             page.List=list;page.Chart=chart;page.Controls.Add(list);page.Controls.Add(chart);
             ReportVisual visual=chart as ReportVisual;if(visual!=null)visual.MetricSelected+=delegate{list.SelectedItems.Clear();_copy.Enabled=true;_feedback.Text="已选中指标 · Ctrl+C 复制";};
             list.SelectedIndexChanged+=delegate{_copy.Enabled=true;};

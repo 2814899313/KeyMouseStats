@@ -132,6 +132,12 @@ namespace KeyMouseStats
         private static void TextAt(Graphics g,string text,Font font,Color color,RectangleF rect)
         {using(SolidBrush brush=new SolidBrush(color))using(StringFormat format=new StringFormat{Trimming=StringTrimming.EllipsisCharacter,FormatFlags=StringFormatFlags.NoWrap})g.DrawString(text??"",font,brush,rect,format);}
         private static void Fill(Graphics g,Color color,RectangleF rect){if(rect.Width>0&&rect.Height>0)using(SolidBrush b=new SolidBrush(color))g.FillRectangle(b,rect);}
+        internal void RenderTo(Graphics g,float scale)
+        {
+            float previous=UiScale;UiScale=scale;
+            try{using(PaintEventArgs args=new PaintEventArgs(g,new Rectangle(0,0,Math.Max(1,(int)(ClientSize.Width*scale)),Math.Max(1,(int)(ClientSize.Height*scale)))))OnPaint(args);}
+            finally{UiScale=previous;}
+        }
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g=e.Graphics;float scale=UiScale>0?UiScale:g.DpiX/96f;DeviceScale=scale;g.ScaleTransform(scale,scale);float w=ClientSize.Width/scale;

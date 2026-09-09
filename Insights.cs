@@ -53,6 +53,7 @@ namespace KeyMouseStats
         private void ApplyInsightChip(int id)
         {
             if (id == 203) { using (StatisticsReport report = new StatisticsReport(_insightDay)) report.ShowDialog(this); return; }
+            if (id == 204) { using (StatisticsReport report = new StatisticsReport(_insightDay, 11)) report.ShowDialog(this); return; }
             if (id >= 200 && id <= 202) { _tab = TabId.Insights; _insightView = id - 200; }
             if (id == 210 || id == 211) _calendarMetric = id - 210;
             if (id == 220) _insightDay = _insightDay.AddDays(-1);
@@ -90,6 +91,7 @@ namespace KeyMouseStats
             string[] names = { "年度日历", "会话时间轴", "七日节奏" };
             for (int i = 0; i < 3; i++) AppChip(g, 200 + i, Cx + i * 114, 98, 104, names[i], _insightView == i);
             AppChip(g, 203, Cx + 354, 98, 112, "统计报告", false);
+            AppChip(g, 204, Cx + 474, 98, 118, "本周回顾", false);
             if (_insightView == 0) PaintCalendar(g);
             else if (_insightView == 1) PaintSessionTimeline(g);
             else PaintWeekActivity(g);
