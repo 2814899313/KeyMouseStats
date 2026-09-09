@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build release executable
+        shell: cmd
+        run: build.bat
+
+      - name: Build clean edition
+        shell: cmd
+        run: build-clean.bat
+
+      # A tag is the release contract: the built binaries must agree with it.
+      # This replaces the hardcoded version string that has to be edited by hand
+      # in the build workflow on every release.
+      - name: Verify the tag matches the built version
+        shell: powershell
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $expected = $tag.TrimStart('v') + ".0"
+          $full = (Get-Item KeyMouseStats.exe).VersionInfo.FileVersion
+          $clean = (Get-Item KeyMouseStats.Clean.exe).VersionInfo.FileVersion
+          if ($full -ne $expected) { throw "KeyMouseStats.exe reports $full but tag $tag expects $expected." }
+          if ($clean -ne $expected) { throw "KeyMouseStats.Clean.exe reports $clean but tag $tag expects $expected." }
+          Write-Host "version check passed: $expected"
+
+      - name: Verify clean edition
+        shell: powershell
+        run: |
+          $file = Get-Item KeyMouseStats.Clean.exe
+          if ($file.Length -gt 2MB) { throw "Clean edition unexpectedly exceeds 2 MiB." }
+          $assembly = [Reflection.Assembly]::LoadFile($file.FullName)
+          if ($assembly.GetManifestResourceNames().Count -ne 0) { throw "Clean edition contains embedded managed resources." }
+
+      # docs/releases/<tag>.md is the release note; fall back to a one-line body
+      # so a missing note never blocks a release.
+      - name: Compose release notes
+        shell: powershell
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $note = "docs/releases/$tag.md"
+          if (Test-Path $note) { Copy-Item $note release-body.md } else { "KeyMouseStats $tag" | Set-Content -Encoding UTF8 release-body.md }
+
+      # Uses the gh CLI that ships with the runner and the built-in token,
+      # so the project keeps its no-third-party-dependency habit.
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" KeyMouseStats.exe KeyMouseStats.Clean.exe --title "KeyMouseStats ${{ github.ref_name }}" --notes-file release-body.md
