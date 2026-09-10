@@ -179,7 +179,7 @@ internal static class RangeReportTests
         // ---- 按键时长 ----
         HoldReportData hold = HoldReportData.Build(rangeStart, rangeEnd);
         Check(hold.Samples == 600 + 7, "hold samples aggregate over the range and include today");
-        Check(hold.Caption.Contains("含今日"), "hold page states that today is included");
+        Check(hold.Caption.Contains("今日（进行中）"), "hold page states that today is appended");
         Check(hold.Keys == expectedCurrent + 999999, "coverage denominator includes today");
         long bucketTotal = 0;
         foreach (long value in hold.Buckets) bucketTotal += value;
@@ -192,7 +192,7 @@ internal static class RangeReportTests
         // ---- 应用 × 键位 ----
         AppKeyReportData appKey = AppKeyReportData.Build(rangeStart, rangeEnd);
         Check(appKey.AttributedKeys == expectedCurrent + 40, "app key groups aggregate by process and include today");
-        Check(appKey.Caption.Contains("含今日"), "app key page states that today is included");
+        Check(appKey.Caption.Contains("今日（进行中）"), "app key page states that today is appended");
         Check(appKey.Groups.Count == 1, "one recorded app");
         Check(appKey.Groups[0][0] + appKey.Groups[0][4] == appKey.AttributedKeys, "group counts conserve the attributed keys");
         Check(appKey.Headings.Length == 7, "app key table has six group columns");
