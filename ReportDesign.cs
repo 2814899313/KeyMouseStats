@@ -69,7 +69,7 @@ namespace KeyMouseStats
             }
             ReportVisual visual=Chart as ReportVisual;if(visual!=null)visual.UiScale=scale;
             CrossReportVisual cross=Chart as CrossReportVisual;if(cross!=null)cross.UiScale=scale;
-            int chartHeight=(int)(scale*(Index==0?ReportVisual.HabitHeight(width/scale):Index==7?325:Index==13?430:Index==15?432:Index==14?330:300));
+            int chartHeight=(int)(scale*(Index==0?ReportVisual.HabitHeight(width/scale):Index==7?325:Index==13?430:Index==15?432:Index==14?392:300));
             Chart.SetBounds(0,y,width,chartHeight);y+=chartHeight+gap;
             details.Text=(DetailsOpen?"▾ 收起明细":"▸ 查看明细")+"   ·   "+List.Items.Count+" 项";
             details.ForeColor=t.Accent;details.BackColor=t.Card;details.FlatAppearance.BorderColor=t.Line;

@@ -130,6 +130,16 @@ namespace KeyMouseStats
             return FormatSeconds(Edges[index - 1]) + " — " + FormatSeconds(Edges[index]);
         }
 
+        /// <summary>坐标轴用的紧凑标签;悬停仍用完整说明。</summary>
+        public static string BucketLabelShort(int index)
+        {
+            if (index == 0) return "<50";
+            if (index < 0 || index >= BucketCount) return "";
+            if (index == BucketCount - 1) return "≥5s";
+            double low = Edges[index - 1], high = Edges[index];
+            if (high <= 500) return low.ToString("0", CultureInfo.InvariantCulture) + "-" + high.ToString("0", CultureInfo.InvariantCulture);
+            return (low / 1000).ToString("0.#", CultureInfo.InvariantCulture) + "-" + (high / 1000).ToString("0.#", CultureInfo.InvariantCulture) + "s";
+        }
         private static string FormatSeconds(double milliseconds)
         {
             return milliseconds < 1000

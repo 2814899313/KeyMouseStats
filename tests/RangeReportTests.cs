@@ -219,7 +219,7 @@ internal static class RangeReportTests
         }
         using (HoldReportVisual holdVisual = new HoldReportVisual(rangeStart, rangeEnd))
         {
-            holdVisual.Size = new Size(1000, 330);
+            holdVisual.Size = new Size(1000, 392);
             RenderAndCheck(holdVisual, "press-duration", 1f);
             RenderAndCheck(holdVisual, "press-duration-150", 1.5f);
         }

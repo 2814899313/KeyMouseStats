@@ -188,7 +188,9 @@ namespace KeyMouseStats
 
                 // ---- 左:八档直方图 ----
                 float half = (w - 44) / 2f;
-                TextAt(g, "按住时长分布", small, t.Text, new RectangleF(14, 114, half, 18));
+                long bucketPeak = 1;
+                foreach (long value in data.Buckets) bucketPeak = Math.Max(bucketPeak, value);
+                TextAt(g, "按住时长分布 · 最大 " + bucketPeak + " 次", small, t.Text, new RectangleF(14, 114, half, 18));
                 long maximum = 1;
                 foreach (long value in data.Buckets) maximum = Math.Max(maximum, value);
                 float histogramTop = 140, histogramBottom = 250, histogramLeft = 24;
@@ -199,13 +201,14 @@ namespace KeyMouseStats
                     float height = (float)data.Buckets[i] / maximum * (histogramBottom - histogramTop);
                     RectangleF bar = new RectangleF(histogramLeft + i * step + 1, histogramBottom - height, Math.Max(2, step - 4), height);
                     Fill(g, ArtTheme.Mix(t.Card, t.Accent, .55), bar);
-                    TextAt(g, HoldTracker.BucketLabel(i).Replace(" ms", "").Replace(" s", "s"), small, t.Muted,
-                        new RectangleF(histogramLeft + i * step - 10, histogramBottom + 2, step + 20, 18));
+                    using (StringFormat centered = new StringFormat { Alignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap })
+                    using (SolidBrush label = new SolidBrush(t.Muted))
+                        g.DrawString(HoldTracker.BucketLabelShort(i), small, label,
+                            new RectangleF(histogramLeft + i * step - 4, histogramBottom + 2, step + 8, 18), centered);
                     targets.Add(new KeyValuePair<RectangleF, string>(new RectangleF(histogramLeft + i * step, histogramTop, step, histogramBottom - histogramTop),
                         HoldTracker.BucketLabel(i) + " · " + data.Buckets[i] + " 次"));
                 }
                 using (Pen axis = new Pen(t.Line)) g.DrawLine(axis, histogramLeft, histogramBottom, histogramLeft + half - 20, histogramBottom);
-                TextAt(g, "最大 " + maximum + " 次", small, t.Muted, new RectangleF(24, 268, half, 18));
 
                 // ---- 右:每键平均时长排行 ----
                 float right = half + 30;
@@ -235,7 +238,7 @@ namespace KeyMouseStats
                         g.DrawRectangle(outline, r.X, r.Y, Math.Max(2, r.Width), r.Height);
                     }
                 TextAt(g, hover >= 0 && hover < targets.Count ? targets[hover].Value : data.Footer, small, t.Muted,
-                    new RectangleF(14, 292, w - 28, 20));
+                    new RectangleF(14, 358, w - 28, 20));
             }
         }
     }
