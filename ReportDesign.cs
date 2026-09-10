@@ -142,7 +142,7 @@ namespace KeyMouseStats
         private ListView _live;private float _scale=1;private bool _ready,_reportStyled;
         public StatisticsReport(DateTime date,int initialTab=0)
         {
-            _date=date.Date;Text="统计报告";Font=new Font("Microsoft YaHei UI",10f);AutoScaleMode=AutoScaleMode.None;
+            _date=date.Date;Program.LogStall("统计报告 打开 tab=" + initialTab, 0);Font=new Font("Microsoft YaHei UI",10f);AutoScaleMode=AutoScaleMode.None;
             ClientSize=new Size(1140,800);MinimumSize=new Size(720,480);StartPosition=FormStartPosition.CenterParent;ShowInTaskbar=false;KeyPreview=true;DoubleBuffered=true;
             _feedback.Visible=false;_feedback.TextChanged+=delegate{_feedback.Visible=!string.IsNullOrEmpty(_feedback.Text);};
             Controls.AddRange(new Control[]{_header,_navigation,_tabs,_compact,_export,_copy,_help,_refresh,_feedback});
@@ -329,6 +329,6 @@ namespace KeyMouseStats
             try{Clipboard.SetText(text);_feedback.Text="指标已复制";}catch(System.Runtime.InteropServices.ExternalException){_feedback.Text="剪贴板忙，请重试";}
         }
         protected override void OnKeyDown(KeyEventArgs e){base.OnKeyDown(e);if(e.Control&&e.KeyCode==Keys.C){CopyMetric();e.Handled=true;e.SuppressKeyPress=true;}if(e.KeyCode==Keys.Escape)Close();}
-        protected override void Dispose(bool disposing){if(disposing){_timer.Dispose();_navMenu.Dispose();}base.Dispose(disposing);}
+        protected override void Dispose(bool disposing){if(disposing){Program.LogStall("统计报告 关闭", 0);_timer.Dispose();_navMenu.Dispose();_exportMenu.Dispose();}base.Dispose(disposing);}
     }
 }

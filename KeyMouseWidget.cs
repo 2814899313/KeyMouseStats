@@ -66,6 +66,22 @@ namespace KeyMouseStats
             GC.KeepAlive(mutex);
             GC.KeepAlive(dashEvent);
         }
+        /// <summary>UI 线程停顿与关键动作的诊断记录(仅追加一行,超过 256 KB 轮换)。</summary>
+        internal static void LogStall(string context, double seconds)
+        {
+            try
+            {
+                lock (LogGate)
+                {
+                    string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KeyMouseStats");
+                    Directory.CreateDirectory(folder);
+                    string path = Path.Combine(folder, "ui-stalls.log");
+                    if (File.Exists(path) && new FileInfo(path).Length > 262144) File.Delete(path);
+                    File.AppendAllText(path, DateTime.Now.ToString("HH:mm:ss.fff") + "  +" + seconds.ToString("0.0", CultureInfo.InvariantCulture) + "s  " + context + Environment.NewLine);
+                }
+            }
+            catch { }
+        }
         private static readonly object LogGate=new object();
         internal static void LogFailure(string context,Exception error)
         {
@@ -999,6 +1015,7 @@ namespace KeyMouseStats
                     _dash = new Dashboard();
                     _dash.Owner = this;
                 }
+                Program.LogStall("面板 显示", 0);
                 if (_dash.Visible) _dash.Activate();
                 else _dash.Show();
                 _dash.BringToFront();
@@ -1677,6 +1694,7 @@ namespace KeyMouseStats
         // ---------------------------------------------------------------- 定时 / 生命周期
 
         private int _artRevision;
+        private long _lastTickStamp;
         private void OnTick(object sender, EventArgs e)
         {
             int revision=System.Threading.Volatile.Read(ref ThemeImages.Revision);
@@ -1685,6 +1703,15 @@ namespace KeyMouseStats
                 _artRevision=revision;RefreshTheme();
                 foreach(Form form in Application.OpenForms)if(form.Visible)form.Invalidate();
             }
+            // UI 线程停顿探针:定时器每 250 ms 触发,间隔异常说明界面被阻塞。
+            long nowTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+            if (_lastTickStamp != 0)
+            {
+                double gap = (nowTicks - _lastTickStamp) / (double)System.Diagnostics.Stopwatch.Frequency;
+                if (gap > 2.0) Program.LogStall("界面定时器停顿 " + _mode, gap);
+            }
+            _lastTickStamp = nowTicks;
+
             long previousTrend=LiveRate.TrendVersion;
             long previousApm = LiveRate.Apm;
             ActiveSession previousSession = ActivityMonitor.CurrentSession;
