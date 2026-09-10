@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Reflection;
+using System.Text;
 using System.Windows.Forms;
 using KeyMouseStats;
 
@@ -33,6 +34,24 @@ internal static class RenderDashboard
     }
     [STAThread]
     private static void Main()
+    {
+        try { Run(); }
+        catch (Exception error)
+        {
+            // The CLR's own unhandled-exception printer fails on this console, so write the
+            // detail to a file instead of losing it.
+            try
+            {
+                File.WriteAllText("render-failure.txt",
+                    error.GetType().FullName + ": " + error.Message + Environment.NewLine + error.StackTrace,
+                    new UTF8Encoding(false));
+            }
+            catch { }
+            throw;
+        }
+    }
+
+    private static void Run()
     {
         if(Dashboard.DistributionStart(new DateTime(2026,9,6),1)!=new DateTime(2026,8,31) || Dashboard.DistributionStart(new DateTime(2026,9,7),1)!=new DateTime(2026,9,7) || Dashboard.DistributionStart(new DateTime(2026,9,7),2)!=new DateTime(2026,9,1) || Dashboard.DistributionStart(new DateTime(2026,9,7),3)!=new DateTime(2026,1,1))throw new Exception("Distribution calendar boundaries");
         RectangleF ringTest=new RectangleF(0,0,100,100);long[] slices={1,1,0,2};
@@ -66,6 +85,15 @@ internal static class RenderDashboard
                 "Windows API 开发文档", "微信", "项目文件夹", "季度报告.docx — WPS", "README.md — 项目说明" };
             int[] weights = { 40, 25, 10, 8, 6, 5, 4, 2 };
             long remainingKeys = day.Keys, remainingClicks = day.Clicks, remainingWheel = day.Wheel;
+            day.HoldCount = 900; day.HoldTotalMs = 900 * 124; day.HoldMaxMs = 664;
+            day.HoldBuckets[0] = 120; day.HoldBuckets[1] = 260; day.HoldBuckets[2] = 300;
+            day.HoldBuckets[3] = 160; day.HoldBuckets[4] = 60;
+            int[] holdKeys = { 87, 65, 83, 68, 32, 69, 70, 16 };
+            for (int k = 0; k < holdKeys.Length; k++)
+            {
+                int samples = 120 - k * 10;
+                day.Holds[holdKeys[k]] = new KeyHold { Count = samples, TotalMs = samples * (90 + k * 22), MaxMs = 90 + k * 22 + 40 };
+            }
             for (int a = 0; a < processes.Length; a++)
             {
                 AppUsage usage = new AppUsage { ProcessPath = processes[a], Title = titles[a],
@@ -73,6 +101,12 @@ internal static class RenderDashboard
                     Clicks = a == 7 ? remainingClicks : day.Clicks * weights[a] / 100,
                     Wheel = a == 7 ? remainingWheel : day.Wheel * weights[a] / 100 };
                 remainingKeys -= usage.Keys; remainingClicks -= usage.Clicks; remainingWheel -= usage.Wheel;
+                usage.HasKeyGroups = true;
+                usage.KeyGroups[0] = usage.Keys * 35 / 100;
+                usage.KeyGroups[1] = usage.Keys * 20 / 100;
+                usage.KeyGroups[2] = usage.Keys * 12 / 100;
+                usage.KeyGroups[3] = usage.Keys * 18 / 100;
+                usage.KeyGroups[4] = usage.Keys - usage.KeyGroups[0] - usage.KeyGroups[1] - usage.KeyGroups[2] - usage.KeyGroups[3];
                 day.Apps[usage.Id] = usage;
                 if (a == 2) AppActivity.Rules[AppActivity.WindowRuleKey(usage)] = 2;
                 if (a == 3) AppActivity.Rules[AppActivity.WindowRuleKey(usage)] = 0;
@@ -163,6 +197,57 @@ internal static class RenderDashboard
                 new object[] { new MouseEventArgs(MouseButtons.Left, 1, 970, 620, 0) });
             if ((int)typeof(Dashboard).GetField("_appPage", Private).GetValue(form) != 1) throw new Exception("App pagination hit target failed");
             Render(form, "app-windows-page2", 1f);
+
+            // 1.7.4: the apps page gains a key-composition view (stacked segments + hover detail).
+            Set(form, "_appsByWindow", false);
+            Set(form, "_appPage", 0);
+            Set(form, "_appKeyGroups", false);
+            Render(form, "apps", 1f);
+            ClickChip(form, 65);
+            if (!(bool)typeof(Dashboard).GetField("_appKeyGroups", Private).GetValue(form))
+                throw new Exception("Key composition chip hit target failed");
+            Render(form, "app-keygroups", 1f); Render(form, "app-keygroups-150", 1.5f);
+            int contentX = Convert.ToInt32(typeof(Dashboard).GetField("ContentX", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null));
+            int contentY = Convert.ToInt32(typeof(Dashboard).GetField("ContentY", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null));
+            Set(form, "_mouse", new Point(500 + contentX, 295 + contentY));
+            Render(form, "app-keygroups-hover", 1f);
+            Set(form, "_mouse", new Point(0, 0));
+
+            // 1.7.4: the keys page gains a hold-duration mode reusing the report data.
+            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 3));
+            Set(form, "_showKeyboardHeatmap", false);
+            Set(form, "_showCombos", false);
+            Set(form, "_showHoldDuration", false);
+            Render(form, "keys", 1f);
+            ClickChip(form, 78);
+            if (!(bool)typeof(Dashboard).GetField("_showHoldDuration", Private).GetValue(form))
+                throw new Exception("Hold duration chip hit target failed");
+            Render(form, "keys-hold", 1f); Render(form, "keys-hold-150", 1.5f);
+
+            // 1.7.4: each panel page hands the report its matching page and the panel's current range.
+            MethodInfo reportTab = typeof(Dashboard).GetMethod("ReportTabForPage", Private);
+            MethodInfo currentRange = typeof(Dashboard).GetMethod("CurrentRange", Private);
+            object[] range = new object[] { null, null };
+            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 4));
+            Set(form, "_appKeyGroups", true);
+            if ((int)reportTab.Invoke(form, null) != 15) throw new Exception("Key-composition mode must open the app × key report page");
+            Set(form, "_appKeyGroups", false);
+            if ((int)reportTab.Invoke(form, null) != 2) throw new Exception("Apps page must open the app-time report page");
+            Set(form, "_appDays", 90);
+            currentRange.Invoke(form, range);
+            if ((DateTime)range[1] != DateTime.Today || (DateTime)range[0] != DateTime.Today.AddDays(-89))
+                throw new Exception("Apps page must hand over its 90-day filter");
+            Set(form, "_appDays", 1);
+            currentRange.Invoke(form, range);
+            if ((DateTime)range[0] != DateTime.Today || (DateTime)range[1] != DateTime.Today)
+                throw new Exception("A single-day filter must hand over a one-day range");
+            Set(form, "_showHoldDuration", true); Set(form, "_keyRange", 2);
+            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 3));
+            if ((int)reportTab.Invoke(form, null) != 14) throw new Exception("Hold mode must open the hold report page");
+            currentRange.Invoke(form, range);
+            if ((DateTime)range[0] != DateTime.Today.AddDays(-6)) throw new Exception("Keys page must hand over its 7-day filter");
+            Set(form, "_showHoldDuration", false); Set(form, "_keyRange", 0);
+            if ((int)reportTab.Invoke(form, null) != 9) throw new Exception("Keys page must open the key distribution page");
             tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 2));
             Set(form, "_hourMetric", 2);
             Render(form, "hours-active", 1f);
@@ -316,6 +401,24 @@ internal static class RenderDashboard
         }
         Console.WriteLine("Rendered six pages and all three insight views at 100% and 150%; empty states, navigation, filters, pagination and calendar drilldown passed.");
     }
+    /// <summary>点击当前帧注册的 chip:坐标从 _chips / _chipIds 反查,不硬编码像素。</summary>
+    private static void ClickChip(Dashboard form, int id)
+    {
+        IList chips = (IList)typeof(Dashboard).GetField("_chips", Private).GetValue(form);
+        IList ids = (IList)typeof(Dashboard).GetField("_chipIds", Private).GetValue(form);
+        int contentX = Convert.ToInt32(typeof(Dashboard).GetField("ContentX", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null));
+        int contentY = Convert.ToInt32(typeof(Dashboard).GetField("ContentY", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null));
+        for (int i = 0; i < ids.Count && i < chips.Count; i++)
+        {
+            if (Convert.ToInt32(ids[i]) != id) continue;
+            RectangleF rect = (RectangleF)chips[i];
+            typeof(Dashboard).GetMethod("OnMouseClick", Private).Invoke(form, new object[] { new MouseEventArgs(MouseButtons.Left, 1,
+                (int)(rect.X + rect.Width / 2) + contentX, (int)(rect.Y + rect.Height / 2) + contentY, 0) });
+            return;
+        }
+        throw new Exception("Chip " + id + " is not registered on the current page");
+    }
+
     private static void Render(Dashboard form, string name, float scale)
     {
         Set(form, "_s", scale);
