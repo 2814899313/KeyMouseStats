@@ -1610,7 +1610,7 @@ namespace KeyMouseStats
             }
             if (data.TopKeys.Count == 0) AppText(g, "每个键至少 10 次样本才进入排行", _fBody, Csub, new RectangleF(Cx + 18, 210, 500, 24), false);
 
-            AppText(g, "按住时长分布 · 最大 " + data.CardValues[1], _fH2, Ctext, new RectangleF(Cx + 590, 148, 220, 24), false);
+            AppText(g, "按住时长分布 · 最长 " + data.CardValues[2], _fH2, Ctext, new RectangleF(Cx + 590, 148, 220, 24), false);
             long bucketPeak = 1;
             foreach (long value in data.Buckets) bucketPeak = Math.Max(bucketPeak, value);
             float histLeft = Cx + 590, histBottom = 470, histTop = 230;
