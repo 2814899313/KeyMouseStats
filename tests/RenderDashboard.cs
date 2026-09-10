@@ -248,6 +248,20 @@ internal static class RenderDashboard
             if ((DateTime)range[0] != DateTime.Today.AddDays(-6)) throw new Exception("Keys page must hand over its 7-day filter");
             Set(form, "_showHoldDuration", false); Set(form, "_keyRange", 0);
             if ((int)reportTab.Invoke(form, null) != 9) throw new Exception("Keys page must open the key distribution page");
+
+            // 1.7.4: every panel page offers the report entry (chip 45). Clicking it opens a modal
+            // report, so only its registration is asserted here.
+            for (int page = 0; page < 6; page++)
+            {
+                tabField.SetValue(form, Enum.ToObject(tabField.FieldType, page));
+                Set(form, "_showHoldDuration", false);
+                Set(form, "_appKeyGroups", false);
+                Render(form, "report-entry-" + page, 1f);
+                IList pageIds = (IList)typeof(Dashboard).GetField("_chipIds", Private).GetValue(form);
+                bool entry = false;
+                for (int i = 0; i < pageIds.Count; i++) if (Convert.ToInt32(pageIds[i]) == 45) { entry = true; break; }
+                if (!entry) throw new Exception("Panel page " + page + " does not register the report entry chip");
+            }
             tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 2));
             Set(form, "_hourMetric", 2);
             Render(form, "hours-active", 1f);
