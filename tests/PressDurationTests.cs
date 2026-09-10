@@ -245,6 +245,47 @@ internal static class PressDurationTests
             try { Directory.Delete(directory, true); } catch { }
         }
 
+        // ---- 只选「今日」:完整日为空,但进行中的今天必须照旧计入 ----
+        string todayDir = Path.Combine(Path.GetTempPath(), "KeyMouseTodayTests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(todayDir);
+        Store.DataDirectory = todayDir;
+        try
+        {
+            Store.History.Clear();
+            Store.Total = new Counters();
+            Store.RollDay(DateTime.Today);
+            DayRecord running = Store.Today;
+            running.Keys = 1000;
+            running.HoldCount = 900; running.HoldTotalMs = 900 * 124; running.HoldMaxMs = 664; running.HoldDiscarded = 12;
+            running.HoldBuckets[2] = 900;
+            running.Holds[87] = new KeyHold { Count = 900, TotalMs = 900 * 124, MaxMs = 664 };
+            AppUsage usage = new AppUsage { ProcessPath = @"C:\Apps\Code.exe", Keys = 1000 };
+            usage.HasKeyGroups = true; usage.KeyGroups[0] = 600; usage.KeyGroups[1] = 400;
+            running.Apps[usage.Id] = usage;
+
+            HoldReportData held = HoldReportData.Build(DateTime.Today, DateTime.Today);
+            Check(held.Samples == 900, "today-only range still counts the running day's hold samples");
+            Check(held.Keys == 1000, "today-only range still counts the running day's keys");
+            Check(held.TopKeys.Count == 1 && held.TopKeys[0].Key == 87, "today-only range still ranks keys");
+            Check(held.Caption.Contains("今日"), "today-only caption names the running day");
+
+            AppKeyReportData apps = AppKeyReportData.Build(DateTime.Today, DateTime.Today);
+            Check(apps.AttributedKeys == 1000, "today-only range still attributes app keys");
+            Check(apps.Groups.Count == 1 && apps.Groups[0][0] == 600, "today-only range keeps the group split");
+
+            // 昨天到今天:今天只能算一次,不能被拼成两天。
+            HoldReportData both = HoldReportData.Build(DateTime.Today.AddDays(-1), DateTime.Today);
+            Check(both.Samples == 900, "a range ending today counts the running day exactly once");
+
+            // 完整日区间以昨天结尾时,今天照旧接上(1.7.3 起的行为不能被这次修复改掉)。
+            HoldReportData throughYesterday = HoldReportData.Build(DateTime.Today.AddDays(-6), DateTime.Today.AddDays(-1));
+            Check(throughYesterday.Samples == 900, "a range ending yesterday still appends the running day");
+        }
+        finally
+        {
+            try { Directory.Delete(todayDir, true); } catch { }
+        }
+
         HoldTracker.DiscardPending();
         Console.WriteLine("PASS: " + _checks + " press duration / app key / archive checks");
     }

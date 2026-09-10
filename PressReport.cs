@@ -46,13 +46,17 @@ namespace KeyMouseStats
             HoldReportData data = new HoldReportData();
             RangeMetrics range = RangeStats.Of(start, end, false);   // 只取完整日;今天由下面显式接上
             data.Days = range.Days;
-            bool includesToday = range.Days > 0 && range.End == DateTime.Today.AddDays(-1);
+            // 区间只覆盖今天时完整日为空,但进行中的今天仍有样本:除了「完整日区间以昨天结尾」,
+            // 请求区间本身覆盖今天时也要接上今天,否则「今日」会连今天的样本一起丢掉。
+            bool includesToday = (range.Days > 0 && range.End == DateTime.Today.AddDays(-1))
+                || (end.Date >= DateTime.Today && start.Date <= DateTime.Today);
             data.Observed = range.Observed + (includesToday && !Store.Today.IsEmpty ? 1 : 0);
             data.Keys = range.Keys + (includesToday ? Store.Today.Keys : 0);
 
             Dictionary<int, KeyHold> byKey = new Dictionary<int, KeyHold>();
-            DateTime from = range.Start, to = includesToday ? DateTime.Today : range.End;
-            if (range.Days > 0)
+            DateTime from = range.Days > 0 ? range.Start : DateTime.Today;
+            DateTime to = includesToday ? DateTime.Today : range.End;
+            if (range.Days > 0 || includesToday)
             {
                 for (DateTime date = from; date <= to; date = date.AddDays(1))
                 {
@@ -97,7 +101,7 @@ namespace KeyMouseStats
 
             double coverage = data.Keys > 0 ? (double)data.Samples / data.Keys : double.NaN;
             double mean = data.Samples > 0 ? data.TotalMs / data.Samples : double.NaN;
-            data.Caption = range.Days == 0 ? "所选区间没有完整日"
+            data.Caption = range.Days == 0 ? (includesToday ? "今日（进行中） · 按住时长分布与逐键排行" : "所选区间没有完整日")
                 : range.Start.ToString("MM.dd") + "—" + range.End.ToString("MM.dd") + " · " + range.Days + " 个完整日" + (includesToday ? " + 今日（进行中）" : "") + " · 按住时长分布与逐键排行";
             data.Cards = new string[] { "有效样本", "平均时长", "最长一次", "覆盖率" };
             data.CardValues = new string[] { data.Samples.ToString("N0", CultureInfo.InvariantCulture),
@@ -262,13 +266,16 @@ namespace KeyMouseStats
             AppKeyReportData data = new AppKeyReportData();
             RangeMetrics range = RangeStats.Of(start, end, false);   // 只取完整日;今天由下面显式接上
             data.Days = range.Days;
-            bool includesToday = range.Days > 0 && range.End == DateTime.Today.AddDays(-1);
+            // 同 HoldReportData:只选「今日」时完整日为空,今天的归因仍要算进来。
+            bool includesToday = (range.Days > 0 && range.End == DateTime.Today.AddDays(-1))
+                || (end.Date >= DateTime.Today && start.Date <= DateTime.Today);
             data.Observed = range.Observed + (includesToday && !Store.Today.IsEmpty ? 1 : 0);
             data.TotalKeys = range.Keys + (includesToday ? Store.Today.Keys : 0);
 
             Dictionary<string, long[]> byPath = new Dictionary<string, long[]>(StringComparer.OrdinalIgnoreCase);
-            DateTime from = range.Start, to = includesToday ? DateTime.Today : range.End;
-            if (range.Days > 0)
+            DateTime from = range.Days > 0 ? range.Start : DateTime.Today;
+            DateTime to = includesToday ? DateTime.Today : range.End;
+            if (range.Days > 0 || includesToday)
             {
                 for (DateTime date = from; date <= to; date = date.AddDays(1))
                 {
@@ -319,7 +326,7 @@ namespace KeyMouseStats
             long[] grand = new long[6];
             foreach (KeyValuePair<string, long[]> pair in list)
                 for (int i = 0; i < 6; i++) grand[i] += pair.Value[i];
-            data.Caption = range.Days == 0 ? "所选区间没有完整日"
+            data.Caption = range.Days == 0 ? (includesToday ? "今日（进行中） · 各应用的按键构成（Top 8）" : "所选区间没有完整日")
                 : range.Start.ToString("MM.dd") + "—" + range.End.ToString("MM.dd") + " · " + range.Days + " 个完整日" + (includesToday ? " + 今日（进行中）" : "") + " · 各应用的按键构成（Top 8）";
             data.Cards = new string[] { "已归因击键", "记录应用", "移动类占比", "覆盖率" };
             data.CardValues = new string[] { data.AttributedKeys.ToString("N0", CultureInfo.InvariantCulture), list.Count.ToString(CultureInfo.InvariantCulture),
