@@ -34,8 +34,23 @@ internal static class RangeReportTests
         day.HourKeys[9] = 100;
         day.HourKeys[15] = 40;
         day.Sessions.Add(new ActiveSession { Start = date.AddHours(9), End = date.AddHours(10), Seconds = 3600 });
-        AppUsage app = new AppUsage { ProcessPath = @"C:\Apps\code.exe", Title = "code", Keys = keys / 2, Clicks = 10, ActiveSeconds = 1200 };
+        AppUsage app = new AppUsage { ProcessPath = @"C:\Apps\code.exe", Title = "code", Keys = keys, Clicks = 10, ActiveSeconds = 1200 };
+        app.HasKeyGroups = true;
+        app.KeyGroups[0] = keys / 2;
+        app.KeyGroups[4] = keys / 2;
         day.Apps[app.Id] = app;
+        // 按键时长:直接写入聚合值,不依赖真实钩子;分箱之和必须等于样本数。
+        day.HoldCount = 100;
+        day.HoldTotalMs = 100 * 120;
+        day.HoldMaxMs = 800;
+        day.HoldBuckets[2] = 60;
+        day.HoldBuckets[3] = 40;
+        KeyHold fast = new KeyHold();
+        fast.Count = 40; fast.TotalMs = 40 * 90; fast.MaxMs = 200;
+        day.Holds[87] = fast;
+        KeyHold slow = new KeyHold();
+        slow.Count = 60; slow.TotalMs = 60 * 140; slow.MaxMs = 800;
+        day.Holds[65] = slow;
         return day;
     }
 
@@ -51,9 +66,10 @@ internal static class RangeReportTests
     [STAThread]
     private static void Main()
     {
-        Check(ReportDesign.Names.Length == 14, "fourteen report pages");
+        Check(ReportDesign.Names.Length == 16, "sixteen report pages");
         Check(ReportDesign.Scope.Length == ReportDesign.Names.Length, "scope array matches page count");
         Check(ReportDesign.Names[11] == "区间回顾" && ReportDesign.Names[12] == "星期节律" && ReportDesign.Names[13] == "分布", "new page titles");
+        Check(ReportDesign.Names[14] == "按键时长" && ReportDesign.Names[15] == "应用键位", "press pages are registered");
 
         Store.History.Clear();
         Store.Total = new Counters();
@@ -148,6 +164,26 @@ internal static class RangeReportTests
             Check(selectedEnd == range.Current.Start.AddDays(4), "selection maps to the fifth day");
         }
 
+        // ---- 按键时长 ----
+        HoldReportData hold = HoldReportData.Build(rangeStart, rangeEnd);
+        Check(hold.Samples == 600, "hold samples aggregate over the range");
+        Check(hold.Keys == expectedCurrent, "coverage uses the range key count");
+        long bucketTotal = 0;
+        foreach (long value in hold.Buckets) bucketTotal += value;
+        Check(bucketTotal == hold.Samples, "hold buckets conserve the sample count");
+        Check(hold.TopKeys.Count >= 1, "keys are ranked by mean hold time");
+        Check(hold.CardValues[3].EndsWith("%"), "coverage card is a percentage");
+        Check(hold.Rows.Count >= 1 && hold.Rows[0][0] != "--", "per-key hold rows exist");
+        Check(Math.Abs(hold.TotalMs - 600 * 120) < 1, "hold total duration aggregates");
+
+        // ---- 应用 × 键位 ----
+        AppKeyReportData appKey = AppKeyReportData.Build(rangeStart, rangeEnd);
+        Check(appKey.AttributedKeys == expectedCurrent, "app key groups aggregate by process");
+        Check(appKey.Groups.Count == 1, "one recorded app");
+        Check(appKey.Groups[0][0] + appKey.Groups[0][4] == appKey.AttributedKeys, "group counts conserve the attributed keys");
+        Check(appKey.Headings.Length == 7, "app key table has six group columns");
+        Check(appKey.Rows.Count >= 1 && appKey.Rows[0][0].Contains("code.exe"), "app row names the process");
+
         // ---- 渲染 ----
         Directory.CreateDirectory("previews");
         using (RangeReportVisual visual = new RangeReportVisual(rangeStart, rangeEnd))
@@ -166,6 +202,18 @@ internal static class RangeReportTests
         {
             rhythmVisual.Size = new Size(1000, 300);
             RenderAndCheck(rhythmVisual, "weekday-rhythm", 1f);
+        }
+        using (HoldReportVisual holdVisual = new HoldReportVisual(rangeStart, rangeEnd))
+        {
+            holdVisual.Size = new Size(1000, 330);
+            RenderAndCheck(holdVisual, "press-duration", 1f);
+            RenderAndCheck(holdVisual, "press-duration-150", 1.5f);
+        }
+        using (AppKeyReportVisual appKeyVisual = new AppKeyReportVisual(rangeStart, rangeEnd))
+        {
+            appKeyVisual.Size = new Size(1000, 432);
+            RenderAndCheck(appKeyVisual, "app-key-groups", 1f);
+            RenderAndCheck(appKeyVisual, "app-key-groups-150", 1.5f);
         }
 
         // 空数据也必须能渲染,不能除零或抛异常。
@@ -206,8 +254,12 @@ internal static class RangeReportTests
                 RangeReportVisual range = visual as RangeReportVisual;
                 DistributionReportVisual distribution = visual as DistributionReportVisual;
                 RhythmReportVisual rhythm = visual as RhythmReportVisual;
+                HoldReportVisual hold = visual as HoldReportVisual;
+                AppKeyReportVisual appKey = visual as AppKeyReportVisual;
                 if (range != null) range.RenderTo(graphics, scale);
                 else if (distribution != null) distribution.RenderTo(graphics, scale);
+                else if (hold != null) hold.RenderTo(graphics, scale);
+                else if (appKey != null) appKey.RenderTo(graphics, scale);
                 else rhythm.RenderTo(graphics, scale);
             }
             bitmap.Save(Path.Combine("previews", name + ".png"), ImageFormat.Png);

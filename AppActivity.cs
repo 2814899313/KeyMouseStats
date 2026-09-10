@@ -13,12 +13,17 @@ namespace KeyMouseStats
         public string Title = "";
         public long Keys, Clicks, Wheel;
         public double ActiveSeconds;
+        /// <summary>六类键位分组计数(1.7.3 起采集);HasKeyGroups 区分「全为零」与「旧记录没有该维度」。</summary>
+        public readonly long[] KeyGroups = new long[6];
+        public bool HasKeyGroups;
         public string Id { get { return ProcessPath.ToLowerInvariant() + "\n" + Title; } }
         public AppUsage Copy()
         {
             AppUsage copy = new AppUsage();
             copy.ProcessPath = ProcessPath; copy.Title = Title;
             copy.Keys = Keys; copy.Clicks = Clicks; copy.Wheel = Wheel; copy.ActiveSeconds = ActiveSeconds;
+            copy.HasKeyGroups = HasKeyGroups;
+            for (int i = 0; i < KeyGroups.Length; i++) copy.KeyGroups[i] = KeyGroups[i];
             return copy;
         }
         public string AppName
@@ -173,8 +178,22 @@ namespace KeyMouseStats
 
         public static void Record(DayRecord day, AppUsage snapshot, int kind)
         {
+            Record(day, snapshot, kind, -1);
+        }
+
+        /// <summary>kind:0 击键 / 1 点击 / 2 滚轮;group 为键位分组(-1 表示不计分组)。</summary>
+        public static void Record(DayRecord day, AppUsage snapshot, int kind, int group)
+        {
             AppUsage record = EnsureRecord(day, snapshot);
-            if (kind == 0) record.Keys++;
+            if (kind == 0)
+            {
+                record.Keys++;
+                if (group >= 0 && group < record.KeyGroups.Length)
+                {
+                    record.KeyGroups[group]++;
+                    record.HasKeyGroups = true;
+                }
+            }
             else if (kind == 1) record.Clicks++;
             else record.Wheel++;
         }

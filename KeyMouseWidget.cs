@@ -124,6 +124,11 @@ namespace KeyMouseStats
         public double AppObservedSeconds;
         public long AppSwitches, PeakApm;
         public readonly CrossDay Cross=new CrossDay();
+        /// <summary>按键时长(1.7.3 起采集):逐键聚合、8 档直方图与丢弃计数。</summary>
+        public readonly Dictionary<int, KeyHold> Holds = new Dictionary<int, KeyHold>();
+        public readonly long[] HoldBuckets = new long[HoldTracker.BucketCount];
+        public long HoldCount, HoldDiscarded;
+        public double HoldTotalMs, HoldMaxMs;
 
         public bool IsEmpty
         {
@@ -163,8 +168,26 @@ namespace KeyMouseStats
                 {
                     existing.Keys += app.Keys; existing.Clicks += app.Clicks;
                     existing.Wheel += app.Wheel; existing.ActiveSeconds += app.ActiveSeconds;
+                    if (app.HasKeyGroups)
+                    {
+                        existing.HasKeyGroups = true;
+                        for (int g = 0; g < existing.KeyGroups.Length && g < app.KeyGroups.Length; g++) existing.KeyGroups[g] += app.KeyGroups[g];
+                    }
                 }
                 else Apps[app.Id] = app.Copy();
+            }
+            HoldCount += other.HoldCount;
+            HoldDiscarded += other.HoldDiscarded;
+            HoldTotalMs += other.HoldTotalMs;
+            if (other.HoldMaxMs > HoldMaxMs) HoldMaxMs = other.HoldMaxMs;
+            for (int i = 0; i < HoldBuckets.Length && i < other.HoldBuckets.Length; i++) HoldBuckets[i] += other.HoldBuckets[i];
+            foreach (KeyValuePair<int, KeyHold> pair in other.Holds)
+            {
+                KeyHold hold;
+                if (!Holds.TryGetValue(pair.Key, out hold)) { hold = new KeyHold(); Holds[pair.Key] = hold; }
+                hold.Count += pair.Value.Count;
+                hold.TotalMs += pair.Value.TotalMs;
+                if (pair.Value.MaxMs > hold.MaxMs) hold.MaxMs = pair.Value.MaxMs;
             }
             Cross.AddFrom(other.Cross);
         }
@@ -258,7 +281,15 @@ namespace KeyMouseStats
     /// </summary>
     internal static class Store
     {
-        private const int KeepDays = 365;
+        /// <summary>保留天数;0 表示永久保留。超期数据先按月归档再移除。</summary>
+        public static int KeepDays = 365;
+        /// <summary>读取到的文件格式版本(缺失按 10 计)。</summary>
+        public static int DetectedFormat = 10;
+        /// <summary>文件由更新版本写入时为 true,此时只提示不阻止。</summary>
+        public static bool FileFromNewerVersion;
+        public const int FormatVersion = 11;
+        /// <summary>按月归档(保留期之外的数据)。</summary>
+        public static readonly Dictionary<string, MonthArchive> Archives = new Dictionary<string, MonthArchive>(StringComparer.Ordinal);
         private static string Dir = DefaultDirectory();
         private static string FilePath = Path.Combine(Dir, "stats.txt");
 
@@ -331,6 +362,9 @@ namespace KeyMouseStats
             public double MouseDpi;
             public int BackupKeep = 7;
             public string Wellbeing;
+            public int KeepDays = 365, FormatVersion = 10;
+            public bool HasKeepDays;
+            public readonly Dictionary<string, MonthArchive> Archives = new Dictionary<string, MonthArchive>(StringComparer.Ordinal);
             public bool HasMouseDpi, HasIdleThreshold, HasBackupKeep;
         }
 
@@ -397,6 +431,9 @@ namespace KeyMouseStats
                         case "session": ActivityMonitor.LoadSession(cur, val); break;
                         case "session_reason_v1": ActivityMonitor.LoadSessionReason(cur,val);break;
                         case "cross_hours_v1": case "app_hours_v1": case "session_coverage_v1": case "session_app_v1": case "mouse_vector_v1": CrossTelemetry.Load(cur,key,val);break;
+                        case "hold_v1": HoldCodec.Load(cur,val);break;
+                        case "hold_key_v1": HoldCodec.LoadKeys(cur,val);break;
+                        case "app_keys_v1": AppKeyCodec.Load(cur,val);break;
                     }
                 }
                 else
@@ -409,6 +446,13 @@ namespace KeyMouseStats
                         case "all_time_peak_apm": result.AllTimePeakApm = Math.Max(0, ParseL(val)); break;
                         case "app_rule": result.AppRules.Add(val); break;
                         case "wellbeing_v1": result.Wellbeing = val; break;
+                        case "keep_days":
+                            int keepDays = (int)ParseL(val);
+                            result.KeepDays = keepDays <= 0 ? 0 : Math.Max(30, Math.Min(3650, keepDays));
+                            result.HasKeepDays = true;
+                            break;
+                        case "format": result.FormatVersion = (int)ParseL(val); break;
+                        case "archive_v1": MonthArchive.AddTo(result.Archives, val); break;
                         case "backup_keep":
                             int keep = (int)ParseL(val);
                             result.BackupKeep = keep >= 1 && keep <= 60 ? keep : 7;
@@ -491,6 +535,10 @@ namespace KeyMouseStats
             History.Clear();
             foreach (KeyValuePair<DateTime, DayRecord> day in parsed.History) History[day.Key] = day.Value;
             Total = parsed.Total;
+            DetectedFormat = parsed.FormatVersion;
+            FileFromNewerVersion = parsed.FormatVersion > FormatVersion;
+            Archives.Clear();
+            foreach (KeyValuePair<string, MonthArchive> archive in parsed.Archives) Archives[archive.Key] = archive.Value;
             if (applySettings)
             {
                 ThemeId = parsed.ThemeId;
@@ -500,6 +548,7 @@ namespace KeyMouseStats
                 if (parsed.HasIdleThreshold) IdleThresholdSeconds = parsed.IdleThresholdSeconds;
                 if (parsed.HasBackupKeep) BackupKeep = parsed.BackupKeep;
                 if (!string.IsNullOrEmpty(parsed.Wellbeing)) WellbeingSettings.Load(parsed.Wellbeing);
+                if (parsed.HasKeepDays) KeepDays = parsed.KeepDays;
                 PosX = parsed.PosX; PosY = parsed.PosY;
                 AppActivity.Rules.Clear();
                 foreach (string rule in parsed.AppRules) AppActivity.LoadRule(rule);
@@ -568,13 +617,19 @@ namespace KeyMouseStats
 
         private static void Prune()
         {
+            if (KeepDays <= 0) return;   // 永久保留,不归档也不移除
             DateTime oldest = DateTime.Today.AddDays(-(KeepDays - 1));
             List<DateTime> remove = new List<DateTime>();
             foreach (KeyValuePair<DateTime, DayRecord> kv in History)
             {
                 if (kv.Key < oldest) remove.Add(kv.Key);
             }
-            foreach (DateTime d in remove) History.Remove(d);
+            foreach (DateTime d in remove)
+            {
+                // 超期数据先折进月度归档,再移除明细,避免一年前的记录无声消失。
+                MonthArchive.Fold(Archives, History[d]);
+                History.Remove(d);
+            }
         }
 
         private static double NonNegative(double value)
@@ -686,11 +741,14 @@ namespace KeyMouseStats
         private static string Serialize()
         {
             StringBuilder sb = new StringBuilder();
-                sb.AppendLine("# 键鼠统计数据文件 v10 / 正式版 " + BuildInfo.Version);
+                sb.AppendLine("# 键鼠统计数据文件 v11 / 正式版 " + BuildInfo.Version);
+                sb.AppendLine("format=11");
                 sb.AppendLine("shortcut_model_v1="+ShortcutSavings.EncodeModel());
                 sb.AppendLine("idle_threshold=" + IdleThresholdSeconds.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("backup_keep=" + BackupKeep.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("wellbeing_v1=" + WellbeingSettings.Encode());
+                sb.AppendLine("keep_days=" + KeepDays.ToString(CultureInfo.InvariantCulture));
+                foreach (MonthArchive archive in Archives.Values) sb.AppendLine("archive_v1=" + MonthArchive.Encode(archive));
                 sb.AppendLine("art_theme=" + ArtTheme.Validate(ThemeId).ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("keyboard_layout=" + KeyboardHeat.Valid(KeyboardLayout).ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("all_time_peak_apm=" + AllTimePeakApm.ToString(CultureInfo.InvariantCulture));
@@ -739,6 +797,8 @@ namespace KeyMouseStats
                     foreach (ActiveSession period in r.IdlePeriods)
                         sb.AppendLine("idle_period=" + period.Start.ToString("O", CultureInfo.InvariantCulture) + "|"
                             + period.End.ToString("O", CultureInfo.InvariantCulture) + "|" + period.Seconds.ToString("R", CultureInfo.InvariantCulture));
+                    foreach(string holdLine in HoldCodec.EncodeAll(r))sb.AppendLine(holdLine);
+                    foreach(string appKeyLine in AppKeyCodec.EncodeAll(r))sb.AppendLine(appKeyLine);
                     CrossTelemetry.Save(sb,r);
                 }
 
@@ -1110,6 +1170,7 @@ namespace KeyMouseStats
                         Native.KBDLLHOOKSTRUCT released = (Native.KBDLLHOOKSTRUCT)
                             Marshal.PtrToStructure(lParam, typeof(Native.KBDLLHOOKSTRUCT));
                         _combos.Process(msg, (int)released.vkCode, released.scanCode, released.flags);
+                        HoldTracker.Release(ShortcutTracker.Normalize((int)released.vkCode, released.scanCode, released.flags), System.Diagnostics.Stopwatch.GetTimestamp());
                     }
                     if (msg == Native.WM_KEYDOWN || msg == Native.WM_SYSKEYDOWN)
                     {
@@ -1135,7 +1196,8 @@ namespace KeyMouseStats
                                 t.KeyCounts[vk] = c + 1;
                                 KeyboardHeat.Record(t, vk, info.scanCode, info.flags);
                                 Store.Total.Keys++;
-                                AppActivity.Record(t, foreground, 0);
+                                HoldTracker.Press(t, vk, System.Diagnostics.Stopwatch.GetTimestamp());
+                                AppActivity.Record(t, foreground, 0, KeySemantics.Group(vk));
                                 LiveRate.AddKey();
                                 MarkDirty();
                             }
@@ -1670,6 +1732,7 @@ namespace KeyMouseStats
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             base.OnFormClosed(e);
+            HoldTracker.DiscardPending();   // 退出时未抬起的按键不计入时长
             if(_hud!=null){_hud.Close();_hud.Dispose();}
             if (_dashWait != null) { try { _dashWait.Unregister(null); } catch { } }
             if (_kbHook != IntPtr.Zero) { Native.UnhookWindowsHookEx(_kbHook); _kbHook = IntPtr.Zero; }

@@ -24,13 +24,15 @@ namespace KeyMouseStats
         private readonly Button _apply = new Button { Text = "应用到本机", Enabled = false };
         private readonly ListView _issues = new ListView { View = View.Details, FullRowSelect = true, BorderStyle = BorderStyle.FixedSingle };
         private readonly Label _validationStatus = new Label();
+        private readonly NumericUpDown _retentionDays = new NumericUpDown { Minimum = 30, Maximum = 3650, Increment = 30 };
+        private readonly CheckBox _retentionForever = new CheckBox { Text = "永久保留" };
         private ImportPreview _preview;
 
         public DataSettingsDialog()
         {
             Text = "数据管理"; FormBorderStyle = FormBorderStyle.FixedDialog; StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false; MinimizeBox = false; ShowInTaskbar = false; AutoScaleMode = AutoScaleMode.None;
-            Font = new Font("Microsoft YaHei UI", 9f); ClientSize = new Size(620, 600);
+            Font = new Font("Microsoft YaHei UI", 9f); ClientSize = new Size(620, 664);
             _keep.Value = Math.Max(1, Math.Min(60, Store.BackupKeep));
 
             Label backupTitle = Header("备份");
@@ -65,9 +67,34 @@ namespace KeyMouseStats
             _issues.Columns.Add("级别", 60); _issues.Columns.Add("日期", 90); _issues.Columns.Add("说明", 420);
             _issues.SetBounds(20, 456, 580, 128);
 
+            Label retentionTitle = Header("数据保留");
+            Label retentionLabel = new Label { Text = "保留", TextAlign = ContentAlignment.MiddleLeft };
+            Label retentionTail = new Label { Text = "天（超期先按月归档，不会直接删除）", TextAlign = ContentAlignment.MiddleLeft };
+            retentionTitle.SetBounds(20, 594, 200, 22);
+            retentionLabel.SetBounds(20, 622, 34, 26);
+            _retentionDays.SetBounds(56, 622, 74, 26);
+            retentionTail.SetBounds(136, 622, 290, 26);
+            _retentionForever.SetBounds(432, 622, 130, 26);
+            _retentionDays.Value = Store.KeepDays <= 0 ? 365 : Math.Max(_retentionDays.Minimum, Math.Min(_retentionDays.Maximum, Store.KeepDays));
+            _retentionForever.Checked = Store.KeepDays <= 0;
+            _retentionDays.Enabled = !_retentionForever.Checked;
+            _retentionForever.CheckedChanged += delegate
+            {
+                _retentionDays.Enabled = !_retentionForever.Checked;
+                Store.KeepDays = _retentionForever.Checked ? 0 : (int)_retentionDays.Value;
+                Store.Save();
+            };
+            _retentionDays.ValueChanged += delegate
+            {
+                if (_retentionForever.Checked) return;
+                Store.KeepDays = (int)_retentionDays.Value;
+                Store.Save();
+            };
+
             Controls.AddRange(new Control[]{ backupTitle, keepLabel, _keep, backupNow, openFolder, _backupStatus,
                 exportTitle, export, importTitle, choose, _importFile, _importPreview, _keepLarger, _add, _apply,
-                validateTitle, validate, _validationStatus, _issues });
+                validateTitle, validate, _validationStatus, _issues,
+                retentionTitle, retentionLabel, _retentionDays, retentionTail, _retentionForever });
 
             _keep.ValueChanged += delegate { Store.BackupKeep = (int)_keep.Value; Store.Save(); RefreshBackupStatus(); };
             backupNow.Click += delegate { Backup(); };

@@ -70,6 +70,142 @@ namespace KeyMouseStats
         }
     }
 
+    /// <summary>
+    /// 按月归档的汇总。1.7.3 起,保留期之外的日记录先折进这里再移除,
+    /// 而不是像以前那样直接删除——一年前的数据不该无声消失。
+    /// 归档只保留粗略合计,不参与任何日级统计。
+    /// </summary>
+    internal sealed class MonthArchive
+    {
+        public int Year, Month, Days, Sessions;
+        public long Keys, Clicks, Wheel, Combos;
+        public double ActiveSeconds, MoveMeters;
+        public readonly Dictionary<string, long> AppKeys = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        private const int AppLimit = 16;
+
+        public string Key
+        {
+            get { return Year.ToString("0000", CultureInfo.InvariantCulture) + "-" + Month.ToString("00", CultureInfo.InvariantCulture); }
+        }
+        public string Label { get { return Year + " 年 " + Month + " 月"; } }
+
+        public static void Fold(Dictionary<string, MonthArchive> archives, DayRecord day)
+        {
+            if (archives == null || day == null || day.IsEmpty) return;
+            string key = day.Date.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+            MonthArchive archive;
+            if (!archives.TryGetValue(key, out archive))
+            {
+                archive = new MonthArchive();
+                archive.Year = day.Date.Year;
+                archive.Month = day.Date.Month;
+                archives[key] = archive;
+            }
+            archive.Days++;
+            archive.Keys += day.Keys;
+            archive.Clicks += day.Clicks;
+            archive.Wheel += day.Wheel;
+            archive.Combos += PersonalStats.Combos(day);
+            archive.ActiveSeconds += day.ActiveSeconds;
+            archive.MoveMeters += day.MoveMeters;
+            archive.Sessions += day.Sessions.Count;
+            foreach (AppUsage app in day.Apps.Values)
+            {
+                string path = app.ProcessPath ?? "";
+                long value;
+                archive.AppKeys.TryGetValue(path, out value);
+                archive.AppKeys[path] = value + app.Keys;
+            }
+        }
+
+        /// <summary>archive_v1=yyyy-MM|天数|击键|点击|滚轮|组合|活跃秒|移动米|段数|路径:击键,…</summary>
+        public static string Encode(MonthArchive archive)
+        {
+            if (archive == null) return "";
+            StringBuilder sb = new StringBuilder();
+            sb.Append(archive.Key).Append('|');
+            sb.Append(archive.Days.ToString(CultureInfo.InvariantCulture)).Append('|');
+            sb.Append(archive.Keys.ToString(CultureInfo.InvariantCulture)).Append('|');
+            sb.Append(archive.Clicks.ToString(CultureInfo.InvariantCulture)).Append('|');
+            sb.Append(archive.Wheel.ToString(CultureInfo.InvariantCulture)).Append('|');
+            sb.Append(archive.Combos.ToString(CultureInfo.InvariantCulture)).Append('|');
+            sb.Append(archive.ActiveSeconds.ToString("R", CultureInfo.InvariantCulture)).Append('|');
+            sb.Append(archive.MoveMeters.ToString("R", CultureInfo.InvariantCulture)).Append('|');
+            sb.Append(archive.Sessions.ToString(CultureInfo.InvariantCulture)).Append('|');
+
+            List<KeyValuePair<string, long>> apps = new List<KeyValuePair<string, long>>(archive.AppKeys);
+            apps.Sort(delegate(KeyValuePair<string, long> a, KeyValuePair<string, long> b)
+            {
+                int order = b.Value.CompareTo(a.Value);
+                return order != 0 ? order : string.Compare(a.Key, b.Key, StringComparison.OrdinalIgnoreCase);
+            });
+            for (int i = 0; i < apps.Count && i < AppLimit; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append(AppActivity.Encode(apps[i].Key)).Append(':').Append(apps[i].Value.ToString(CultureInfo.InvariantCulture));
+            }
+            return sb.ToString();
+        }
+
+        public static void AddTo(Dictionary<string, MonthArchive> archives, string value)
+        {
+            if (archives == null || string.IsNullOrEmpty(value)) return;
+            try
+            {
+                string[] fields = value.Split('|');
+                if (fields.Length < 9) return;
+                string[] stamp = fields[0].Split('-');
+                int year, month;
+                if (stamp.Length != 2) return;
+                if (!int.TryParse(stamp[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out year)) return;
+                if (!int.TryParse(stamp[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out month)) return;
+                if (month < 1 || month > 12) return;
+
+                MonthArchive archive = new MonthArchive();
+                archive.Year = year;
+                archive.Month = month;
+                archive.Days = (int)Math.Max(0, ParseLong(fields[1]));
+                archive.Keys = Math.Max(0, ParseLong(fields[2]));
+                archive.Clicks = Math.Max(0, ParseLong(fields[3]));
+                archive.Wheel = Math.Max(0, ParseLong(fields[4]));
+                archive.Combos = Math.Max(0, ParseLong(fields[5]));
+                archive.ActiveSeconds = Math.Max(0, ParseDouble(fields[6]));
+                archive.MoveMeters = Math.Max(0, ParseDouble(fields[7]));
+                archive.Sessions = (int)Math.Max(0, ParseLong(fields[8]));
+                if (fields.Length >= 10 && fields[9].Length > 0)
+                {
+                    foreach (string entry in fields[9].Split(','))
+                    {
+                        int colon = entry.LastIndexOf(':');
+                        if (colon <= 0) continue;
+                        string path = AppActivity.Decode(entry.Substring(0, colon));
+                        long keys = ParseLong(entry.Substring(colon + 1));
+                        if (keys <= 0) continue;
+                        long existing;
+                        archive.AppKeys.TryGetValue(path, out existing);
+                        archive.AppKeys[path] = existing + keys;
+                    }
+                }
+                archives[archive.Key] = archive;
+            }
+            catch (FormatException) { }
+        }
+
+        private static long ParseLong(string text)
+        {
+            long value;
+            long.TryParse((text ?? "").Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+            return value;
+        }
+
+        private static double ParseDouble(string text)
+        {
+            double value;
+            double.TryParse((text ?? "").Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+            return double.IsNaN(value) || double.IsInfinity(value) ? 0 : value;
+        }
+    }
+
     internal static class DataManagement
     {
         private const string Magic = "# KeyMouseStats export v1";
