@@ -21,6 +21,7 @@ namespace KeyMouseStats
         private void ApplyAppChip(int id)
         {
             if (id == 64) { using (StatisticsReport report = new StatisticsReport(DateTime.Today, 2)) report.ShowDialog(this); return; }
+            if (id == 65) { _appKeyGroups = !_appKeyGroups; _appPage = 0; return; }
             if (id == 40) _appPage = Math.Max(0, _appPage - 1);
             else if (id == 41) _appPage = Math.Min(_appPageCount - 1, _appPage + 1);
             else if (id == 50 || id == 51) { _appsByWindow = id == 51; if (id == 50) _onlyUnclassified = false; _appPage = 0; }
@@ -91,6 +92,27 @@ namespace KeyMouseStats
                 g.DrawString(text, font, brush, rect, format);
         }
 
+        /// <summary>按当前应用页区间汇总每个应用的键位构成（键组计数）。</summary>
+        private Dictionary<string, long[]> AppKeyGroupsForRange()
+        {
+            Dictionary<string, long[]> map = new Dictionary<string, long[]>(StringComparer.OrdinalIgnoreCase);
+            DateTime from = DateTime.Today.AddDays(-(_appDays - 1));
+            for (DateTime date = from; date <= DateTime.Today; date = date.AddDays(1))
+            {
+                DayRecord day = Analysis.GetDay(date);
+                if (day == null || day.IsEmpty || day.Apps == null) continue;
+                foreach (AppUsage app in day.Apps.Values)
+                {
+                    if (app == null || !app.HasKeyGroups) continue;
+                    string path = app.ProcessPath ?? "";
+                    long[] groups;
+                    if (!map.TryGetValue(path, out groups)) { groups = new long[6]; map[path] = groups; }
+                    for (int i = 0; i < 6 && i < app.KeyGroups.Length; i++) groups[i] += app.KeyGroups[i];
+                }
+            }
+            return map;
+        }
+
         private void PaintApps(Graphics g)
         {
             _appEditRects.Clear(); _appEditRows.Clear();
@@ -99,10 +121,12 @@ namespace KeyMouseStats
             AppChip(g, 62, Cx + 180, 98, 90, "近 90 天", _appDays == 90);
             AppChip(g, 63, Cx + 286, 98, 106, "只看待标注", _onlyUnclassified);
             AppChip(g, 64, Cx + 404, 98, 106, "今日分析", false);
+            AppChip(g, 65, Cx + 520, 98, 106, "键位构成", _appKeyGroups);
             AppChip(g, 50, Cx + Cw - 190, 98, 90, "按应用", !_appsByWindow);
             AppChip(g, 51, Cx + Cw - 90, 98, 90, "按窗口", _appsByWindow);
 
             long[] categoryKeys;
+            Dictionary<string, long[]> keyGroups = _appKeyGroups ? AppKeyGroupsForRange() : null;
             List<AppActivity.Row> rows = AppActivity.Aggregate(Analysis.RangeDays(_appDays), _appsByWindow, out categoryKeys);
             if (_onlyUnclassified) rows.RemoveAll(delegate(AppActivity.Row row) { return row.Legacy || row.Category != 4; });
             long totalKeys = 0;
@@ -128,10 +152,12 @@ namespace KeyMouseStats
 
             PaintCardBase(g, Cx, 235, Cw, 351);
             AppText(g, _appsByWindow ? "窗口标题 / 应用" : "应用 / 进程路径", _fH2, Ctext, new RectangleF(Cx + 18, 244, 300, 24), false);
-            string[] headings = { "分类", "击键", "点击", "滚轮" };
+            string[] headings = _appKeyGroups ? new[]{ "移动", "技能", "交互", "功能", "文字", "未归位" } : new[]{ "分类", "击键", "点击", "滚轮" };
+            float[] keyColumnX = { 330, 402, 474, 546, 618, 690 };
             float[] columnX = { 349, 446, 552, 648 };
-            for (int i = 0; i < 4; i++)
-                AppText(g, headings[i], _fSmall, Csub, new RectangleF(columnX[i], 245, 80, 22), i > 0);
+            float[] headingX = _appKeyGroups ? keyColumnX : columnX;
+            for (int i = 0; i < headings.Length; i++)
+                AppText(g, headings[i], _fSmall, Csub, new RectangleF(headingX[i], 245, _appKeyGroups ? 68 : 80, 22), i > 0);
             using (Pen pen = new Pen(Cline)) g.DrawLine(pen, Cx + 16, 273, Cx + Cw - 16, 273);
 
             const int pageSize = 7;
@@ -159,9 +185,24 @@ namespace KeyMouseStats
                     new RectangleF(349, y, 90, 20), false);
                 AppText(g, row.Source, _fAxis, Csub, new RectangleF(349, y + 20, 90, 16), false);
                 if (new RectangleF(349, y, 90, 37).Contains(mouse)) reason = row.Reason;
-                long[] values = { row.Keys, row.Clicks, row.Wheel };
-                for (int j = 0; j < 3; j++)
-                    AppText(g, Analysis.FmtCount(values[j]), _fBody, Ctext, new RectangleF(columnX[j + 1], y + 7, 80, 22), true);
+                if (_appKeyGroups)
+                {
+                    long[] groups;
+                    if (keyGroups != null && keyGroups.TryGetValue(row.ProcessPath ?? "", out groups))
+                    {
+                        long groupTotal = 0; foreach (long value in groups) groupTotal += value;
+                        for (int j = 0; j < 6; j++)
+                            AppText(g, groupTotal > 0 ? (groups[j] * 100.0 / groupTotal).ToString("0", CultureInfo.InvariantCulture) + "%" : "—", _fBody, Ctext,
+                                new RectangleF(keyColumnX[j], y + 7, 68, 22), true);
+                    }
+                    else AppText(g, "该区间无此维度", _fSmall, Csub, new RectangleF(330, y + 7, 220, 22), false);
+                }
+                else
+                {
+                    long[] values = { row.Keys, row.Clicks, row.Wheel };
+                    for (int j = 0; j < 3; j++)
+                        AppText(g, Analysis.FmtCount(values[j]), _fBody, Ctext, new RectangleF(columnX[j + 1], y + 7, 80, 22), true);
+                }
                 if (!row.Legacy)
                 {
                     RectangleF edit = new RectangleF(766, y + 5, 70, 27);
