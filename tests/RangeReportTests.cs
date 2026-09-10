@@ -90,6 +90,18 @@ internal static class RangeReportTests
             else if (k < 14) expectedPrevious += keys;
         }
         Store.Today.Keys = 999999;                       // 今日不计入任何区间
+        // 今天也带上 v11 维度的样本:累积类页面必须计入今天,对比类页面必须排除今天。
+        Store.Today.HoldCount = 7;
+        Store.Today.HoldTotalMs = 700;
+        Store.Today.HoldMaxMs = 150;
+        Store.Today.HoldBuckets[2] = 7;
+        KeyHold todayHold = new KeyHold();
+        todayHold.Count = 7; todayHold.TotalMs = 700; todayHold.MaxMs = 150;
+        Store.Today.Holds[65] = todayHold;
+        AppUsage todayApp = new AppUsage { ProcessPath = @"C:\Apps\code.exe", Title = "code", Keys = 40 };
+        todayApp.HasKeyGroups = true;
+        todayApp.KeyGroups[0] = 40;
+        Store.Today.Apps[todayApp.Id] = todayApp;
 
         // ---- 区间回顾 ----
         DateTime rangeStart = DateTime.Today.AddDays(-7), rangeEnd = DateTime.Today;
@@ -166,19 +178,21 @@ internal static class RangeReportTests
 
         // ---- 按键时长 ----
         HoldReportData hold = HoldReportData.Build(rangeStart, rangeEnd);
-        Check(hold.Samples == 600, "hold samples aggregate over the range");
-        Check(hold.Keys == expectedCurrent, "coverage uses the range key count");
+        Check(hold.Samples == 600 + 7, "hold samples aggregate over the range and include today");
+        Check(hold.Caption.Contains("含今日"), "hold page states that today is included");
+        Check(hold.Keys == expectedCurrent + 999999, "coverage denominator includes today");
         long bucketTotal = 0;
         foreach (long value in hold.Buckets) bucketTotal += value;
         Check(bucketTotal == hold.Samples, "hold buckets conserve the sample count");
         Check(hold.TopKeys.Count >= 1, "keys are ranked by mean hold time");
         Check(hold.CardValues[3].EndsWith("%"), "coverage card is a percentage");
         Check(hold.Rows.Count >= 1 && hold.Rows[0][0] != "--", "per-key hold rows exist");
-        Check(Math.Abs(hold.TotalMs - 600 * 120) < 1, "hold total duration aggregates");
+        Check(Math.Abs(hold.TotalMs - (600 * 120 + 700)) < 1, "hold total duration aggregates");
 
         // ---- 应用 × 键位 ----
         AppKeyReportData appKey = AppKeyReportData.Build(rangeStart, rangeEnd);
-        Check(appKey.AttributedKeys == expectedCurrent, "app key groups aggregate by process");
+        Check(appKey.AttributedKeys == expectedCurrent + 40, "app key groups aggregate by process and include today");
+        Check(appKey.Caption.Contains("含今日"), "app key page states that today is included");
         Check(appKey.Groups.Count == 1, "one recorded app");
         Check(appKey.Groups[0][0] + appKey.Groups[0][4] == appKey.AttributedKeys, "group counts conserve the attributed keys");
         Check(appKey.Headings.Length == 7, "app key table has six group columns");

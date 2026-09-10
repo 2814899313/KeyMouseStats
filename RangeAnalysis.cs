@@ -33,8 +33,19 @@ namespace KeyMouseStats
         /// </summary>
         public static bool TryNormalize(DateTime start, DateTime end, out DateTime from, out DateTime to)
         {
+            return TryNormalize(start, end, false, out from, out to);
+        }
+
+        /// <summary>
+        /// includeToday 为 true 时把进行中的今天也算进来,用于累积 / 构成类页面
+        /// (按键时长、应用键位);期间对比与分布仍只使用完整日。
+        /// </summary>
+        public static bool TryNormalize(DateTime start, DateTime end, bool includeToday, out DateTime from, out DateTime to)
+        {
             from = start.Date;
-            to = CompleteEnd(end);
+            to = includeToday
+                ? (end.Date > DateTime.Today ? DateTime.Today : end.Date)
+                : CompleteEnd(end);
             return to >= from;
         }
 
@@ -285,9 +296,15 @@ namespace KeyMouseStats
         /// <summary>规范化并聚合区间;区间内没有任何完整日时返回空指标(Days = 0)。</summary>
         public static RangeMetrics Of(DateTime start, DateTime end)
         {
+            return Of(start, end, false);
+        }
+
+        /// <summary>includeToday 为 true 时把进行中的今天一并计入(累积 / 构成类页面)。</summary>
+        public static RangeMetrics Of(DateTime start, DateTime end, bool includeToday)
+        {
             RangeMetrics metrics = new RangeMetrics();
             DateTime from, to;
-            if (!RangeRules.TryNormalize(start, end, out from, out to)) return metrics;
+            if (!RangeRules.TryNormalize(start, end, includeToday, out from, out to)) return metrics;
             metrics.Start = from;
             metrics.End = to;
             metrics.Days = (int)(to - from).TotalDays + 1;

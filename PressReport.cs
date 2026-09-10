@@ -44,14 +44,14 @@ namespace KeyMouseStats
         public static HoldReportData Build(DateTime start, DateTime end)
         {
             HoldReportData data = new HoldReportData();
-            RangeMetrics range = RangeStats.Of(start, end);
+            RangeMetrics range = RangeStats.Of(start, end, true);   // 累积类页面:把进行中的今天算进来
             data.Days = range.Days;
             data.Observed = range.Observed;
             data.Keys = range.Keys;
 
             Dictionary<int, KeyHold> byKey = new Dictionary<int, KeyHold>();
             DateTime from, to;
-            if (RangeRules.TryNormalize(start, end, out from, out to))
+            if (RangeRules.TryNormalize(start, end, true, out from, out to))
             {
                 for (DateTime date = from; date <= to; date = date.AddDays(1))
                 {
@@ -94,13 +94,13 @@ namespace KeyMouseStats
             double coverage = data.Keys > 0 ? (double)data.Samples / data.Keys : double.NaN;
             double mean = data.Samples > 0 ? data.TotalMs / data.Samples : double.NaN;
             data.Caption = range.Days == 0 ? "所选区间没有完整日"
-                : range.Start.ToString("MM.dd") + "—" + range.End.ToString("MM.dd") + " · " + range.Days + " 天 · 按住时长分布与逐键排行";
+                : range.Start.ToString("MM.dd") + "—" + range.End.ToString("MM.dd") + " · " + range.Days + " 天" + (range.End == DateTime.Today ? "（含今日，进行中）" : "") + " · 按住时长分布与逐键排行";
             data.Cards = new string[] { "有效样本", "平均时长", "最长一次", "覆盖率" };
             data.CardValues = new string[] { data.Samples.ToString("N0", CultureInfo.InvariantCulture),
                 Milliseconds(mean), Milliseconds(data.MaxMs),
                 RangeMath.IsNumber(coverage) && coverage > 0 ? (coverage * 100).ToString("0.#", CultureInfo.InvariantCulture) + "%" : "--" };
             data.Footer = data.Samples == 0
-                ? "区间内没有按键时长样本;该维度从 1.7.3 起采集,旧记录不会反推。"
+                ? "区间内没有按键时长样本。该维度从 1.7.3 起采集,更早的日期不会有数据;如果今天已经在打字,样本会在几秒内出现。"
                 : "有效样本 " + data.Samples.ToString("N0", CultureInfo.InvariantCulture) + " · 丢弃 " + data.Discarded.ToString("N0", CultureInfo.InvariantCulture)
                     + "（丢失抬起 / 超过 60 秒）· 覆盖率按该区间击键数计算。";
             return data;
@@ -253,14 +253,14 @@ namespace KeyMouseStats
         public static AppKeyReportData Build(DateTime start, DateTime end)
         {
             AppKeyReportData data = new AppKeyReportData();
-            RangeMetrics range = RangeStats.Of(start, end);
+            RangeMetrics range = RangeStats.Of(start, end, true);   // 累积类页面:把进行中的今天算进来
             data.Days = range.Days;
             data.Observed = range.Observed;
             data.TotalKeys = range.Keys;
 
             Dictionary<string, long[]> byPath = new Dictionary<string, long[]>(StringComparer.OrdinalIgnoreCase);
             DateTime from, to;
-            if (RangeRules.TryNormalize(start, end, out from, out to))
+            if (RangeRules.TryNormalize(start, end, true, out from, out to))
             {
                 for (DateTime date = from; date <= to; date = date.AddDays(1))
                 {
@@ -312,12 +312,12 @@ namespace KeyMouseStats
             foreach (KeyValuePair<string, long[]> pair in list)
                 for (int i = 0; i < 6; i++) grand[i] += pair.Value[i];
             data.Caption = range.Days == 0 ? "所选区间没有完整日"
-                : range.Start.ToString("MM.dd") + "—" + range.End.ToString("MM.dd") + " · " + range.Days + " 天 · 各应用的按键构成（Top 8）";
+                : range.Start.ToString("MM.dd") + "—" + range.End.ToString("MM.dd") + " · " + range.Days + " 天" + (range.End == DateTime.Today ? "（含今日，进行中）" : "") + " · 各应用的按键构成（Top 8）";
             data.Cards = new string[] { "已归因击键", "记录应用", "移动类占比", "覆盖率" };
             data.CardValues = new string[] { data.AttributedKeys.ToString("N0", CultureInfo.InvariantCulture), list.Count.ToString(CultureInfo.InvariantCulture),
                 Share(grand[0], data.AttributedKeys), Share(data.AttributedKeys, data.TotalKeys) };
             data.Footer = data.AttributedKeys == 0
-                ? "区间内没有应用 × 键位样本;该维度从 1.7.3 起采集,旧记录不会反推。"
+                ? "区间内没有应用 × 键位样本。该维度从 1.7.3 起采集,更早的日期不会有数据;如果今天已经在使用,样本会在几秒内出现。"
                 : "每行以该应用自身的击键数为分母;未归因部分单列,不按比例分摊。";
             return data;
         }
