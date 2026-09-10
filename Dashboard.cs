@@ -192,7 +192,7 @@ namespace KeyMouseStats
                 case 0xBD: return "-";
                 case 0xBE: return ".";
                 case 0xBF: return "/";
-                case 0xC0: return "`";
+                case 0xC0: return "";
                 case 0xDB: return "[";
                 case 0xDC: return "\\";
                 case 0xDD: return "]";
@@ -257,6 +257,7 @@ namespace KeyMouseStats
         private readonly RectangleF[] _tabRects = new RectangleF[6];
         private readonly List<RectangleF> _chips = new List<RectangleF>();
         private readonly List<int> _chipIds = new List<int>();
+        private bool _showHoldDuration, _appKeyGroups;
         private RectangleF _closeRect, _exportRect;
 
         private float _s = 1f;
@@ -390,6 +391,64 @@ namespace KeyMouseStats
 
         private bool Hit(RectangleF r, PointF p) { return r.Contains(p); }
 
+        // ---------------------------------------------------------------- 与统计报告互跳
+
+        /// <summary>当前页对应的报告页。</summary>
+        private int ReportTabForPage()
+        {
+            switch (_tab)
+            {
+                case TabId.Trend: return 1;      // 每日趋势
+                case TabId.Hours: return 12;     // 星期节律
+                case TabId.Keys: return _showHoldDuration ? 14 : 9;   // 按键时长 / 键位分布
+                case TabId.Apps: return _appKeyGroups ? 15 : 2;       // 应用键位 / 应用时间
+                default: return 11;              // 总览 / 洞察 → 区间回顾
+            }
+        }
+        /// <summary>当前页筛选对应的日期区间,带给报告作为自定义区间。</summary>
+        private void CurrentRange(out DateTime start, out DateTime end)
+        {
+            end = DateTime.Today;
+            switch (_tab)
+            {
+                case TabId.Keys:
+                    int[] days = { 1, 90, 7, 30 };
+                    int span = _keyRange >= 0 && _keyRange < days.Length ? days[_keyRange] : 1;
+                    start = span <= 1 ? DateTime.Today : DateTime.Today.AddDays(-(span - 1));
+                    break;
+                case TabId.Apps:
+                    start = _appDays <= 1 ? DateTime.Today : DateTime.Today.AddDays(-(_appDays - 1));
+                    break;
+                case TabId.Hours:
+                    start = _activeHourToday ? DateTime.Today : DateTime.Today.AddDays(-89);
+                    break;
+                case TabId.Trend:
+                    if (_trendHourly) { start = end = _hourlyTrendDay; }
+                    else start = DateTime.Today;
+                    break;
+                case TabId.Insights:
+                    start = end = _insightDay;
+                    break;
+                default:
+                    start = DateTime.Today;
+                    break;
+            }
+        }
+        private void OpenReport()
+        {
+            DateTime start, end;
+            CurrentRange(out start, out end);
+            using (StatisticsReport report = new StatisticsReport(end, ReportTabForPage(), start, end)) report.ShowDialog(this);
+        }
+        /// <summary>报告里点「在面板中查看」时调用:切到使用洞察的会话时间轴并定位到那一天。</summary>
+        internal void FocusFromReport(DateTime day)
+        {
+            _insightDay = day.Date > DateTime.Today ? DateTime.Today : day.Date;
+            _tab = TabId.Insights; _insightView = 1; _sessionPage = 0;
+            Invalidate();
+            Activate();
+        }
+
         protected override void OnMouseClick(MouseEventArgs e)
         {
             base.OnMouseClick(e);
@@ -439,12 +498,14 @@ namespace KeyMouseStats
 
         private void ApplyChip(int id)
         {
+            if (id == 45) { OpenReport(); return; }   // 在报告中查看(带当前筛选)
             if (id >= 300) { ApplyHourlyTrendChip(id); return; }
             if (id >= 200) { ApplyInsightChip(id); return; }
             if (_tab == TabId.Keys && (id == 76 || id == 77)) { _keyRange=id-74;return; }
             if (_tab == TabId.Keys && id == 75) { KeyboardMenu(); return; }
-            if (_tab == TabId.Keys && id == 74) { _showKeyboardHeatmap = true; return; }
-            if (_tab == TabId.Keys && (id == 72 || id == 73)) { _showKeyboardHeatmap = false; _showCombos = id == 73; return; }
+            if (_tab == TabId.Keys && id == 74) { _showKeyboardHeatmap = true; _showHoldDuration = false; return; }
+            if (_tab == TabId.Keys && (id == 72 || id == 73)) { _showKeyboardHeatmap = false; _showHoldDuration = false; _showCombos = id == 73; return; }
+            if (_tab == TabId.Keys && id == 78) { _showHoldDuration = !_showHoldDuration; if (_showHoldDuration) _showKeyboardHeatmap = false; return; }
             if (_tab == TabId.Hours && (id == 30 || id == 31)) { _activeHourToday = id == 30; return; }
             if (id < 70) { ApplyAppChip(id); return; }
             if (id >= 100) { _trendMetric = id - 100; return; }        // 100..103
@@ -709,6 +770,9 @@ namespace KeyMouseStats
         {
             using (Pen p = new Pen(Cline)) g.DrawLine(p, 200, 666, 1032, 666);
             _exportRect = new RectangleF(912, 680, 120, 28);
+            RectangleF reportRect = new RectangleF(778, 680, 124, 28);
+            _chips.Add(reportRect); _chipIds.Add(45);
+            PaintChip(g, reportRect, "在报告中查看", false, null);
             bool hov = Hit(_exportRect, ToBase(_mouse));
             using (GraphicsPath p = RoundedRect(_exportRect.X, _exportRect.Y, 120, 28, 8))
             using (SolidBrush b = new SolidBrush(hov ? ArtTheme.Mix(Cblue, Ctext, 0.18) : Cblue)) g.FillPath(b, p);
@@ -1512,6 +1576,54 @@ namespace KeyMouseStats
 
         // ---------------------------------------------------------------- 标签页:按键排行
 
+        /// <summary>按键排行的「按住时长」模式:复用区间聚合,口径与报告页一致。</summary>
+        private void PaintHoldRanking(Graphics g)
+        {
+            int[] spans = { 1, 90, 7, 30 };
+            int span = _keyRange >= 0 && _keyRange < spans.Length ? spans[_keyRange] : 1;
+            DateTime end = DateTime.Today;
+            DateTime start = span <= 1 ? DateTime.Today : DateTime.Today.AddDays(-(span - 1));
+            HoldReportData data = HoldReportData.Build(start, end);
+
+            PaintCard(g, Cx, 138, 560, 438, null);
+            PaintCard(g, Cx + 572, 138, Cw - 572, 438, null);
+            AppText(g, "每键平均按住时长" + (data.TopKeys.Count > 0 ? " · Top " + data.TopKeys.Count : ""), _fH2, Ctext, new RectangleF(Cx + 18, 148, 400, 24), false);
+            AppText(g, "覆盖 " + data.CardValues[3] + " · 样本 " + data.Samples, _fSmall, Csub, new RectangleF(Cx + 18, 172, 400, 20), false);
+            if (data.Samples == 0)
+            {
+                AppText(g, "该区间没有按键时长样本", _fNum2, Ctext, new RectangleF(Cx + 30, 300, 500, 40), false);
+                AppText(g, "按住时长从 1.7.3 起采集；更早的日期不会有数据。", _fBody, Csub, new RectangleF(Cx + 30, 345, 500, 30), false);
+                return;
+            }
+            double peak = 1;
+            foreach (KeyValuePair<int, KeyHold> pair in data.TopKeys) peak = Math.Max(peak, pair.Value.Mean);
+            for (int i = 0; i < data.TopKeys.Count; i++)
+            {
+                KeyValuePair<int, KeyHold> pair = data.TopKeys[i];
+                float y = 200 + i * 30;
+                AppText(g, Analysis.KeyName(pair.Key), _fBody, Ctext, new RectangleF(Cx + 18, y, 70, 22), false);
+                RectangleF track = new RectangleF(Cx + 92, y + 5, 330, 12);
+                using (SolidBrush b = new SolidBrush(Cbg)) g.FillRectangle(b, track);
+                using (SolidBrush b = new SolidBrush(Ccyan)) g.FillRectangle(b, track.X, track.Y, (float)(pair.Value.Mean / peak * track.Width), track.Height);
+                AppText(g, pair.Value.Mean.ToString("0", CultureInfo.InvariantCulture) + " ms · " + pair.Value.Count + " 次", _fSmall, Ctext,
+                    new RectangleF(Cx + 430, y, 120, 22), false);
+            }
+            if (data.TopKeys.Count == 0) AppText(g, "每个键至少 10 次样本才进入排行", _fBody, Csub, new RectangleF(Cx + 18, 210, 500, 24), false);
+
+            AppText(g, "按住时长分布 · 最大 " + data.CardValues[1], _fH2, Ctext, new RectangleF(Cx + 590, 148, 220, 24), false);
+            long bucketPeak = 1;
+            foreach (long value in data.Buckets) bucketPeak = Math.Max(bucketPeak, value);
+            float histLeft = Cx + 590, histBottom = 470, histTop = 230;
+            float step = (Cw - 590 - 20) / (float)data.Buckets.Length;
+            for (int i = 0; i < data.Buckets.Length; i++)
+            {
+                float height = (float)data.Buckets[i] / bucketPeak * (histBottom - histTop);
+                using (SolidBrush b = new SolidBrush(Cblue)) g.FillRectangle(b, histLeft + i * step + 1, histBottom - height, Math.Max(2, step - 4), height);
+                using (StringFormat centered = new StringFormat { Alignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap })
+                using (SolidBrush lb = new SolidBrush(Csub)) g.DrawString(HoldTracker.BucketLabelShort(i), _fAxis, lb, new RectangleF(histLeft + i * step - 4, histBottom + 2, step + 8, 18), centered);
+            }
+            AppText(g, data.Footer, _fSmall, Csub, new RectangleF(Cx + 590, 500, Cw - 610, 60), false);
+        }
         private void PaintKeys(Graphics g)
         {
             string[] ranges = { "今日", "近7天", "近30天", "近90天" };
@@ -1534,10 +1646,15 @@ namespace KeyMouseStats
 
             IEnumerable<DayRecord> src = KeyRangeDays();
 
+            RectangleF holdChoice = new RectangleF(Cx + 410, 98, 92, 30);
+            _chips.Add(holdChoice); _chipIds.Add(78);
+            PaintChip(g, holdChoice, "按住时长", _showHoldDuration && !_showKeyboardHeatmap, null);
+
             RectangleF heatChoice = new RectangleF(Cx + Cw - 294, 98, 98, 30);
             _chips.Add(heatChoice); _chipIds.Add(74);
             PaintChip(g, heatChoice, "键盘热力", _showKeyboardHeatmap, null);
             if (_showKeyboardHeatmap) { PaintKeyboardHeatmap(g, src); return; }
+            if (_showHoldDuration) { PaintHoldRanking(g); return; }
 
             List<KeyValuePair<string, long>> rank = _showCombos ? ShortcutStats.Ranking(src) : Analysis.KeyRanking(src);
             long total = 0;
