@@ -198,6 +198,27 @@ internal static class RangeReportTests
         Check(appKey.Headings.Length == 7, "app key table has six group columns");
         Check(appKey.Rows.Count >= 1 && appKey.Rows[0][0].Contains("code.exe"), "app row names the process");
 
+        // ---- 每个图表都必须从 Arrange 拿到 DPI 缩放 ----
+        // 绘制用 g.DpiX/96、命中用 UiScale,两者不一致时非 100% 缩放下鼠标会指错行。
+        Control[] charts = { new ReportVisual(DateTime.Today, 1), new RangeReportVisual(rangeStart, rangeEnd),
+            new DistributionReportVisual(rangeStart, rangeEnd), new HoldReportVisual(rangeStart, rangeEnd),
+            new AppKeyReportVisual(rangeStart, rangeEnd), new RhythmReportVisual(DateTime.Today) };
+        foreach (Control chart in charts)
+        {
+            using (ReportPage page = new ReportPage { Index = 11 })
+            {
+                page.Chart = chart;
+                page.List = new ReportList();
+                page.Controls.Add(page.List);
+                page.Controls.Add(chart);
+                page.Arrange(900, 1.5f);
+                System.Reflection.FieldInfo field = chart.GetType().GetField("UiScale",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+                Check(field != null, chart.GetType().Name + " exposes a ui scale");
+                Check(field != null && Math.Abs((float)field.GetValue(chart) - 1.5f) < 1e-6, chart.GetType().Name + " receives the ui scale");
+            }
+        }
+
         // ---- 渲染 ----
         Directory.CreateDirectory("previews");
         using (RangeReportVisual visual = new RangeReportVisual(rangeStart, rangeEnd))

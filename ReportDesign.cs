@@ -69,6 +69,11 @@ namespace KeyMouseStats
             }
             ReportVisual visual=Chart as ReportVisual;if(visual!=null)visual.UiScale=scale;
             CrossReportVisual cross=Chart as CrossReportVisual;if(cross!=null)cross.UiScale=scale;
+            RangeReportVisual rangeVisual=Chart as RangeReportVisual;if(rangeVisual!=null)rangeVisual.UiScale=scale;
+            RhythmReportVisual rhythmVisual=Chart as RhythmReportVisual;if(rhythmVisual!=null)rhythmVisual.UiScale=scale;
+            DistributionReportVisual distributionVisual=Chart as DistributionReportVisual;if(distributionVisual!=null)distributionVisual.UiScale=scale;
+            HoldReportVisual holdVisual=Chart as HoldReportVisual;if(holdVisual!=null)holdVisual.UiScale=scale;
+            AppKeyReportVisual appKeyVisual=Chart as AppKeyReportVisual;if(appKeyVisual!=null)appKeyVisual.UiScale=scale;
             int chartHeight=(int)(scale*(Index==0?ReportVisual.HabitHeight(width/scale):Index==7?325:Index==13?430:Index==15?432:Index==14?392:300));
             Chart.SetBounds(0,y,width,chartHeight);y+=chartHeight+gap;
             details.Text=(DetailsOpen?"▾ 收起明细":"▸ 查看明细")+"   ·   "+List.Items.Count+" 项";
