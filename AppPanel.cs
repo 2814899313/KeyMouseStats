@@ -153,11 +153,24 @@ namespace KeyMouseStats
             PaintCardBase(g, Cx, 235, Cw, 351);
             AppText(g, _appsByWindow ? "窗口标题 / 应用" : "应用 / 进程路径", _fH2, Ctext, new RectangleF(Cx + 18, 244, 300, 24), false);
             string[] headings = _appKeyGroups ? new[]{ "移动", "技能", "交互", "功能", "文字", "未归位" } : new[]{ "分类", "击键", "点击", "滚轮" };
-            float[] keyColumnX = { 330, 402, 474, 546, 618, 690 };
             float[] columnX = { 349, 446, 552, 648 };
-            float[] headingX = _appKeyGroups ? keyColumnX : columnX;
-            for (int i = 0; i < headings.Length; i++)
-                AppText(g, headings[i], _fSmall, Csub, new RectangleF(headingX[i], 245, _appKeyGroups ? 68 : 80, 22), i > 0);
+            const float keyBarX = 430f, keyBarW = 318f;
+            if (_appKeyGroups)
+            {
+                // 键位构成列用堆叠段表达：六类键组共用一条 100% 宽的条，图例代替表头。
+                for (int i = 0; i < headings.Length; i++)
+                {
+                    float legendX = keyBarX + i * (keyBarW / headings.Length);
+                    using (SolidBrush brush = new SolidBrush(colors[i]))
+                        g.FillRectangle(brush, legendX, 249, 8, 8);
+                    AppText(g, headings[i], _fSmall, Csub, new RectangleF(legendX + 12, 245, 60, 20), false);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < headings.Length; i++)
+                    AppText(g, headings[i], _fSmall, Csub, new RectangleF(columnX[i], 245, 80, 22), i > 0);
+            }
             using (Pen pen = new Pen(Cline)) g.DrawLine(pen, Cx + 16, 273, Cx + Cw - 16, 273);
 
             const int pageSize = 7;
@@ -187,15 +200,38 @@ namespace KeyMouseStats
                 if (new RectangleF(349, y, 90, 37).Contains(mouse)) reason = row.Reason;
                 if (_appKeyGroups)
                 {
-                    long[] groups;
-                    if (keyGroups != null && keyGroups.TryGetValue(row.ProcessPath ?? "", out groups))
+                    long[] groups = null;
+                    long groupTotal = 0;
+                    if (keyGroups != null) keyGroups.TryGetValue(row.ProcessPath ?? "", out groups);
+                    if (groups != null)
+                        foreach (long value in groups) groupTotal += value;
+                    if (groupTotal > 0)
                     {
-                        long groupTotal = 0; foreach (long value in groups) groupTotal += value;
+                        RectangleF bar = new RectangleF(keyBarX, y + 11, keyBarW, 14);
+                        using (SolidBrush track = new SolidBrush(Color.FromArgb(28, Ctext))) g.FillRectangle(track, bar);
+                        float cursor = bar.X;
                         for (int j = 0; j < 6; j++)
-                            AppText(g, groupTotal > 0 ? (groups[j] * 100.0 / groupTotal).ToString("0", CultureInfo.InvariantCulture) + "%" : "—", _fBody, Ctext,
-                                new RectangleF(keyColumnX[j], y + 7, 68, 22), true);
+                        {
+                            float segment = (float)(bar.Width * groups[j] / (double)groupTotal);
+                            if (segment <= 0) continue;
+                            using (SolidBrush brush = new SolidBrush(colors[j])) g.FillRectangle(brush, cursor, bar.Y, segment, bar.Height);
+                            cursor += segment;
+                        }
+                        using (Pen pen = new Pen(Color.FromArgb(60, Ctext))) g.DrawRectangle(pen, bar.X, bar.Y, bar.Width, bar.Height);
+                        if (bar.Contains(mouse))
+                        {
+                            StringBuilder detail = new StringBuilder();
+                            detail.Append(row.Name).Append("：");
+                            for (int j = 0; j < 6; j++)
+                            {
+                                if (j > 0) detail.Append(" · ");
+                                detail.Append(headings[j]).Append(' ')
+                                    .Append((groups[j] * 100.0 / groupTotal).ToString("0.#", CultureInfo.InvariantCulture)).Append('%');
+                            }
+                            reason = detail.ToString();
+                        }
                     }
-                    else AppText(g, "该区间无此维度", _fSmall, Csub, new RectangleF(330, y + 7, 220, 22), false);
+                    else AppText(g, "该区间无此维度", _fSmall, Csub, new RectangleF(keyBarX, y + 7, 220, 22), false);
                 }
                 else
                 {
