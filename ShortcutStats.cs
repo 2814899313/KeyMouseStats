@@ -9,8 +9,19 @@ namespace KeyMouseStats
     {
         private readonly HashSet<int> _held = new HashSet<int>();
         private readonly Dictionary<int, int> _physicalHeld = new Dictionary<int, int>();
+        private readonly Dictionary<int, long> _physicalDownTicks = new Dictionary<int, long>();
         private readonly HashSet<int> _seeded = new HashSet<int>();
-        public void Reset() { _held.Clear(); _physicalHeld.Clear(); _seeded.Clear(); }
+
+        /// <summary>
+        /// 同一个物理键在「已经按住」的状态下再次收到按下时的间隔上限(毫秒)。
+        /// Windows 的自动重复由系统输入栈产生:首次重复延迟最长 1000 ms(SPI_SETKEYBOARDDELAY 上界),
+        /// 之后最慢约 400 ms 一次。间隔超过这个上界的「重复按下」只可能是上一次抬起被吞掉之后的
+        /// 重新按下(Alt+Tab、Win 键、提权进程、游戏吞键)。阈值 1200 ms:高于任何自动重复间隔,
+        /// 又足够低,能拦住绝大多数丢抬起后重新按下的场景。
+        /// </summary>
+        public const double RePressGapMs = 1200;
+
+        public void Reset() { _held.Clear(); _physicalHeld.Clear(); _physicalDownTicks.Clear(); _seeded.Clear(); }
         // Called outside a hook callback: async state has not yet been updated inside the callback.
         public void Seed(Func<int, bool> isDown)
         {
@@ -29,9 +40,14 @@ namespace KeyMouseStats
         public string Process(int message, int vk, uint scan, uint flags)
         {
             bool firstPress;
-            return Process(message, vk, scan, flags, out firstPress);
+            return Process(message, vk, scan, flags, System.Diagnostics.Stopwatch.GetTimestamp(), out firstPress);
         }
         public string Process(int message, int vk, uint scan, uint flags, out bool firstPress)
+        {
+            return Process(message, vk, scan, flags, System.Diagnostics.Stopwatch.GetTimestamp(), out firstPress);
+        }
+        /// <summary>ticks 为单调时钟(Stopwatch.GetTimestamp),用于区分自动重复与丢失抬起后的重新按下。</summary>
+        public string Process(int message, int vk, uint scan, uint flags, long ticks, out bool firstPress)
         {
             firstPress = false;
             bool down = message == Native.WM_KEYDOWN || message == Native.WM_SYSKEYDOWN;
@@ -44,12 +60,29 @@ namespace KeyMouseStats
             {
                 int original;
                 if (_physicalHeld.TryGetValue(physical, out original)) { _physicalHeld.Remove(physical); vk = original; }
+                _physicalDownTicks.Remove(physical);
                 _seeded.Remove(vk);
                 if (!_physicalHeld.ContainsValue(vk)) _held.Remove(vk);
                 return null;
             }
-            if (_physicalHeld.ContainsKey(physical)) return null;
+            if (_physicalHeld.ContainsKey(physical))
+            {
+                long lastDown;
+                if (!_physicalDownTicks.TryGetValue(physical, out lastDown)) lastDown = ticks;
+                if ((ticks - lastDown) * 1000.0 / System.Diagnostics.Stopwatch.Frequency <= RePressGapMs)
+                {
+                    // 自动重复:只刷新这个物理键的活跃时间,不产生新的击键,也不重置时长起点。
+                    if (ticks > lastDown) _physicalDownTicks[physical] = ticks;
+                    return null;
+                }
+                // 间隔远超自动重复的上界:上一次抬起被吞掉,这个键在我们眼里一直「按着」。
+                // 当成一次全新的按下重新起算,否则这次抬起会和很旧的按下配对,产出一次虚假的长按,
+                // 同时让这次真实敲击完全不被计数。
+                _physicalHeld.Remove(physical);
+                _physicalDownTicks.Remove(physical);
+            }
             _physicalHeld[physical] = vk;
+            _physicalDownTicks[physical] = ticks;
             if (_seeded.Contains(vk)) return null;
             _held.Add(vk);
             firstPress = true;

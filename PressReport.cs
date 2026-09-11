@@ -21,7 +21,7 @@ namespace KeyMouseStats
     /// <summary>按键时长报告。</summary>
     internal sealed class HoldReportData
     {
-        public const string Note = "按键时长 = 首次按下到抬起的间隔,由单调时钟测量;系统的自动重复不会重置起点。\n超过 60 秒的按住视为挂机或丢失抬起,直接丢弃并计入丢弃数;锁屏、休眠与退出时未抬起的按键同样丢弃。按住时长不是按压力度——普通键盘没有压力感应。\n覆盖率 = 有效样本 ÷ 该区间击键数。丢 UP 是常态(Alt+Tab、Win 键、游戏吞键),覆盖率偏低说明样本偏少,结论要谨慎。";
+        public const string Note = "按键时长 = 首次按下到抬起的间隔,由单调时钟测量;系统的自动重复不会重置起点。\n抬起被吞掉之后再次按下同一个键时,旧样本按丢失抬起丢弃,以本次按下重新起算;超过 60 秒的按住视为挂机或丢失抬起,直接丢弃并计入丢弃数;锁屏、休眠、断开与退出时未抬起的按键同样丢弃。按住时长不是按压力度——普通键盘没有压力感应。\n覆盖率 = 有效样本 ÷ 该区间击键数。丢 UP 是常态(Alt+Tab、Win 键、游戏吞键),覆盖率偏低说明样本偏少,结论要谨慎。";
 
         public string Caption, Footer;
         public string[] Cards = new string[4], CardValues = new string[4];

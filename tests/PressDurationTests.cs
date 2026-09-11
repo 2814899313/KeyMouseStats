@@ -56,15 +56,22 @@ internal static class PressDurationTests
         Check(day.Holds[65].Count == 1, "per-key sample recorded");
         Near(day.Holds[65].Mean, 120, 2, "per-key mean");
 
-        // ---- 自动重复不重置起点 ----
+        // ---- 自动重复不重置起点:重复的按下在 ShortcutTracker 就被丢掉,不会到达 HoldTracker ----
         HoldTracker.DiscardPending();
         day = NewDay(DateTime.Today);
+        ShortcutTracker seq = new ShortcutTracker();
         start = Stopwatch.GetTimestamp();
+        bool first;
+        seq.Process(Native.WM_KEYDOWN, 87, 0, 0, start, out first);
         HoldTracker.Press(day, 87, start);
-        HoldTracker.Press(day, 87, start + Ticks(300));   // 自动重复
-        HoldTracker.Press(day, 87, start + Ticks(600));
+        for (int i = 1; i <= 20; i++)
+        {
+            seq.Process(Native.WM_KEYDOWN, 87, 0, 0, start + Ticks(i * 30), out first);
+            if (first) HoldTracker.Press(day, 87, start + Ticks(i * 30));   // 自动重复不该走到这里
+        }
+        Check(HoldTracker.PendingCount == 1, "auto-repeat keeps a single pending press");
         Check(HoldTracker.Release(87, start + Ticks(800)), "auto-repeat still settles once");
-        Check(day.HoldCount == 1, "auto-repeat does not create extra samples");
+        Check(day.HoldCount == 1 && day.HoldDiscarded == 0, "auto-repeat does not create extra samples");
         Near(day.HoldTotalMs, 800, 3, "auto-repeat keeps the first press time");
 
         // ---- 丢 UP / 超长按 ----
@@ -87,6 +94,44 @@ internal static class PressDurationTests
         HoldTracker.Press(yesterday, 65, start);
         Check(HoldTracker.Release(65, start + Ticks(150)), "cross-day release settles");
         Check(yesterday.HoldCount == 1 && today.HoldCount == 0, "cross-day sample belongs to the day it started");
+
+        // ---- 1.7.5:丢失抬起后的重新按下不与旧按下配对 ----
+        HoldTracker.DiscardPending();
+        day = NewDay(DateTime.Today);
+        start = Stopwatch.GetTimestamp();
+        HoldTracker.Press(day, 65, start);                                  // 第一次按下
+        HoldTracker.Press(day, 65, start + Ticks(3000));                    // UP 丢失,3 秒后重新按下
+        Check(day.HoldDiscarded == 1 && day.HoldCount == 0, "a re-press without a release discards the stale sample");
+        Check(HoldTracker.PendingCount == 1, "the re-press opens a fresh pending sample");
+        Check(HoldTracker.Release(65, start + Ticks(3100)), "the fresh sample settles on its own release");
+        Check(day.HoldCount == 1 && day.HoldDiscarded == 1, "only the real hold survives");
+        Near(day.HoldTotalMs, 100, 2, "the 3 s gap between two taps never becomes a hold sample");
+        Check(day.HoldBuckets[2] == 1 && day.HoldMaxMs < 200, "the surviving sample lands in the 100-200 ms bucket");
+        Check(day.Holds[65].Count == 1, "per-key detail keeps exactly one sample");
+
+        // 跨日的重新按下:旧样本丢弃在它开始的那天,新样本算在重新按下那天。
+        HoldTracker.DiscardPending();
+        yesterday = NewDay(DateTime.Today.AddDays(-1));
+        today = NewDay(DateTime.Today);
+        start = Stopwatch.GetTimestamp();
+        HoldTracker.Press(yesterday, 65, start);
+        HoldTracker.Press(today, 65, start + Ticks(4000));
+        Check(yesterday.HoldDiscarded == 1 && today.HoldDiscarded == 0, "the stale sample is discarded on the day it started");
+        Check(HoldTracker.Release(65, start + Ticks(4100)), "the cross-day re-press settles");
+        Check(today.HoldCount == 1 && yesterday.HoldCount == 0, "the fresh sample belongs to the re-press day");
+
+        // ---- 1.7.5:锁屏 / 休眠丢弃还按着的键 ----
+        HoldTracker.DiscardPending();
+        day = NewDay(DateTime.Today);
+        HoldTracker.Press(day, 65, Stopwatch.GetTimestamp());
+        HoldTracker.Press(day, 87, Stopwatch.GetTimestamp());
+        ActivityMonitor.Message(0x02B1, new IntPtr(7));                     // WM_WTSSESSION_CHANGE:锁屏
+        Check(HoldTracker.PendingCount == 0 && day.HoldDiscarded == 2, "locking the session discards every key still down");
+        HoldTracker.Press(day, 65, Stopwatch.GetTimestamp());
+        ActivityMonitor.Message(0x0218, new IntPtr(4));                     // WM_POWERBROADCAST:休眠
+        Check(HoldTracker.PendingCount == 0 && day.HoldDiscarded == 3, "suspending discards keys still down");
+        ActivityMonitor.Message(0x02B1, new IntPtr(8));                     // 解锁
+        ActivityMonitor.Message(0x0218, new IntPtr(7));                     // 恢复
 
         // ---- 编码往返 ----
         HoldTracker.DiscardPending();
@@ -117,6 +162,19 @@ internal static class PressDurationTests
         Check(keyRestored.Holds.Count == 2, "per-key detail round trip");
         Check(keyRestored.Holds[65].Count == 5 && keyRestored.Holds[87].Count == 1, "per-key counts round trip");
         Check(string.Join(",", HoldCodec.EncodeAll(day)).Contains("hold_key_v1="), "EncodeAll emits both lines");
+
+        // ---- 1.7.5:同一天区段重复解析时,汇总与逐键明细都累加,保持自洽 ----
+        DayRecord twice = NewDay(DateTime.Today);
+        HoldCodec.Load(twice, encoded);
+        HoldCodec.LoadKeys(twice, keys);
+        HoldCodec.Load(twice, encoded);
+        HoldCodec.LoadKeys(twice, keys);
+        long twiceBuckets = 0, twiceDetail = 0;
+        foreach (long value in twice.HoldBuckets) twiceBuckets += value;
+        foreach (KeyValuePair<int, KeyHold> pair in twice.Holds) twiceDetail += pair.Value.Count;
+        Check(twice.HoldCount == day.HoldCount * 2, "repeated day sections accumulate instead of overwriting");
+        Check(twiceBuckets == twice.HoldCount && twiceDetail == twice.HoldCount,
+            "repeated day sections keep summary and per-key detail consistent");
 
         // ---- 逐键 Top N 截断:次数与总时长必须守恒 ----
         HoldTracker.DiscardPending();

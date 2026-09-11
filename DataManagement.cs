@@ -397,6 +397,28 @@ namespace KeyMouseStats
                 if (keyCounts > day.Keys)
                     issues.Add(new ValidationIssue(warning, date, "逐键计数之和大于当日击键。"));
 
+                // 按住时长:分档、逐键明细与总量必须自洽(1.7.5 起也检查这一维度)。
+                long holdBuckets = Sum(day.HoldBuckets);
+                if (holdBuckets != day.HoldCount)
+                    issues.Add(new ValidationIssue(error, date, "按住时长分档之和与样本数不一致("
+                        + holdBuckets.ToString(CultureInfo.InvariantCulture) + " / " + day.HoldCount.ToString(CultureInfo.InvariantCulture) + ")。"));
+                if (day.Holds.Count > 0)
+                {
+                    long holdSamples = 0;
+                    foreach (KeyHold hold in day.Holds.Values) holdSamples += hold.Count;
+                    if (holdSamples != day.HoldCount)
+                        issues.Add(new ValidationIssue(error, date, "按住时长逐键样本之和与样本数不一致("
+                            + holdSamples.ToString(CultureInfo.InvariantCulture) + " / " + day.HoldCount.ToString(CultureInfo.InvariantCulture) + ")。"));
+                }
+                if (day.HoldCount > 0)
+                {
+                    double holdMean = day.HoldTotalMs / day.HoldCount;
+                    if (holdMean <= 0 || holdMean > HoldTracker.MaxHoldMs)
+                        issues.Add(new ValidationIssue(error, date, "按住时长均值超出 0—60 秒。"));
+                    else if (holdMean > day.HoldMaxMs + 0.5)
+                        issues.Add(new ValidationIssue(error, date, "按住时长均值大于最长一次。"));
+                }
+
                 double sessionSeconds = 0;
                 foreach (ActiveSession session in day.Sessions)
                 {

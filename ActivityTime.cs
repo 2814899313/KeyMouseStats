@@ -192,14 +192,16 @@ namespace KeyMouseStats
             int code = unchecked((int)value.ToInt64());
             if (message == 0x02B1) // WM_WTSSESSION_CHANGE
             {
-                if (code == 7) { _locked = true; Tracker.Reset(SessionStartReason.Lock); }
+                // 锁屏 / 断开 / 休眠期间钩子收不到抬起事件(安全桌面、会话切换),还按着的键
+                // 必须在这里丢弃:否则它们会一直挂在 pending 里,和之后某次抬起错配成长按样本。
+                if (code == 7) { _locked = true; HoldTracker.DiscardPending(); Tracker.Reset(SessionStartReason.Lock); }
                 else if (code == 8) { _locked = false; Tracker.Reset(SessionStartReason.Lock); }
-                else if (code == 2 || code == 4 || code == 6) { _disconnected = true; Tracker.Reset(SessionStartReason.Disconnect); }
+                else if (code == 2 || code == 4 || code == 6) { _disconnected = true; HoldTracker.DiscardPending(); Tracker.Reset(SessionStartReason.Disconnect); }
                 else if (code == 1 || code == 3 || code == 5) { _disconnected = false; Tracker.Reset(SessionStartReason.Disconnect); }
             }
             else if (message == 0x0218) // WM_POWERBROADCAST
             {
-                if (code == 4) { _suspended = true; Tracker.Reset(SessionStartReason.Suspend); }
+                if (code == 4) { _suspended = true; HoldTracker.DiscardPending(); Tracker.Reset(SessionStartReason.Suspend); }
                 else if (code == 7 || code == 18) { _suspended = false; Tracker.Reset(SessionStartReason.Suspend); }
             }
         }

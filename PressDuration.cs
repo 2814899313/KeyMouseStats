@@ -7,6 +7,12 @@
 //    · 应用×键位:每次击键把「前台应用 + 键位分组」累加,保存时只写当天击键最多的
 //      Top N 个应用与「其他应用汇总」,避免逐键×应用的矩阵撑爆文本格式。
 //
+//  1.7.5 修正丢失抬起:
+//    · 丢失 UP 之后再按同一个键(Alt+Tab、Win 键、提权进程、游戏吞键),旧样本按「丢失抬起」
+//      丢弃并以本次按下重新起算;此前它会与更早的按下配对,把两次敲击之间的间隔记成一次
+//      虚假的长按,并让那次真实敲击的时长凭空消失。
+//    · 锁屏 / 休眠 / 会话断开、以及整体替换数据时丢弃未抬起的按键(此前只在退出时丢弃)。
+//
 //  口径与限制(页面与文档都要说明):
 //    · 按住时长不是按压力度,普通键盘没有压力感应。
 //    · 丢 UP 是常态(Alt+Tab、Win 键、游戏吞键、锁屏、进程被杀),覆盖率必须如实显示。
@@ -59,11 +65,19 @@ namespace KeyMouseStats
         }
         private static readonly Dictionary<int, Pending> Down = new Dictionary<int, Pending>();
 
-        /// <summary>首次按下(自动重复不会重置起点)。</summary>
+        /// <summary>首次按下(自动重复不会重置起点)。
+        /// 若上一个按下还没等到抬起(抬起被吞掉),旧样本按「丢失抬起」丢弃,再以本次按下重新起算。</summary>
         public static void Press(DayRecord day, int vk, long ticks)
         {
             if (day == null || vk <= 0) return;
-            if (Down.ContainsKey(vk)) return;
+            Pending stale;
+            if (Down.TryGetValue(vk, out stale))
+            {
+                // 同一个键在“已按下”状态下又收到一次首次按下 = 上一次抬起丢了。
+                // 丢弃而不是结算:那段间隔里按键并没有真的被按住。
+                Down.Remove(vk);
+                Discard(stale);
+            }
             Pending pending;
             pending.Day = day;
             pending.Ticks = ticks;
@@ -86,7 +100,7 @@ namespace KeyMouseStats
             double milliseconds = (ticks - pending.Ticks) * 1000.0 / Stopwatch.Frequency;
             if (milliseconds <= 0 || milliseconds > MaxHoldMs)
             {
-                day.HoldDiscarded++;
+                Discard(pending);
                 return false;
             }
             day.HoldCount++;
@@ -99,13 +113,19 @@ namespace KeyMouseStats
             return true;
         }
 
-        /// <summary>把还按着的键全部丢弃(锁屏、休眠、断开、退出前调用)。</summary>
+        /// <summary>丢弃一个样本:计入按下那天的丢弃数。</summary>
+        private static void Discard(Pending pending)
+        {
+            if (pending.Day != null) pending.Day.HoldDiscarded++;
+        }
+
+        /// <summary>把还按着的键全部丢弃(锁屏、休眠、断开、替换数据、退出前调用)。</summary>
         public static int DiscardPending()
         {
             int count = 0;
             foreach (KeyValuePair<int, Pending> pending in Down)
             {
-                if (pending.Value.Day != null) pending.Value.Day.HoldDiscarded++;
+                Discard(pending.Value);
                 count++;
             }
             Down.Clear();
@@ -180,12 +200,15 @@ namespace KeyMouseStats
                 {
                     long count;
                     if (long.TryParse(buckets[i].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out count) && count > 0)
-                        day.HoldBuckets[i] = count;
+                        day.HoldBuckets[i] += count;
                 }
-                day.HoldCount = Math.Max(0, ParseLong(parts[1]));
-                day.HoldTotalMs = ParseNumber(parts[2], 0);
-                day.HoldMaxMs = ParseNumber(parts[3], 0);
-                day.HoldDiscarded = Math.Max(0, ParseLong(parts[4]));
+                // 与逐键明细、AddFrom 一致采用累加语义:同一天区段重复出现时,汇总与明细仍然自洽
+                // (此前汇总是覆盖、明细是累加,分档合计会与逐键合计对不上)。
+                day.HoldCount += Math.Max(0, ParseLong(parts[1]));
+                day.HoldTotalMs += ParseNumber(parts[2], 0);
+                double max = ParseNumber(parts[3], 0);
+                if (max > day.HoldMaxMs) day.HoldMaxMs = max;
+                day.HoldDiscarded += Math.Max(0, ParseLong(parts[4]));
             }
             catch (FormatException) { }
         }

@@ -8,6 +8,7 @@ internal static class ShortcutTests
 {
     private static int _checks;
     private static void Check(bool pass, string name) { if (!pass) throw new Exception(name); _checks++; }
+    private static long Ticks(double ms) { return (long)(ms / 1000.0 * System.Diagnostics.Stopwatch.Frequency); }
     private static string Down(ShortcutTracker tracker, int key) { return tracker.Process(Native.WM_KEYDOWN, key, 0, 0); }
     private static void Up(ShortcutTracker tracker, int key) { tracker.Process(Native.WM_KEYUP, key, 0, 0); }
     private static void Main()
@@ -43,6 +44,23 @@ internal static class ShortcutTests
         Check(!firstPress, "startup-held key is not counted again");
         tracker.Process(Native.WM_KEYDOWN, 0x100, 0, 0, out firstPress);
         Check(!firstPress, "invalid key cannot enter physical-key totals");
+
+        // ---- 1.7.5:区分自动重复与「丢失抬起后的重新按下」 ----
+        tracker.Reset();
+        long probe = 10000000;
+        tracker.Process(Native.WM_KEYDOWN, 0x57, 0, 0, probe, out firstPress);
+        Check(firstPress, "re-press probe starts with a counted press");
+        tracker.Process(Native.WM_KEYDOWN, 0x57, 0, 0, probe + Ticks(30), out firstPress);
+        Check(!firstPress, "a 30 ms autorepeat stays suppressed");
+        tracker.Process(Native.WM_KEYDOWN, 0x57, 0, 0, probe + Ticks(1000), out firstPress);
+        Check(!firstPress, "an autorepeat at the 1 s repeat-delay ceiling stays suppressed");
+        Check(tracker.Process(Native.WM_KEYDOWN, 0x57, 0, 0, probe + Ticks(1000 + ShortcutTracker.RePressGapMs + 100), out firstPress) == null && firstPress,
+            "a silent gap beyond the repeat ceiling counts as a fresh press");
+        tracker.Process(Native.WM_KEYUP, 0x57, 0, 0, out firstPress);
+        Check(!firstPress, "the recovered press still releases on a single keyup");
+        tracker.Process(Native.WM_KEYDOWN, 0x57, 0, 0, probe + Ticks(4000), out firstPress);
+        Check(firstPress, "a normal press after the release counts again");
+        tracker.Reset();
         tracker.Reset();
         Check(Down(tracker, 0x43) == null, "plain key ignored"); Up(tracker, 0x43);
         Check(Down(tracker, 0xA2) == null, "modifier alone ignored");

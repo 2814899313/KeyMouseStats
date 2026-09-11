@@ -20,6 +20,12 @@ internal static class DataManagementTests
         Check(Math.Abs(actual - expected) < 1e-9, name + " (expected " + expected + ", got " + actual + ")");
     }
 
+    private static bool HasIssue(List<ValidationIssue> issues, string fragment)
+    {
+        foreach (ValidationIssue issue in issues) if (issue.Message.Contains(fragment)) return true;
+        return false;
+    }
+
     private static DayRecord Day(DateTime date, long keys, double active)
     {
         DayRecord day = new DayRecord();
@@ -140,6 +146,33 @@ internal static class DataManagementTests
             foreach (ValidationIssue issue in issues)
                 if (issue.Severity == ValidationIssue.Level.Warning && issue.Message.Contains("小时击键")) bucketWarning = true;
             Check(bucketWarning, "hour buckets exceeding daily keys is reported as a warning");
+
+            // ---- 逐日校验:按住时长自洽(1.7.5 新增这一维度) ----
+            Store.History.Clear(); Store.Total = new Counters(); Store.RollDay(DateTime.Today);
+            DayRecord holdDay = Day(DateTime.Today.AddDays(-1), 200, 600);
+            holdDay.HoldCount = 10;
+            holdDay.HoldTotalMs = 10 * 120;
+            holdDay.HoldMaxMs = 200;
+            holdDay.HoldBuckets[2] = 10;
+            holdDay.Holds[65] = new KeyHold { Count = 10, TotalMs = 10 * 120, MaxMs = 200 };
+            Store.History[holdDay.Date] = holdDay;
+            Check(DataManagement.Validate().Count == 0, "a consistent hold record reports no issues");
+
+            holdDay.HoldBuckets[2] = 9;
+            Check(HasIssue(DataManagement.Validate(), "分档之和"), "hold buckets diverging from the sample count is reported");
+            holdDay.HoldBuckets[2] = 10;
+
+            holdDay.Holds[65].Count = 11;
+            Check(HasIssue(DataManagement.Validate(), "逐键样本之和"), "hold per-key detail diverging from the sample count is reported");
+            holdDay.Holds[65].Count = 10;
+
+            holdDay.HoldTotalMs = 10 * 90000;
+            Check(HasIssue(DataManagement.Validate(), "均值超出"), "an impossible hold mean is reported");
+            holdDay.HoldTotalMs = 10 * 120;
+
+            holdDay.HoldMaxMs = 50;
+            Check(HasIssue(DataManagement.Validate(), "均值大于最长一次"), "a hold mean above the longest sample is reported");
+            holdDay.HoldMaxMs = 200;
 
             // ---- DayRecord 相加守恒 ----
             DayRecord left = Day(DateTime.Today, 100, 600);

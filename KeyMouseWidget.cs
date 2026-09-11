@@ -548,6 +548,9 @@ namespace KeyMouseStats
         /// <summary>把解析结果写入静态状态。applySettings 为 false 时只接管日记录(导入合并用)。</summary>
         internal static void ApplyParsed(Parsed parsed, bool applySettings)
         {
+            // 整体替换会丢掉所有旧的 DayRecord 对象:还按着的键必须在这里丢弃,
+            // 否则之后那次抬起会结算到一个已经脱离 History 的记录上,样本既不落盘也不计丢弃。
+            HoldTracker.DiscardPending();
             History.Clear();
             foreach (KeyValuePair<DateTime, DayRecord> day in parsed.History) History[day.Key] = day.Value;
             Total = parsed.Total;
@@ -1191,13 +1194,16 @@ namespace KeyMouseStats
                     }
                     if (msg == Native.WM_KEYDOWN || msg == Native.WM_SYSKEYDOWN)
                     {
+                        // 按下时刻必须在这里取:后面的前台应用抓取(跨进程 GetWindowText)与记账
+                        // 可能阻塞几十到几百毫秒,晚取会把每一次按住时长都系统性地算短。
+                        long downTicks = System.Diagnostics.Stopwatch.GetTimestamp();
                         Native.KBDLLHOOKSTRUCT info = (Native.KBDLLHOOKSTRUCT)
                             Marshal.PtrToStructure(lParam, typeof(Native.KBDLLHOOKSTRUCT));
                         if (info.vkCode != 0)
                         {
                             int vk = (int)info.vkCode;
                             bool firstPress;
-                            string combo = _combos.Process(msg, vk, info.scanCode, info.flags, out firstPress);
+                            string combo = _combos.Process(msg, vk, info.scanCode, info.flags, downTicks, out firstPress);
                             if (firstPress)
                             {
                                 DateTime now = DateTime.Now;
@@ -1213,7 +1219,7 @@ namespace KeyMouseStats
                                 t.KeyCounts[vk] = c + 1;
                                 KeyboardHeat.Record(t, vk, info.scanCode, info.flags);
                                 Store.Total.Keys++;
-                                HoldTracker.Press(t, vk, System.Diagnostics.Stopwatch.GetTimestamp());
+                                HoldTracker.Press(t, vk, downTicks);
                                 AppActivity.Record(t, foreground, 0, KeySemantics.Group(vk));
                                 LiveRate.AddKey();
                                 MarkDirty();
