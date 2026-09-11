@@ -21,17 +21,34 @@ namespace KeyMouseStats
     /// <summary>按键时长报告。</summary>
     internal sealed class HoldReportData
     {
-        public const string Note = "按键时长 = 首次按下到抬起的间隔,由单调时钟测量;系统的自动重复不会重置起点。\n抬起被吞掉之后再次按下同一个键时,旧样本按丢失抬起丢弃,以本次按下重新起算;超过 60 秒的按住视为挂机或丢失抬起,直接丢弃并计入丢弃数;锁屏、休眠、断开与退出时未抬起的按键同样丢弃。按住时长不是按压力度——普通键盘没有压力感应。\n覆盖率 = 有效样本 ÷ 该区间击键数。丢 UP 是常态(Alt+Tab、Win 键、游戏吞键),覆盖率偏低说明样本偏少,结论要谨慎。";
+        public const string Note = "按键时长 = 首次按下到抬起的间隔,由单调时钟测量;系统的自动重复不会重置起点。\n抬起被吞掉之后再次按下同一个键时,旧样本按丢失抬起丢弃,以本次按下重新起算;超过 60 秒的按住视为挂机或丢失抬起,直接丢弃并计入丢弃数;锁屏、休眠、断开与退出时未抬起的按键同样丢弃。按住时长不是按压力度——普通键盘没有压力感应。\n覆盖率 = 有效样本 ÷ 该区间击键数。丢 UP 是常态(Alt+Tab、Win 键、游戏吞键),覆盖率偏低说明样本偏少,结论要谨慎。\n「累计按住」是逐键时长之和,同时按下多个键会各算一份,可以大于「有键按下」;「有键按下」是至少一个键被按住的墙钟时间(区间并集,不重复计时),它不会超过活跃时长。\n全量累计不受保留期影响:超期日折进月度归档后仍计入;1.7.6 之前的数据没有「有键按下」这一项。";
 
         public string Caption, Footer;
-        public string[] Cards = new string[4], CardValues = new string[4];
-        public string[] Headings = { "按键", "平均时长", "次数", "最长", "占样本" };
+        public string[] Cards = new string[6], CardValues = new string[6];
+        public string[] Headings = { "按键", "累计时长", "平均时长", "次数", "最长", "占样本", "占累计" };
         public readonly List<string[]> Rows = new List<string[]>();
         public readonly long[] Buckets = new long[HoldTracker.BucketCount];
         public readonly List<KeyValuePair<int, KeyHold>> TopKeys = new List<KeyValuePair<int, KeyHold>>();
         public long Samples, Discarded, Keys;
         public double TotalMs, MaxMs;
+        /// <summary>区间内的活跃时长与「有键按下」的墙钟占用(秒)。</summary>
+        public double ActiveSeconds, HoldActiveSeconds;
+        /// <summary>全量累计(含已归档月份),来自 Store.Total。</summary>
+        public double AllTotalMs, AllActiveSeconds;
+        public long AllSamples, AllDiscarded;
         public int Days, Observed;
+
+        /// <summary>紧凑的时长文字:毫秒 / 秒 / 分 / 时各取一位小数。</summary>
+        public static string Duration(double milliseconds)
+        {
+            if (double.IsNaN(milliseconds) || double.IsInfinity(milliseconds) || milliseconds < 0) return "--";
+            if (milliseconds < 1000) return milliseconds.ToString("0", CultureInfo.InvariantCulture) + " ms";
+            double seconds = milliseconds / 1000.0;
+            if (seconds < 60) return seconds.ToString("0.#", CultureInfo.InvariantCulture) + " s";
+            double minutes = seconds / 60.0;
+            if (minutes < 60) return minutes.ToString("0.#", CultureInfo.InvariantCulture) + " 分";
+            return (minutes / 60.0).ToString("0.#", CultureInfo.InvariantCulture) + " 时";
+        }
 
         private static string Milliseconds(double value)
         {
@@ -48,8 +65,7 @@ namespace KeyMouseStats
             data.Days = range.Days;
             // 区间只覆盖今天时完整日为空,但进行中的今天仍有样本:除了「完整日区间以昨天结尾」,
             // 请求区间本身覆盖今天时也要接上今天,否则「今日」会连今天的样本一起丢掉。
-            bool includesToday = (range.Days > 0 && range.End == DateTime.Today.AddDays(-1))
-                || (end.Date >= DateTime.Today && start.Date <= DateTime.Today);
+            bool includesToday = RangeStats.IncludesRunningToday(range, start, end);
             data.Observed = range.Observed + (includesToday && !Store.Today.IsEmpty ? 1 : 0);
             data.Keys = range.Keys + (includesToday ? Store.Today.Keys : 0);
 
@@ -65,6 +81,8 @@ namespace KeyMouseStats
                     data.Samples += day.HoldCount;
                     data.Discarded += day.HoldDiscarded;
                     data.TotalMs += day.HoldTotalMs;
+                    data.ActiveSeconds += day.ActiveSeconds;
+                    data.HoldActiveSeconds += day.HoldActiveSeconds;
                     if (day.HoldMaxMs > data.MaxMs) data.MaxMs = day.HoldMaxMs;
                     for (int i = 0; i < data.Buckets.Length && i < day.HoldBuckets.Length; i++) data.Buckets[i] += day.HoldBuckets[i];
                     foreach (KeyValuePair<int, KeyHold> pair in day.Holds)
@@ -88,30 +106,55 @@ namespace KeyMouseStats
                 return order != 0 ? order : string.Compare(Analysis.KeyName(a.Key), Analysis.KeyName(b.Key), StringComparison.Ordinal);
             });
             for (int i = 0; i < ranked.Count && i < 8; i++) data.TopKeys.Add(ranked[i]);
-            foreach (KeyValuePair<int, KeyHold> pair in new List<KeyValuePair<int, KeyHold>>(byKey)) if (!ranked.Contains(pair)) ranked.Add(pair);
 
-            for (int i = 0; i < ranked.Count; i++)
+            // 明细按「累计时长」从多到少:累计视图回答的是哪个键占掉了最多按住时间。
+            List<KeyValuePair<int, KeyHold>> byTotal = new List<KeyValuePair<int, KeyHold>>(byKey);
+            byTotal.Sort(delegate(KeyValuePair<int, KeyHold> a, KeyValuePair<int, KeyHold> b)
             {
-                if (ranked[i].Value.Count < 5) continue;
-                data.Rows.Add(new string[] { Analysis.KeyName(ranked[i].Key), Milliseconds(ranked[i].Value.Mean),
-                    ranked[i].Value.Count.ToString(CultureInfo.InvariantCulture), Milliseconds(ranked[i].Value.MaxMs),
-                    data.Samples > 0 ? (ranked[i].Value.Count * 100.0 / data.Samples).ToString("0.#", CultureInfo.InvariantCulture) + "%" : "--" });
+                int order = b.Value.TotalMs.CompareTo(a.Value.TotalMs);
+                return order != 0 ? order : string.Compare(Analysis.KeyName(a.Key), Analysis.KeyName(b.Key), StringComparison.Ordinal);
+            });
+
+            for (int i = 0; i < byTotal.Count; i++)
+            {
+                if (byTotal[i].Value.Count < 5) continue;
+                data.Rows.Add(new string[] { Analysis.KeyName(byTotal[i].Key),
+                    Duration(byTotal[i].Value.TotalMs),
+                    Milliseconds(byTotal[i].Value.Mean),
+                    byTotal[i].Value.Count.ToString(CultureInfo.InvariantCulture),
+                    Milliseconds(byTotal[i].Value.MaxMs),
+                    data.Samples > 0 ? Share(byTotal[i].Value.Count, data.Samples) : "--",
+                    data.TotalMs > 0 ? Share(byTotal[i].Value.TotalMs, data.TotalMs) : "--" });
             }
-            if (data.Rows.Count == 0) data.Rows.Add(new string[] { "暂无有效样本", "--", "0", "--", "--" });
+            if (data.Rows.Count == 0)
+                data.Rows.Add(new string[] { "暂无有效样本", "--", "--", "0", "--", "--", "--" });
 
             double coverage = data.Keys > 0 ? (double)data.Samples / data.Keys : double.NaN;
             double mean = data.Samples > 0 ? data.TotalMs / data.Samples : double.NaN;
-            data.Caption = range.Days == 0 ? (includesToday ? "今日（进行中） · 按住时长分布与逐键排行" : "所选区间没有完整日")
-                : range.Start.ToString("MM.dd") + "—" + range.End.ToString("MM.dd") + " · " + range.Days + " 个完整日" + (includesToday ? " + 今日（进行中）" : "") + " · 按住时长分布与逐键排行";
-            data.Cards = new string[] { "有效样本", "平均时长", "最长一次", "覆盖率" };
+            data.AllSamples = Store.Total.HoldCount;
+            data.AllDiscarded = Store.Total.HoldDiscarded;
+            data.AllTotalMs = Store.Total.HoldTotalMs;
+            data.AllActiveSeconds = Store.Total.HoldActiveSeconds;
+            data.Caption = range.Days == 0 ? (includesToday ? "今日（进行中） · 累计、分布与逐键排行" : "所选区间没有完整日")
+                : range.Start.ToString("MM.dd") + "—" + range.End.ToString("MM.dd") + " · " + range.Days + " 个完整日" + (includesToday ? " + 今日（进行中）" : "") + " · 累计、分布与逐键排行";
+            data.Cards = new string[] { "有效样本", "平均时长", "最长一次", "覆盖率", "累计按住", "有键按下" };
             data.CardValues = new string[] { data.Samples.ToString("N0", CultureInfo.InvariantCulture),
                 Milliseconds(mean), Milliseconds(data.MaxMs),
-                RangeMath.IsNumber(coverage) && coverage > 0 ? (coverage * 100).ToString("0.#", CultureInfo.InvariantCulture) + "%" : "--" };
+                RangeMath.IsNumber(coverage) && coverage > 0 ? (coverage * 100).ToString("0.#", CultureInfo.InvariantCulture) + "%" : "--",
+                Duration(data.TotalMs), Duration(data.HoldActiveSeconds * 1000) };
             data.Footer = data.Samples == 0
                 ? "区间内没有按键时长样本。该维度从 1.7.3 起采集,更早的日期不会有数据;如果今天已经在打字,样本会在几秒内出现。"
-                : "有效样本 " + data.Samples.ToString("N0", CultureInfo.InvariantCulture) + " · 丢弃 " + data.Discarded.ToString("N0", CultureInfo.InvariantCulture)
-                    + "（丢失抬起 / 超过 60 秒）· 覆盖率按该区间击键数计算；刚升级到 1.7.3 的当天采样只覆盖升级之后的时段,覆盖率会偏低。";
+                : "累计按住 " + Duration(data.TotalMs) + " · 有键按下 " + Duration(data.HoldActiveSeconds * 1000)
+                    + (data.ActiveSeconds > 0 ? "（活跃时长的 " + Share(data.HoldActiveSeconds, data.ActiveSeconds) + "）" : "")
+                    + " · 丢弃 " + data.Discarded.ToString("N0", CultureInfo.InvariantCulture)
+                    + " · 全量累计(含归档) " + Duration(data.AllTotalMs)
+                    + (data.AllActiveSeconds > 0 ? " / 有键按下 " + Duration(data.AllActiveSeconds * 1000) : "");
             return data;
+        }
+
+        private static string Share(double part, double whole)
+        {
+            return whole > 0 ? (part * 100.0 / whole).ToString("0.#", CultureInfo.InvariantCulture) + "%" : "--";
         }
     }
 
@@ -180,8 +223,8 @@ namespace KeyMouseStats
             using (Font body = new Font("Microsoft YaHei UI", 12, FontStyle.Regular, GraphicsUnit.Pixel))
             using (Font large = new Font("Segoe UI", 23, FontStyle.Bold, GraphicsUnit.Pixel))
             {
-                float card = (w - 44) / 4;
-                for (int i = 0; i < 4; i++)
+                float card = (w - 60) / 6;
+                for (int i = 0; i < data.Cards.Length; i++)
                 {
                     float x = 10 + i * (card + 8);
                     ReportDesign.Surface(g, new RectangleF(x, 10, card, 67), t.Card, t.Line);
@@ -231,7 +274,8 @@ namespace KeyMouseStats
                     TextAt(g, pair.Value.Mean.ToString("0", CultureInfo.InvariantCulture) + " ms · " + pair.Value.Count + " 次", small, t.Muted,
                         new RectangleF(track.Right + 6, y, 130, 20));
                     targets.Add(new KeyValuePair<RectangleF, string>(new RectangleF(right, y, half - 20, 22),
-                        Analysis.KeyName(pair.Key) + " · 平均 " + pair.Value.Mean.ToString("0", CultureInfo.InvariantCulture) + " ms · 最长 "
+                        Analysis.KeyName(pair.Key) + " · 累计 " + HoldReportData.Duration(pair.Value.TotalMs) + " · 平均 "
+                        + pair.Value.Mean.ToString("0", CultureInfo.InvariantCulture) + " ms · 最长 "
                         + pair.Value.MaxMs.ToString("0", CultureInfo.InvariantCulture) + " ms · " + pair.Value.Count + " 次"));
                 }
 
@@ -267,8 +311,7 @@ namespace KeyMouseStats
             RangeMetrics range = RangeStats.Of(start, end, false);   // 只取完整日;今天由下面显式接上
             data.Days = range.Days;
             // 同 HoldReportData:只选「今日」时完整日为空,今天的归因仍要算进来。
-            bool includesToday = (range.Days > 0 && range.End == DateTime.Today.AddDays(-1))
-                || (end.Date >= DateTime.Today && start.Date <= DateTime.Today);
+            bool includesToday = RangeStats.IncludesRunningToday(range, start, end);
             data.Observed = range.Observed + (includesToday && !Store.Today.IsEmpty ? 1 : 0);
             data.TotalKeys = range.Keys + (includesToday ? Store.Today.Keys : 0);
 

@@ -176,6 +176,36 @@ internal static class PressDurationTests
         Check(twiceBuckets == twice.HoldCount && twiceDetail == twice.HoldCount,
             "repeated day sections keep summary and per-key detail consistent");
 
+        // ---- 1.7.6:有键按下是墙钟并集,不是逐键相加 ----
+        HoldTracker.DiscardPending();
+        day = NewDay(DateTime.Today);
+        start = Stopwatch.GetTimestamp();
+        HoldTracker.Press(day, 65, start);
+        HoldTracker.Press(day, 87, start + Ticks(100));            // 同时按住第二个键
+        Check(HoldTracker.Release(65, start + Ticks(400)), "first key releases");
+        Check(day.HoldActiveSeconds == 0, "the wall-clock span stays open while another key is down");
+        Check(HoldTracker.Release(87, start + Ticks(700)), "second key releases");
+        Near(day.HoldActiveSeconds, 0.7, 0.01, "wall-clock span counts the union once, not once per key");
+        Near(day.HoldTotalMs, 400 + 600, 2, "per-key durations still add up separately");
+        Check(day.HoldTotalMs > day.HoldActiveSeconds * 1000, "overlapping keys make the per-key sum exceed the wall-clock span");
+
+        // ---- 1.7.6:丢弃会让墙钟区间收口,但不产生样本 ----
+        HoldTracker.DiscardPending();
+        day = NewDay(DateTime.Today);
+        start = Stopwatch.GetTimestamp();
+        HoldTracker.Press(day, 65, start);
+        Check(HoldTracker.DiscardPending(start + Ticks(500)) == 1, "the pending key is discarded on request");
+        Near(day.HoldActiveSeconds, 0.5, 0.01, "discarding a pending key closes the wall-clock span");
+        Check(day.HoldCount == 0 && day.HoldDiscarded == 1, "the discarded key adds no sample");
+
+        // ---- 1.7.6:超长的一段(休眠或丢事件)不计入墙钟 ----
+        HoldTracker.DiscardPending();
+        day = NewDay(DateTime.Today);
+        start = Stopwatch.GetTimestamp();
+        HoldTracker.Press(day, 65, start);
+        HoldTracker.DiscardPending(start + Ticks(HoldTracker.MaxActiveSpanMs + 1000));
+        Check(day.HoldActiveSeconds == 0, "an absurdly long span is not credited as held time");
+
         // ---- 逐键 Top N 截断:次数与总时长必须守恒 ----
         HoldTracker.DiscardPending();
         day = NewDay(DateTime.Today);
@@ -303,6 +333,54 @@ internal static class PressDurationTests
             try { Directory.Delete(directory, true); } catch { }
         }
 
+        // ---- 1.7.6:墙钟占用、全量累计与归档字段都要能落盘并读回 ----
+        // 用新的数据目录:这样 Save 是第一次写文件,不需要 File.Replace(某些受限环境会拒绝它)。
+        string roundTripDir = Path.Combine(Path.GetTempPath(), "KeyMouseHoldTests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(roundTripDir);
+        Store.DataDirectory = roundTripDir;
+        try
+        {
+            Store.History.Clear();
+            Store.Total = new Counters();
+            Store.Archives.Clear();
+            Store.RollDay(DateTime.Today);
+            Store.KeepDays = 30;
+            DayRecord expired = NewDay(DateTime.Today.AddDays(-45));
+            expired.Keys = 500; expired.HoldCount = 40; expired.HoldTotalMs = 40 * 130;
+            expired.HoldMaxMs = 400; expired.HoldActiveSeconds = 22.5;
+            Store.History[expired.Date] = expired;
+            DayRecord recent = NewDay(DateTime.Today.AddDays(-2));
+            recent.Keys = 10; recent.HoldCount = 5; recent.HoldTotalMs = 600;
+            recent.HoldMaxMs = 200; recent.HoldActiveSeconds = 7.25;
+            Store.History[recent.Date] = recent;
+            Store.Total.HoldCount = 40; Store.Total.HoldTotalMs = 40 * 130; Store.Total.HoldMaxMs = 400;
+            Store.Total.HoldActiveSeconds = 22.5; Store.Total.HoldDiscarded = 3;
+            Store.Save();
+            Check(Store.Archives.Count == 1, "the expired day is archived");
+            foreach (MonthArchive archive in Store.Archives.Values)
+                Check(archive.HoldCount == 40 && Math.Abs(archive.HoldActiveSeconds - 22.5) < 0.001,
+                    "the archive keeps the hold totals instead of dropping them");
+
+            Store.History.Clear();
+            Store.Total = new Counters();
+            Store.Archives.Clear();
+            Store.Load();
+            Check(Store.Total.HoldCount == 40 && Store.Total.HoldDiscarded == 3
+                && Math.Abs(Store.Total.HoldTotalMs - 40 * 130) < 0.001 && Math.Abs(Store.Total.HoldActiveSeconds - 22.5) < 0.001,
+                "the all-time hold totals survive a save/load round trip");
+            Check(Math.Abs(Store.History[recent.Date].HoldActiveSeconds - 7.25) < 0.001,
+                "a day's wall-clock hold time round trips");
+            Check(Store.Archives.Count == 1, "the archive survives a save/load round trip");
+            foreach (MonthArchive archive in Store.Archives.Values)
+                Check(archive.HoldCount == 40 && Math.Abs(archive.HoldTotalMs - 40 * 130) < 0.001,
+                    "archived hold fields round trip");
+            Store.KeepDays = 365;
+        }
+        finally
+        {
+            try { Directory.Delete(roundTripDir, true); } catch { }
+        }
+
         // ---- 只选「今日」:完整日为空,但进行中的今天必须照旧计入 ----
         string todayDir = Path.Combine(Path.GetTempPath(), "KeyMouseTodayTests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(todayDir);
@@ -326,6 +404,25 @@ internal static class PressDurationTests
             Check(held.Keys == 1000, "today-only range still counts the running day's keys");
             Check(held.TopKeys.Count == 1 && held.TopKeys[0].Key == 87, "today-only range still ranks keys");
             Check(held.Caption.Contains("今日"), "today-only caption names the running day");
+
+            // ---- 1.7.6:全量累计接在 Store.Total 上 ----
+            // 用一个独立的日记录做归因目标:Store.Today 后面还有区间断言,不能被这些样本改动。
+            HoldTracker.DiscardPending();
+            Store.Total = new Counters();
+            DayRecord probeDay = NewDay(DateTime.Today);
+            long live = Stopwatch.GetTimestamp();
+            HoldTracker.Press(probeDay, 65, live);
+            HoldTracker.Release(65, live + Ticks(150));
+            Check(Store.Total.HoldCount == 1, "a settled sample lands in the all-time total");
+            Near(Store.Total.HoldTotalMs, 150, 3, "the all-time total keeps the duration");
+            Near(Store.Total.HoldActiveSeconds, 0.15, 0.02, "the all-time total keeps the wall-clock span");
+            Check(Store.Total.HoldMaxMs > 0, "the all-time total keeps the longest sample");
+            HoldTracker.Release(65, live + Ticks(500));
+            Check(Store.Total.HoldDiscarded == 0, "a release without a press is not counted as discarded");
+            HoldTracker.Press(probeDay, 87, live + Ticks(1000));
+            HoldTracker.Release(87, live + Ticks(1000 + HoldTracker.MaxHoldMs + 1000));
+            Check(Store.Total.HoldDiscarded == 1, "a discarded sample lands in the all-time total");
+            HoldTracker.DiscardPending();
 
             AppKeyReportData apps = AppKeyReportData.Build(DateTime.Today, DateTime.Today);
             Check(apps.AttributedKeys == 1000, "today-only range still attributes app keys");

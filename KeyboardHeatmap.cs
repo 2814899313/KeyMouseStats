@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -33,12 +33,22 @@ namespace KeyMouseStats
         { long old; counts.TryGetValue(id, out old); counts[id] = old + count; }
         public static long Count(Dictionary<int, long> counts, int id)
         { long value; return counts.TryGetValue(id, out value) ? value : 0; }
+        /// <summary>一个虚拟键只归属一个规范键位;旧记录按按键名近似归位,不能重复计 Enter。</summary>
+        private static Dictionary<int, int> Canonical()
+        {
+            Dictionary<int, int> canonical = new Dictionary<int, int>();
+            foreach (HeatKey key in Layout(1)) if (key.Vk > 0 && !canonical.ContainsKey(key.Vk)) canonical[key.Vk] = key.Scan;
+            return canonical;
+        }
+        /// <summary>配列里没有这个虚拟键时的近似归位(通用 Ctrl / Alt / Shift)。</summary>
+        private static int FallbackScan(int vk)
+        {
+            return vk == 16 ? 0x2a : vk == 17 ? 0x1d : vk == 18 ? 0x38 : 0;
+        }
         public static Dictionary<int, long> Aggregate(IEnumerable<DayRecord> days, out long legacy, out long total)
         {
             Dictionary<int, long> result = new Dictionary<int, long>();
-            // A legacy virtual key belongs to one canonical key only; never duplicate Enter counts.
-            Dictionary<int, int> canonical = new Dictionary<int, int>();
-            foreach (HeatKey key in Layout(1)) if (key.Vk > 0 && !canonical.ContainsKey(key.Vk)) canonical[key.Vk] = key.Scan;
+            Dictionary<int, int> canonical = Canonical();
             legacy = total = 0;
             foreach (DayRecord day in days)
             {
@@ -49,11 +59,55 @@ namespace KeyMouseStats
                     legacy += remainder; total += remainder;
                     int id;
                     if (canonical.TryGetValue(pair.Key, out id)) Add(result, id, remainder);
-                    else if (pair.Key == 16 || pair.Key == 17 || pair.Key == 18)
-                        Add(result, pair.Key == 16 ? 0x2a : pair.Key == 17 ? 0x1d : 0x38, remainder);
+                    else if (pair.Key == 16 || pair.Key == 17 || pair.Key == 18) Add(result, FallbackScan(pair.Key), remainder);
                 }
             }
             return result;
+        }
+
+        /// <summary>
+        /// 1.7.6:逐键累计按住时长(毫秒),键为扫描码,归属规则与次数热力完全一致。
+        /// 逐键明细只按虚拟键保存,所以主区 Enter 与小键盘 Enter 会合并到同一个键位;
+        /// Top N 截断的「其他按键」与配列里没有的键无法定位,计入 unmapped。
+        /// total 含 unmapped,因此「配列覆盖」对两种口径都成立。
+        /// </summary>
+        public static Dictionary<int, KeyHold> AggregateHolds(IEnumerable<DayRecord> days, out long unmapped, out long total)
+        {
+            Dictionary<int, KeyHold> result = new Dictionary<int, KeyHold>();
+            Dictionary<int, int> canonical = Canonical();
+            unmapped = total = 0;
+            foreach (DayRecord day in days)
+            {
+                foreach (KeyValuePair<int, KeyHold> pair in day.Holds)
+                {
+                    double milliseconds = pair.Value.TotalMs;
+                    if (milliseconds <= 0) continue;
+                    total += (long)Math.Round(milliseconds);
+                    long rounded = (long)Math.Round(milliseconds);
+                    if (rounded <= 0) continue;
+                    if (pair.Key == HoldTracker.OtherKey) { unmapped += rounded; continue; }
+                    int id;
+                    if (!canonical.TryGetValue(pair.Key, out id)) id = FallbackScan(pair.Key);
+                    if (id == 0) { unmapped += rounded; continue; }
+                    KeyHold hold;
+                    if (!result.TryGetValue(id, out hold)) { hold = new KeyHold(); result[id] = hold; }
+                    hold.Count += pair.Value.Count;
+                    hold.TotalMs += milliseconds;
+                    if (pair.Value.MaxMs > hold.MaxMs) hold.MaxMs = pair.Value.MaxMs;
+                }
+            }
+            return result;
+        }
+        /// <summary>某个键位的累计按住时长(毫秒);没有样本时为 0。</summary>
+        public static double HoldMs(Dictionary<int, KeyHold> holds, int id)
+        {
+            KeyHold hold;
+            return holds != null && holds.TryGetValue(id, out hold) ? hold.TotalMs : 0;
+        }
+        public static KeyHold HoldDetail(Dictionary<int, KeyHold> holds, int id)
+        {
+            KeyHold hold;
+            return holds != null && holds.TryGetValue(id, out hold) ? hold : null;
         }
         private static void Row(List<HeatKey> keys, string labels, int[] scans, int[] vks, float y, float first, float last)
         {
@@ -173,16 +227,26 @@ namespace KeyMouseStats
             {
                 long legacy,total;
                 Dictionary<int,long> counts=KeyboardHeat.Aggregate(KeyRangeDays(),out legacy,out total);
+                long unmappedHold;long holdTotal;
+                Dictionary<int,KeyHold> holds=KeyboardHeat.AggregateHolds(KeyRangeDays(),out unmappedHold,out holdTotal);
                 Dictionary<int,string> names=new Dictionary<int,string>();
                 foreach(HeatKey key in KeyboardHeat.Layout(1)) names[key.Scan]=key.Label;
-                System.Text.StringBuilder csv=new System.Text.StringBuilder("扫描码,键位,次数,占全部击键比例,范围内旧记录次数\r\n");
+                System.Text.StringBuilder csv=new System.Text.StringBuilder("扫描码,键位,次数,占全部击键比例,累计按住毫秒,平均按住毫秒,范围内旧记录次数\r\n");
                 List<int> ids=new List<int>(counts.Keys);ids.Sort();
                 foreach(int id in ids)
                 {
                     string name;names.TryGetValue(id,out name);
+                    KeyHold hold=KeyboardHeat.HoldDetail(holds,id);
+                    double holdMs=hold==null?0:hold.TotalMs;
                     csv.Append(id).Append(',').Append('"').Append((name??"配列外按键").Replace("\"","\"\"")).Append("\",").Append(counts[id]).Append(',')
-                        .Append((total>0?(double)counts[id]/total:0).ToString("0.######",CultureInfo.InvariantCulture)).Append(',').Append(legacy).AppendLine();
+                        .Append((total>0?(double)counts[id]/total:0).ToString("0.######",CultureInfo.InvariantCulture)).Append(',')
+                        .Append(holdMs.ToString("0",CultureInfo.InvariantCulture)).Append(',')
+                        .Append((hold!=null&&hold.Count>0?(holdMs/hold.Count).ToString("0.#",CultureInfo.InvariantCulture):"0")).Append(',')
+                        .Append(legacy).AppendLine();
                 }
+                csv.AppendLine();
+                csv.AppendLine("# 按住时长合计(毫秒),"+holdTotal+",其中无法定位到键位,"+unmappedHold);
+                csv.AppendLine("# 逐键明细只按虚拟键保存:主区 Enter 与小键盘 Enter 合并;Top 48 以外的按键无法定位。");
                 string path=System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),"键盘热力_"+DateTime.Now.ToString("yyyyMMdd_HHmmss_fff")+".csv");
                 System.IO.File.WriteAllText(path,csv.ToString(),new System.Text.UTF8Encoding(true));
                 ThemeMessage.Show(this,"已导出：\n"+path,"导出成功",MessageBoxButtons.OK,MessageBoxIcon.Information);
@@ -193,6 +257,7 @@ namespace KeyMouseStats
         private Bitmap _keyboardPlate;
         private string _keyboardPlateStamp;
         private bool _showKeyboardHeatmap;
+        private bool _keyboardHoldMode;   // 1.7.6:热力图口径——false 击键次数 / true 累计按住时长
         private bool _keyboardDevicesRead;
         private void KeyboardMenu()
         {
@@ -224,25 +289,35 @@ namespace KeyMouseStats
         {
             if(!_keyboardDevicesRead) { KeyboardDevices.Refresh(); _keyboardDevicesRead=true; }
             int layout=Store.KeyboardLayout==0?KeyboardDevices.Suggested:Store.KeyboardLayout;
+            bool holdMode=_keyboardHoldMode;
             PaintCard(g,Cx,138,Cw,438,null);
             using(Font title=new Font("Microsoft YaHei UI",17,FontStyle.Bold,GraphicsUnit.Pixel))
-                AppText(g,"你的键盘，使用的痕迹",title,Ctext,new RectangleF(Cx+22,153,400,30),false);
+                AppText(g,holdMode?"你的键盘，按住的痕迹":"你的键盘，使用的痕迹",title,Ctext,new RectangleF(Cx+22,153,400,30),false);
+            RectangleF metric=new RectangleF(Cx+Cw-352,152,104,30);
+            _chips.Add(metric);_chipIds.Add(79);
+            PaintChip(g,metric,holdMode?"按住时长":"击键次数",holdMode,null);
             RectangleF selector=new RectangleF(Cx+Cw-236,152,214,30);
             _chips.Add(selector);_chipIds.Add(75);
             PaintChip(g,selector,KeyboardHeat.Names[layout]+" ▾",false,null);
             AppText(g,Store.KeyboardLayout==0?KeyboardDevices.Description:"手动配列 · 多把键盘合并统计 · 悬停查看键位详情",_fSmall,Csub,new RectangleF(Cx+22,187,Cw-44,22),false);
             List<HeatKey> keys=KeyboardHeat.Layout(layout);
-            long legacy,total;Dictionary<int,long> counts=KeyboardHeat.Aggregate(days,out legacy,out total);
-            if(layout>=4) { counts[41]=KeyboardHeat.Count(counts,41)+KeyboardHeat.Count(counts,1); counts.Remove(1); }
+            long legacy=0,total=0,unmappedHold=0;
+            Dictionary<int,long> counts=null;Dictionary<int,KeyHold> holds=null;
+            if(holdMode) holds=KeyboardHeat.AggregateHolds(days,out unmappedHold,out total);
+            else
+            {
+                counts=KeyboardHeat.Aggregate(days,out legacy,out total);
+                if(layout>=4) { counts[41]=KeyboardHeat.Count(counts,41)+KeyboardHeat.Count(counts,1); counts.Remove(1); }
+            }
             float width=0,height=0;long max=0,visible=0;int used=0,championScan=-1;string favorite="—";
             foreach(HeatKey key in keys)
             {
                 width=Math.Max(width,key.Bounds.Right);height=Math.Max(height,key.Bounds.Bottom);
-                long value=KeyboardHeat.Count(counts,key.Scan);
+                long value=holdMode?(long)KeyboardHeat.HoldMs(holds,key.Scan):KeyboardHeat.Count(counts,key.Scan);
                 if(value>max) {max=value;favorite=key.Label;championScan=key.Scan;} visible+=value;if(value>0)used++;
             }
-            string[] labels={"记录击键","最常用键","点亮键位"};
-            string[] values={Analysis.FmtCount(total),favorite,used+" / "+keys.Count};
+            string[] labels=holdMode?new[]{"累计按住","最久按键","点亮键位"}:new[]{"记录击键","最常用键","点亮键位"};
+            string[] values=holdMode?new[]{HoldReportData.Duration(total),favorite,used+" / "+keys.Count}:new[]{Analysis.FmtCount(total),favorite,used+" / "+keys.Count};
             for(int i=0;i<3;i++)
             {
                 float x=Cx+22+i*185;
@@ -251,7 +326,7 @@ namespace KeyMouseStats
             }
             HeatScale.Bar(g,new RectangleF(Cx+Cw-198,221,176,9));
             AppText(g,"0+",_fSmall,Csub,new RectangleF(Cx+Cw-198,232,40,20),false);
-            AppText(g,max>0?Analysis.FmtCount(max)+" 次":"暂无击键",_fSmall,Csub,new RectangleF(Cx+Cw-133,232,111,20),true);
+            AppText(g,max>0?(holdMode?HoldReportData.Duration(max):Analysis.FmtCount(max)+" 次"):"暂无样本",_fSmall,Csub,new RectangleF(Cx+Cw-133,232,111,20),true);
             Color tray=ArtTheme.Mix(Ccard,ArtTheme.Current.Background,0.64);
             using(GraphicsPath shell=RoundedRect(Cx+12,260,Cw-24,242,14))
             using(SolidBrush b=new SolidBrush(tray))
@@ -259,14 +334,14 @@ namespace KeyMouseStats
             float unit=(Cw-48)/width, row=Math.Min(42,220/height), originY=272+(220-height*row)/2;
             _keyboardHoverRects.Clear();
             PointF mouse=ToBase(_mouse);mouse=new PointF(mouse.X-ContentX,mouse.Y-ContentY);
-            HeatKey hover=null;long hoverCount=0;
+            HeatKey hover=null;long hoverCount=0;KeyHold hoverHold=null;
             RectangleF hoverRect=RectangleF.Empty;
             RectangleF plateBounds=new RectangleF(Cx+22,270,Cw-44,226);
             Graphics keyGraphics=g;
             if(ThemeArt.Active)
             {
-                System.Text.StringBuilder stamp=new System.Text.StringBuilder(ThemeImages.Revision+":"+Store.ThemeId+":"+layout+":"+_s.ToString(CultureInfo.InvariantCulture));
-                foreach(HeatKey key in keys)stamp.Append(':').Append(key.Scan).Append('=').Append(KeyboardHeat.Count(counts,key.Scan));
+                System.Text.StringBuilder stamp=new System.Text.StringBuilder(ThemeImages.Revision+":"+Store.ThemeId+":"+layout+":"+_s.ToString(CultureInfo.InvariantCulture)+":"+(holdMode?"hold":"count"));
+                foreach(HeatKey key in keys)stamp.Append(':').Append(key.Scan).Append('=').Append(holdMode?(long)KeyboardHeat.HoldMs(holds,key.Scan):KeyboardHeat.Count(counts,key.Scan));
                 string signature=stamp.ToString();
                 keyGraphics=null;
                 if(_keyboardPlate==null || _keyboardPlateStamp!=signature)
@@ -285,8 +360,8 @@ namespace KeyMouseStats
             {
                 RectangleF rect=new RectangleF(Cx+24+key.Bounds.X*unit,originY+key.Bounds.Y*row,key.Bounds.Width*unit-4,key.Bounds.Height*row-5);
                 _keyboardHoverRects.Add(rect);
-                long value=KeyboardHeat.Count(counts,key.Scan);bool hovered=rect.Contains(mouse);
-                if(hovered) {hover=key;hoverCount=value;hoverRect=rect;}
+                long value=holdMode?(long)KeyboardHeat.HoldMs(holds,key.Scan):KeyboardHeat.Count(counts,key.Scan);bool hovered=rect.Contains(mouse);
+                if(hovered) {hover=key;hoverCount=value;hoverHold=holdMode?KeyboardHeat.HoldDetail(holds,key.Scan):null;hoverRect=rect;}
                 if(keyGraphics==null)continue;
                 if(ThemeArt.Active)hovered=false;
                 Color fill=HeatColor(max>0?(double)value/max:0);
@@ -323,14 +398,20 @@ namespace KeyMouseStats
             using(SolidBrush b=new SolidBrush(ArtTheme.Mix(Ccard,Cblue,0.12))) g.FillPath(b,path);
             using(StringFormat center=new StringFormat {Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center})
             using(SolidBrush b=new SolidBrush(Ctext)) g.DrawString(ThemeArt.Active && hover==null?(EuroTruckArt.Active?"黄金方向盘":WuxiaArt.Active?"武林盟主":BalatroArt.Active?"王牌加冕":MinecraftArt.Active?"钻石成就":ResidentArt.Active?"幸存者徽章":HaloArt.Active?"斯巴达勋章":"大喵加冕"):keyLabel,_fBody,b,badge,center);
-            string detail=hover==null?"蓝色低频 → 红色高频 · 灰色为零次 · 悬停查看数值":hover.Scan==0?"Fn 由硬件处理，无法统计":Analysis.FmtCount(hoverCount)+" 次击键    /    占全部 "+(total>0?(100.0*hoverCount/total).ToString("0.0",CultureInfo.InvariantCulture):"0.0")+"%";
-            if(ThemeArt.Active && hover==null)detail=max>0?favorite+" 是本场最爱 · "+Analysis.FmtCount(max)+" 次 · 金边键帽获得大喵徽章":"还没有击键记录，大喵等你点亮第一颗键。";
-            if(ThemeArt.Dark && hover==null)detail=max>0?favorite+" 为核心按键 · "+Analysis.FmtCount(max)+" 次 · 金边标识当前最高频键":"终端待命 · 等待第一条击键记录。";
-            if(EuroTruckArt.Active && hover==null)detail=max>0?favorite+" 驶上热键榜首 · "+Analysis.FmtCount(max)+" 次 · 获得黄金方向盘":"车队待命 · 等待第一条击键记录。";
-            if(WuxiaArt.Active && hover==null)detail=max>0?favorite+" 登临键谱榜首 · "+Analysis.FmtCount(max)+" 次 · 朱砂金边封为盟主键":"江湖谱尚空 · 等待第一式落键。";
+            string detail;
+            if(hover==null) detail=holdMode?"蓝色低频 → 红色高频(按累计按住时长) · 灰色没有样本 · 悬停查看数值":"蓝色低频 → 红色高频 · 灰色为零次 · 悬停查看数值";
+            else if(hover.Scan==0) detail="Fn 由硬件处理，无法统计";
+            else if(holdMode) detail=hoverHold==null?"这个键还没有按住的样本":HoldReportData.Duration(hoverHold.TotalMs)+" 累计按住    /    占全部 "+(total>0?(100.0*hoverHold.TotalMs/total).ToString("0.0",CultureInfo.InvariantCulture):"0.0")+"%    ·    "+Analysis.FmtCount(hoverHold.Count)+" 次 · 平均 "+HoldReportData.Duration(hoverHold.Mean)+" · 最长 "+HoldReportData.Duration(hoverHold.MaxMs);
+            else detail=Analysis.FmtCount(hoverCount)+" 次击键    /    占全部 "+(total>0?(100.0*hoverCount/total).ToString("0.0",CultureInfo.InvariantCulture):"0.0")+"%";
+            if(ThemeArt.Active && hover==null && !holdMode)detail=max>0?favorite+" 是本场最爱 · "+Analysis.FmtCount(max)+" 次 · 金边键帽获得大喵徽章":"还没有击键记录，大喵等你点亮第一颗键。";
+            if(ThemeArt.Dark && hover==null && !holdMode)detail=max>0?favorite+" 为核心按键 · "+Analysis.FmtCount(max)+" 次 · 金边标识当前最高频键":"终端待命 · 等待第一条击键记录。";
+            if(EuroTruckArt.Active && hover==null && !holdMode)detail=max>0?favorite+" 驶上热键榜首 · "+Analysis.FmtCount(max)+" 次 · 获得黄金方向盘":"车队待命 · 等待第一条击键记录。";
+            if(WuxiaArt.Active && hover==null && !holdMode)detail=max>0?favorite+" 登临键谱榜首 · "+Analysis.FmtCount(max)+" 次 · 朱砂金边封为盟主键":"江湖谱尚空 · 等待第一式落键。";
             AppText(g,detail,_fBody,Ctext,new RectangleF(Cx+114,519,445,24),false);
             AppText(g,"配列覆盖 "+(total>0?(100.0*visible/total).ToString("0.0",CultureInfo.InvariantCulture):"0.0")+"%",_fSmall,Csub,new RectangleF(Cx+Cw-183,519,160,24),true);
-            string note=legacy>0?"含 "+Analysis.FmtCount(legacy)+" 次旧记录，按键名近似归位；旧 Enter 无法区分主区与小键盘。":"按物理键位统计 · 标准 ANSI 示意，厂商自定义键位与 Fn 层可能不同。";
+            string note;
+            if(holdMode) note=unmappedHold>0?"含 "+HoldReportData.Duration(unmappedHold)+" 无法定位到键位(每天 Top 48 以外的按键) · 逐键明细按虚拟键归位，主区 Enter 与小键盘 Enter 合并。":"逐键明细按虚拟键归位：主区 Enter 与小键盘 Enter 合并，其余键位一一对应。";
+            else note=legacy>0?"含 "+Analysis.FmtCount(legacy)+" 次旧记录，按键名近似归位；旧 Enter 无法区分主区与小键盘。":"按物理键位统计 · 标准 ANSI 示意，厂商自定义键位与 Fn 层可能不同。";
             AppText(g,note,_fSmall,Csub,new RectangleF(Cx+22,551,Cw-44,20),false);
         }
     }

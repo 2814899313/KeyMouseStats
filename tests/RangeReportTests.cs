@@ -51,6 +51,8 @@ internal static class RangeReportTests
         KeyHold slow = new KeyHold();
         slow.Count = 60; slow.TotalMs = 60 * 140; slow.MaxMs = 800;
         day.Holds[65] = slow;
+        // 1.7.6:有键按下的墙钟占用(秒)。它是逐键时长之和的区间并集,必然更小。
+        day.HoldActiveSeconds = 9;
         return day;
     }
 
@@ -66,10 +68,10 @@ internal static class RangeReportTests
     [STAThread]
     private static void Main()
     {
-        Check(ReportDesign.Names.Length == 16, "sixteen report pages");
+        Check(ReportDesign.Names.Length == 17, "seventeen report pages");
         Check(ReportDesign.Scope.Length == ReportDesign.Names.Length, "scope array matches page count");
         Check(ReportDesign.Names[11] == "区间回顾" && ReportDesign.Names[12] == "星期节律" && ReportDesign.Names[13] == "分布", "new page titles");
-        Check(ReportDesign.Names[14] == "按键时长" && ReportDesign.Names[15] == "应用键位", "press pages are registered");
+        Check(ReportDesign.Names[14] == "按键时长" && ReportDesign.Names[15] == "应用键位" && ReportDesign.Names[16] == "按住时长趋势", "press pages are registered");
 
         Store.History.Clear();
         Store.Total = new Counters();
@@ -98,6 +100,13 @@ internal static class RangeReportTests
         KeyHold todayHold = new KeyHold();
         todayHold.Count = 7; todayHold.TotalMs = 700; todayHold.MaxMs = 150;
         Store.Today.Holds[65] = todayHold;
+        Store.Today.HoldActiveSeconds = 0.5;
+        // 全量累计(含归档)由 Store.Total 提供,和区间无关。
+        Store.Total.HoldCount = 800;
+        Store.Total.HoldTotalMs = 123456;
+        Store.Total.HoldMaxMs = 4321;
+        Store.Total.HoldActiveSeconds = 4321;
+        Store.Total.HoldDiscarded = 12;
         AppUsage todayApp = new AppUsage { ProcessPath = @"C:\Apps\code.exe", Title = "code", Keys = 40 };
         todayApp.HasKeyGroups = true;
         todayApp.KeyGroups[0] = 40;
@@ -188,6 +197,25 @@ internal static class RangeReportTests
         Check(hold.CardValues[3].EndsWith("%"), "coverage card is a percentage");
         Check(hold.Rows.Count >= 1 && hold.Rows[0][0] != "--", "per-key hold rows exist");
         Check(Math.Abs(hold.TotalMs - (600 * 120 + 700)) < 1, "hold total duration aggregates");
+        Check(Math.Abs(hold.HoldActiveSeconds - (6 * 9 + 0.5)) < 0.001, "wall-clock hold time aggregates over the range and includes today");
+        Check(hold.CardValues[4].Length > 1 && hold.CardValues[5].Length > 1, "cumulative and wall-clock cards are filled");
+        Check(hold.Headings.Length == 7 && hold.Rows[0].Length == 7, "hold table carries the cumulative columns");
+        Check(hold.Rows[0][1].Length > 1 && hold.Rows[0][6].EndsWith("%"), "detail rows lead with the cumulative duration and end with its share");
+        Check(Math.Abs(hold.AllTotalMs - 123456) < 0.001 && hold.AllSamples == 800, "the all-time line reads Store.Total");
+        Check(hold.Footer.Contains("全量累计"), "footer reports the all-time totals");
+
+        // ---- 按住时长趋势 ----
+        HoldTrendData trend = HoldTrendData.Build(rangeStart, rangeEnd);
+        Check(trend.Rows.Count == 7, "trend lists the six complete days plus today");
+        Check(trend.Dates.Count == trend.Rows.Count && trend.HoldMs.Count == trend.Rows.Count && trend.HoldActive.Count == trend.Rows.Count,
+            "trend series stay in step with its rows");
+        Check(Math.Abs(trend.TotalMs - (6 * 12000 + 700)) < 0.001, "trend totals the per-day cumulative hold time");
+        Check(Math.Abs(trend.TotalHoldActive - (6 * 9 + 0.5)) < 0.001, "trend totals the wall-clock hold time");
+        Check(trend.TotalHoldActive <= trend.TotalActive, "wall-clock hold time stays inside active time");
+        Check(trend.TotalHoldActive * 1000 <= trend.TotalMs, "the wall-clock union never exceeds the per-key sum");
+        Check(trend.Headings.Length == 7 && trend.Rows[0].Length == 7, "trend table has seven columns");
+        Check(trend.CardValues[2].EndsWith("%"), "trend states the share of active time");
+        Check(trend.Footer.Contains("观测"), "trend footer reports the observed days");
 
         // ---- 应用 × 键位 ----
         AppKeyReportData appKey = AppKeyReportData.Build(rangeStart, rangeEnd);
@@ -202,7 +230,8 @@ internal static class RangeReportTests
         // 绘制用 g.DpiX/96、命中用 UiScale,两者不一致时非 100% 缩放下鼠标会指错行。
         Control[] charts = { new ReportVisual(DateTime.Today, 1), new RangeReportVisual(rangeStart, rangeEnd),
             new DistributionReportVisual(rangeStart, rangeEnd), new HoldReportVisual(rangeStart, rangeEnd),
-            new AppKeyReportVisual(rangeStart, rangeEnd), new RhythmReportVisual(DateTime.Today) };
+            new AppKeyReportVisual(rangeStart, rangeEnd), new RhythmReportVisual(DateTime.Today),
+            new HoldTrendVisual(rangeStart, rangeEnd) };
         foreach (Control chart in charts)
         {
             using (ReportPage page = new ReportPage { Index = 11 })
@@ -250,6 +279,12 @@ internal static class RangeReportTests
             RenderAndCheck(appKeyVisual, "app-key-groups", 1f);
             RenderAndCheck(appKeyVisual, "app-key-groups-150", 1.5f);
         }
+        using (HoldTrendVisual trendVisual = new HoldTrendVisual(rangeStart, rangeEnd))
+        {
+            trendVisual.Size = new Size(1000, 400);
+            RenderAndCheck(trendVisual, "hold-trend", 1f);
+            RenderAndCheck(trendVisual, "hold-trend-150", 1.5f);
+        }
 
         // 空数据也必须能渲染,不能除零或抛异常。
         Store.History.Clear();
@@ -274,6 +309,11 @@ internal static class RangeReportTests
             rhythmVisual.Size = new Size(1000, 300);
             RenderAndCheck(rhythmVisual, "weekday-rhythm-empty", 1f);
         }
+        using (HoldTrendVisual trendVisual = new HoldTrendVisual(DateTime.Today.AddDays(-30), DateTime.Today))
+        {
+            trendVisual.Size = new Size(1000, 400);
+            RenderAndCheck(trendVisual, "hold-trend-empty", 1f);
+        }
 
         Console.WriteLine("PASS: " + _checks + " range review / distribution / rhythm checks");
     }
@@ -295,6 +335,7 @@ internal static class RangeReportTests
                 else if (distribution != null) distribution.RenderTo(graphics, scale);
                 else if (hold != null) hold.RenderTo(graphics, scale);
                 else if (appKey != null) appKey.RenderTo(graphics, scale);
+                else if (visual is HoldTrendVisual) ((HoldTrendVisual)visual).RenderTo(graphics, scale);
                 else rhythm.RenderTo(graphics, scale);
             }
             bitmap.Save(Path.Combine("previews", name + ".png"), ImageFormat.Png);

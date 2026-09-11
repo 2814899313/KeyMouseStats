@@ -86,6 +86,7 @@ internal static class RenderDashboard
             int[] weights = { 40, 25, 10, 8, 6, 5, 4, 2 };
             long remainingKeys = day.Keys, remainingClicks = day.Clicks, remainingWheel = day.Wheel;
             day.HoldCount = 900; day.HoldTotalMs = 900 * 124; day.HoldMaxMs = 664;
+            day.HoldActiveSeconds = 78;   // 区间并集:小于逐键之和(111.6 s)
             day.HoldBuckets[0] = 120; day.HoldBuckets[1] = 260; day.HoldBuckets[2] = 300;
             day.HoldBuckets[3] = 160; day.HoldBuckets[4] = 60;
             int[] holdKeys = { 87, 65, 83, 68, 32, 69, 70, 16 };
@@ -159,6 +160,13 @@ internal static class RenderDashboard
             Store.KeyboardLayout=1;
             for(int theme=0;theme<ArtTheme.All.Length;theme++) { Store.ThemeId=theme; Render(form,"keyboard-theme-"+theme,1f); }
             Store.ThemeId=0;Render(form,"keyboard-150",1.5f);
+            // 1.7.6:热力图口径切到「累计按住时长」,并验证按住时长的悬停明细。
+            Set(form,"_keyboardHoldMode",true);
+            Render(form,"keyboard-hold",1f);
+            Set(form,"_mouse",new Point(350,428));
+            Render(form,"keyboard-hold-hover",1f);
+            Set(form,"_mouse",new Point(-100,-100));
+            Set(form,"_keyboardHoldMode",false);
             Set(form,"_showKeyboardHeatmap",false);
             tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 1));
             Render(form, "trend", 1f);

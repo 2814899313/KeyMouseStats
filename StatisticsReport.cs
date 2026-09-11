@@ -395,6 +395,7 @@ namespace KeyMouseStats
                 DistributionReportVisual distribution = chart as DistributionReportVisual;
                 HoldReportVisual hold = chart as HoldReportVisual;
                 AppKeyReportVisual appKey = chart as AppKeyReportVisual;
+                HoldTrendVisual trend = chart as HoldTrendVisual;
                 if (habit != null) habit.RenderTo(graphics, scale);
                 else if (cross != null) cross.RenderTo(graphics, scale);
                 else if (range != null) range.RenderTo(graphics, scale);
@@ -402,6 +403,7 @@ namespace KeyMouseStats
                 else if (distribution != null) distribution.RenderTo(graphics, scale);
                 else if (hold != null) hold.RenderTo(graphics, scale);
                 else if (appKey != null) appKey.RenderTo(graphics, scale);
+                else if (trend != null) trend.RenderTo(graphics, scale);
                 else chart.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size));
             }
             return bitmap;

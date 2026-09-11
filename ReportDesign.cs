@@ -10,8 +10,8 @@ namespace KeyMouseStats
 {
     internal static class ReportDesign
     {
-        public static readonly string[] Names={"输入习惯","每日趋势","应用时间","使用节奏","实时状态","应用时段","应用操作","会话应用","鼠标动作","键位分布","快捷键节省","区间回顾","星期节律","分布","按键时长","应用键位"};
-        public static readonly string[] Scope={"操作强度描述使用方式，不代表工作效率。","今日只展示已累计部分；缺失日期不补零。","按活跃观测归因，无法识别的时间单独保留。","连续使用段包含空闲阈值内的短暂停顿。","APM = 最近 60 秒击键与点击；下图观察最近 5 分钟。","只展示实际观测到的应用时间，不从旧汇总反推。","比较各应用的输入构成，不将滚轮次数视为距离。","每一段独立分析，不按全天占比分摊应用时间。","方向和快速移动是行为描述，不推断左右手或操作效果。","按默认键位分组，不代表这些按键用于游戏。","情景估算，不是实际测得的省时；点击「模型」调整假设。","当前区间对比紧随其前的等长区间，今日未结束不参与。","按星期聚合，样本天数决定结果可信度。","用箱线图与直方图看分布，不只比均值。","按住时长不是按压力度；丢抬起是常态，看覆盖率。","按键归因到当时的前台进程，只描述构成，不推断用途。"};
+        public static readonly string[] Names={"输入习惯","每日趋势","应用时间","使用节奏","实时状态","应用时段","应用操作","会话应用","鼠标动作","键位分布","快捷键节省","区间回顾","星期节律","分布","按键时长","应用键位","按住时长趋势"};
+        public static readonly string[] Scope={"操作强度描述使用方式，不代表工作效率。","今日只展示已累计部分；缺失日期不补零。","按活跃观测归因，无法识别的时间单独保留。","连续使用段包含空闲阈值内的短暂停顿。","APM = 最近 60 秒击键与点击；下图观察最近 5 分钟。","只展示实际观测到的应用时间，不从旧汇总反推。","比较各应用的输入构成，不将滚轮次数视为距离。","每一段独立分析，不按全天占比分摊应用时间。","方向和快速移动是行为描述，不推断左右手或操作效果。","按默认键位分组，不代表这些按键用于游戏。","情景估算，不是实际测得的省时；点击「模型」调整假设。","当前区间对比紧随其前的等长区间，今日未结束不参与。","按星期聚合，样本天数决定结果可信度。","用箱线图与直方图看分布，不只比均值。","按住时长不是按压力度；丢抬起是常态，看覆盖率。","按键归因到当时的前台进程，只描述构成，不推断用途。","累计按住按逐键求和；有键按下是墙钟并集，不重复计时。"};
         public static readonly string[] Metrics={"每次点击的击键数","每秒活跃击键","每分钟活跃点击","每次操作移动","每分钟滚轮事件","组合键使用占比"};
         public static readonly string[] Units={"次击键 / 点击","次 / 活跃秒","次 / 活跃分钟","厘米 / 操作","次 / 活跃分钟","%"};
         public static readonly string[] Definitions={
@@ -74,7 +74,8 @@ namespace KeyMouseStats
             DistributionReportVisual distributionVisual=Chart as DistributionReportVisual;if(distributionVisual!=null)distributionVisual.UiScale=scale;
             HoldReportVisual holdVisual=Chart as HoldReportVisual;if(holdVisual!=null)holdVisual.UiScale=scale;
             AppKeyReportVisual appKeyVisual=Chart as AppKeyReportVisual;if(appKeyVisual!=null)appKeyVisual.UiScale=scale;
-            int chartHeight=(int)(scale*(Index==0?ReportVisual.HabitHeight(width/scale):Index==7?325:Index==13?430:Index==15?432:Index==14?392:300));
+            HoldTrendVisual holdTrendVisual=Chart as HoldTrendVisual;if(holdTrendVisual!=null)holdTrendVisual.UiScale=scale;
+            int chartHeight=(int)(scale*(Index==0?ReportVisual.HabitHeight(width/scale):Index==7?325:Index==13?430:Index==15?432:Index==14?392:Index==16?400:300));
             Chart.SetBounds(0,y,width,chartHeight);y+=chartHeight+gap;
             details.Text=(DetailsOpen?"▾ 收起明细":"▸ 查看明细")+"   ·   "+List.Items.Count+" 项";
             details.ForeColor=t.Accent;details.BackColor=t.Card;details.FlatAppearance.BorderColor=t.Line;
@@ -185,6 +186,7 @@ namespace KeyMouseStats
             DistributionReportData distribution=DistributionReportData.Build(_rangeStart,_rangeEnd);ListView distributionList=PageCore(ReportDesign.Names[13],DistributionReportData.Note,null,distribution.Headings);foreach(string[] fields in distribution.Rows)Row(distributionList,fields);
             HoldReportData hold=HoldReportData.Build(_rangeStart,_rangeEnd);ListView holdList=PageCore(ReportDesign.Names[14],HoldReportData.Note,null,hold.Headings);foreach(string[] fields in hold.Rows)Row(holdList,fields);
             AppKeyReportData appKey=AppKeyReportData.Build(_rangeStart,_rangeEnd);ListView appKeyList=PageCore(ReportDesign.Names[15],AppKeyReportData.Note,null,appKey.Headings);foreach(string[] fields in appKey.Rows)Row(appKeyList,fields);
+            HoldTrendData holdTrend=HoldTrendData.Build(_rangeStart,_rangeEnd);ListView holdTrendList=PageCore(ReportDesign.Names[16],HoldTrendData.Note,null,holdTrend.Headings);foreach(string[] fields in holdTrend.Rows)Row(holdTrendList,fields);
             if(IsHandleCreated)foreach(ReportPage page in _tabs.TabPages)Style(page);
         }
         /// <summary>把区间预设解析成完整日区间;终点不超过最近一个已结束的日。</summary>
@@ -282,7 +284,7 @@ namespace KeyMouseStats
         }
         private void BuildNavigation()
         {
-            string[] groups={"时间与节奏","应用使用","输入方式","周期与分布"};int[][] ids={new[]{0,1,3,4},new[]{2,5,6,7},new[]{8,9,10},new[]{11,12,13,14,15}};
+            string[] groups={"时间与节奏","应用使用","输入方式","周期与分布"};int[][] ids={new[]{0,1,3,4},new[]{2,5,6,7},new[]{8,9,10},new[]{11,12,13,14,15,16}};
             for(int group=0;group<groups.Length;group++)
             {
                 _navigation.Controls.Add(new Label{Text=groups[group],Tag="group",TextAlign=ContentAlignment.MiddleLeft,Margin=new Padding(0,14,0,3)});
@@ -336,7 +338,7 @@ namespace KeyMouseStats
             int index=_tabs.TabPages.Count;ReportPage page=new ReportPage{Text=title,Note=note,Index=index};_tabs.AddPage(page);
             ReportList list=new ReportList{View=View.Details,FullRowSelect=true,HideSelection=false,ShowItemToolTips=true,BorderStyle=BorderStyle.None};
             foreach(string heading in headings)list.Columns.Add(heading,180);
-            Control chart;if(index<5)chart=new ReportVisual(_date,index);else if(index==11)chart=new RangeReportVisual(_rangeStart,_rangeEnd,_compareStart,_compareEnd,_compareLabel);else if(index==12)chart=new RhythmReportVisual(_date);else if(index==13)chart=new DistributionReportVisual(_rangeStart,_rangeEnd);else if(index==14)chart=new HoldReportVisual(_rangeStart,_rangeEnd);else if(index==15)chart=new AppKeyReportVisual(_rangeStart,_rangeEnd);else chart=new CrossReportVisual(_date,index,snapshot);
+            Control chart;if(index<5)chart=new ReportVisual(_date,index);else if(index==11)chart=new RangeReportVisual(_rangeStart,_rangeEnd,_compareStart,_compareEnd,_compareLabel);else if(index==12)chart=new RhythmReportVisual(_date);else if(index==13)chart=new DistributionReportVisual(_rangeStart,_rangeEnd);else if(index==14)chart=new HoldReportVisual(_rangeStart,_rangeEnd);else if(index==15)chart=new AppKeyReportVisual(_rangeStart,_rangeEnd);else if(index==16)chart=new HoldTrendVisual(_rangeStart,_rangeEnd);else chart=new CrossReportVisual(_date,index,snapshot);
             RangeReportVisual brush=chart as RangeReportVisual;if(brush!=null)brush.RangeSelected+=delegate(DateTime start,DateTime end){SetCustomRange(start,end);};
             page.List=list;page.Chart=chart;page.Controls.Add(list);page.Controls.Add(chart);
             ReportVisual visual=chart as ReportVisual;if(visual!=null)visual.MetricSelected+=delegate{list.SelectedItems.Clear();_copy.Enabled=true;_feedback.Text="已选中指标 · Ctrl+C 复制";};

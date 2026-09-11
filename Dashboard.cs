@@ -506,6 +506,7 @@ namespace KeyMouseStats
             if (_tab == TabId.Keys && id == 74) { _showKeyboardHeatmap = true; _showHoldDuration = false; return; }
             if (_tab == TabId.Keys && (id == 72 || id == 73)) { _showKeyboardHeatmap = false; _showHoldDuration = false; _showCombos = id == 73; return; }
             if (_tab == TabId.Keys && id == 78) { _showHoldDuration = !_showHoldDuration; if (_showHoldDuration) _showKeyboardHeatmap = false; return; }
+            if (_tab == TabId.Keys && id == 79) { _keyboardHoldMode = !_keyboardHoldMode; return; }   // 热力图口径:次数 / 按住时长
             if (_tab == TabId.Hours && (id == 30 || id == 31)) { _activeHourToday = id == 30; return; }
             if (id < 70) { ApplyAppChip(id); return; }
             if (id >= 100) { _trendMetric = id - 100; return; }        // 100..103
@@ -788,7 +789,7 @@ namespace KeyMouseStats
                 g.DrawString(_tab == TabId.Apps ? "按捕获时的前台窗口归因 · 分类可手动调整 · 本页导出应用明细"
                     : _tab == TabId.Insights ? "活跃不等于专注 · 空白可能未采集 · 导出 " + _insightDay.ToString("yyyy-MM-dd") + " 的时间区间"
                     : _tab == TabId.Trend && _trendHourly ? "均值不含当前小时 · 数值仅为已采集部分 · 本页导出小时明细"
-                    : _tab == TabId.Keys && _showKeyboardHeatmap ? "物理键位热力 · 长按计一次 · 右上角切换配列 · 导出包含配列外已归位按键"
+                    : _tab == TabId.Keys && _showKeyboardHeatmap ? (_keyboardHoldMode ? "物理键位热力 · 按住时长口径:逐键累计,悬停看平均与最长 · 右上角切换次数 / 配列 · 导出同时包含两种口径" : "物理键位热力 · 长按计一次 · 右上角切换口径与配列 · 导出包含配列外已归位按键")
                     : _tab == TabId.Keys && _showCombos ? "修饰键 + 普通键首次按下计 1 次 · 长按去重 · 左右修饰键合并 · 本页导出组合动作"
                     : _tab == TabId.Overview ? "本段 " + (ActivityMonitor.CurrentSession == null ? "--" : ActivityMonitor.FormatDuration(ActivityMonitor.CurrentSession.Seconds)) + " · 今日峰值 " + Store.Today.PeakApm + " APM · 实时键 " + LiveRate.KeysPerMin + " / 点 " + LiveRate.ClicksPerMin
                     : "鼠标路程为 DPI 估算值 · 设置后开始累计 · 原光标路程见导出文件", _fSmall, b, 200, 687);
@@ -1588,7 +1589,8 @@ namespace KeyMouseStats
             PaintCard(g, Cx, 138, 560, 438, null);
             PaintCard(g, Cx + 572, 138, Cw - 572, 438, null);
             AppText(g, "每键平均按住时长" + (data.TopKeys.Count > 0 ? " · Top " + data.TopKeys.Count : ""), _fH2, Ctext, new RectangleF(Cx + 18, 148, 400, 24), false);
-            AppText(g, "覆盖 " + data.CardValues[3] + " · 样本 " + data.Samples, _fSmall, Csub, new RectangleF(Cx + 18, 172, 400, 20), false);
+            AppText(g, "覆盖 " + data.CardValues[3] + " · 样本 " + data.Samples + " · 累计按住 " + data.CardValues[4]
+                + " · 有键按下 " + data.CardValues[5], _fSmall, Csub, new RectangleF(Cx + 18, 172, 540, 20), false);
             if (data.Samples == 0)
             {
                 AppText(g, "该区间没有按键时长样本", _fNum2, Ctext, new RectangleF(Cx + 30, 300, 500, 40), false);

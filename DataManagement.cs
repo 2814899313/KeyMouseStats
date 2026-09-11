@@ -36,6 +36,9 @@ namespace KeyMouseStats
         public Store.Parsed Data;
         public int Days, Conflicts;
         public long ImportedKeys, ConflictKeysLocal, ConflictKeysImported;
+        /// <summary>1.7.6:冲突日里导入方的按住时长,相加合并时用来扣掉重复的部分。</summary>
+        public long ConflictHoldCountImported;
+        public double ConflictHoldMsImported, ConflictHoldActiveImported;
         public DateTime First, Last;
     }
 
@@ -80,6 +83,9 @@ namespace KeyMouseStats
         public int Year, Month, Days, Sessions;
         public long Keys, Clicks, Wheel, Combos;
         public double ActiveSeconds, MoveMeters;
+        /// <summary>1.7.6:归档也保留按住时长,避免超期后这一维度凭空消失。</summary>
+        public long HoldCount, HoldDiscarded;
+        public double HoldTotalMs, HoldMaxMs, HoldActiveSeconds;
         public readonly Dictionary<string, long> AppKeys = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         private const int AppLimit = 16;
 
@@ -109,6 +115,11 @@ namespace KeyMouseStats
             archive.ActiveSeconds += day.ActiveSeconds;
             archive.MoveMeters += day.MoveMeters;
             archive.Sessions += day.Sessions.Count;
+            archive.HoldCount += day.HoldCount;
+            archive.HoldDiscarded += day.HoldDiscarded;
+            archive.HoldTotalMs += day.HoldTotalMs;
+            archive.HoldActiveSeconds += day.HoldActiveSeconds;
+            if (day.HoldMaxMs > archive.HoldMaxMs) archive.HoldMaxMs = day.HoldMaxMs;
             foreach (AppUsage app in day.Apps.Values)
             {
                 string path = app.ProcessPath ?? "";
@@ -144,6 +155,12 @@ namespace KeyMouseStats
                 if (i > 0) sb.Append(',');
                 sb.Append(AppActivity.Encode(apps[i].Key)).Append(':').Append(apps[i].Value.ToString(CultureInfo.InvariantCulture));
             }
+            // 1.7.6 追加的按住时长字段(旧版本读到第 10 个字段为止,多出来的会被忽略)。
+            sb.Append('|').Append(archive.HoldCount.ToString(CultureInfo.InvariantCulture));
+            sb.Append('|').Append(archive.HoldTotalMs.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append('|').Append(archive.HoldMaxMs.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append('|').Append(archive.HoldActiveSeconds.ToString("R", CultureInfo.InvariantCulture));
+            sb.Append('|').Append(archive.HoldDiscarded.ToString(CultureInfo.InvariantCulture));
             return sb.ToString();
         }
 
@@ -185,6 +202,15 @@ namespace KeyMouseStats
                         archive.AppKeys.TryGetValue(path, out existing);
                         archive.AppKeys[path] = existing + keys;
                     }
+                }
+                // 1.7.6 追加的按住时长字段;1.7.5 及更早写出的归档行没有这些字段,保持 0。
+                if (fields.Length >= 15)
+                {
+                    archive.HoldCount = Math.Max(0, ParseLong(fields[10]));
+                    archive.HoldTotalMs = Math.Max(0, ParseDouble(fields[11]));
+                    archive.HoldMaxMs = Math.Max(0, ParseDouble(fields[12]));
+                    archive.HoldActiveSeconds = Math.Max(0, ParseDouble(fields[13]));
+                    archive.HoldDiscarded = Math.Max(0, ParseLong(fields[14]));
                 }
                 archives[archive.Key] = archive;
             }
@@ -287,6 +313,9 @@ namespace KeyMouseStats
                         preview.Conflicts++;
                         preview.ConflictKeysLocal += local.Keys;
                         preview.ConflictKeysImported += day.Value.Keys;
+                        preview.ConflictHoldCountImported += day.Value.HoldCount;
+                        preview.ConflictHoldMsImported += day.Value.HoldTotalMs;
+                        preview.ConflictHoldActiveImported += day.Value.HoldActiveSeconds;
                     }
                 }
                 preview.Valid = true;
@@ -343,6 +372,12 @@ namespace KeyMouseStats
                     Store.Total.Wheel += preview.Data.Total.Wheel;
                     Store.Total.MovePx += preview.Data.Total.MovePx;
                     Store.Total.MoveMeters += preview.Data.Total.MoveMeters;
+                    // 按住时长同样扣掉冲突日的导入部分,避免相加时明显重复。
+                    Store.Total.HoldCount += Math.Max(0, preview.Data.Total.HoldCount - preview.ConflictHoldCountImported);
+                    Store.Total.HoldTotalMs += Math.Max(0, preview.Data.Total.HoldTotalMs - preview.ConflictHoldMsImported);
+                    Store.Total.HoldActiveSeconds += Math.Max(0, preview.Data.Total.HoldActiveSeconds - preview.ConflictHoldActiveImported);
+                    Store.Total.HoldDiscarded += preview.Data.Total.HoldDiscarded;
+                    if (preview.Data.Total.HoldMaxMs > Store.Total.HoldMaxMs) Store.Total.HoldMaxMs = preview.Data.Total.HoldMaxMs;
                 }
                 else
                 {
@@ -351,6 +386,11 @@ namespace KeyMouseStats
                     if (preview.Data.Total.Wheel > Store.Total.Wheel) Store.Total.Wheel = preview.Data.Total.Wheel;
                     if (preview.Data.Total.MovePx > Store.Total.MovePx) Store.Total.MovePx = preview.Data.Total.MovePx;
                     if (preview.Data.Total.MoveMeters > Store.Total.MoveMeters) Store.Total.MoveMeters = preview.Data.Total.MoveMeters;
+                    if (preview.Data.Total.HoldCount > Store.Total.HoldCount) Store.Total.HoldCount = preview.Data.Total.HoldCount;
+                    if (preview.Data.Total.HoldTotalMs > Store.Total.HoldTotalMs) Store.Total.HoldTotalMs = preview.Data.Total.HoldTotalMs;
+                    if (preview.Data.Total.HoldMaxMs > Store.Total.HoldMaxMs) Store.Total.HoldMaxMs = preview.Data.Total.HoldMaxMs;
+                    if (preview.Data.Total.HoldActiveSeconds > Store.Total.HoldActiveSeconds) Store.Total.HoldActiveSeconds = preview.Data.Total.HoldActiveSeconds;
+                    if (preview.Data.Total.HoldDiscarded > Store.Total.HoldDiscarded) Store.Total.HoldDiscarded = preview.Data.Total.HoldDiscarded;
                 }
                 Store.RollDay(DateTime.Today);
             }
@@ -379,7 +419,8 @@ namespace KeyMouseStats
                 if (date > today)
                     issues.Add(new ValidationIssue(warning, date, "日期在未来,可能是系统时间被修改过。"));
                 if (day.Keys < 0 || day.Clicks < 0 || day.Wheel < 0 || day.MovePx < 0 || day.MoveMeters < 0
-                    || day.ActiveSeconds < 0 || day.IdleSeconds < 0)
+                    || day.ActiveSeconds < 0 || day.IdleSeconds < 0
+                    || day.HoldCount < 0 || day.HoldDiscarded < 0 || day.HoldTotalMs < 0 || day.HoldMaxMs < 0 || day.HoldActiveSeconds < 0)
                     issues.Add(new ValidationIssue(error, date, "存在负值计数。"));
                 if (day.ActiveSeconds > 86400)
                     issues.Add(new ValidationIssue(error, date, "活跃时长超过 24 小时(" + ActivityMonitor.FormatDuration(day.ActiveSeconds) + ")。"));

@@ -13,6 +13,12 @@
 //      虚假的长按,并让那次真实敲击的时长凭空消失。
 //    · 锁屏 / 休眠 / 会话断开、以及整体替换数据时丢弃未抬起的按键(此前只在退出时丢弃)。
 //
+//  1.7.6 累计时长:
+//    · 逐键总时长一直就在采(KeyHold.TotalMs),只是没被显示;现在报告与面板都给出区间累计,
+//      并新增「墙钟占用」= 至少一个键被按住的区间并集(同时按下的键不重复计时)。
+//    · 全量累计(跨归档、不随保留期减少)通过 Settled / Discarded / Active 三个回调写进
+//      Store.Total;回调在 Store 的静态构造里接上。
+//
 //  口径与限制(页面与文档都要说明):
 //    · 按住时长不是按压力度,普通键盘没有压力感应。
 //    · 丢 UP 是常态(Alt+Tab、Win 键、游戏吞键、锁屏、进程被杀),覆盖率必须如实显示。
@@ -57,6 +63,15 @@ namespace KeyMouseStats
         /// <summary>每天保存的应用数上限,超出并入「其他应用汇总」。</summary>
         public const int AppDetailLimit = 12;
         public const int OtherKey = -1;
+        /// <summary>单段「有键按下」的墙钟上限:超过它只能是休眠或丢事件,不再计入占用。</summary>
+        public const double MaxActiveSpanMs = 600000;
+
+        /// <summary>1.7.6:结算一个有效样本(毫秒)后的回调,接到全量累计上。</summary>
+        internal static Action<double> Settled;
+        /// <summary>1.7.6:丢弃一个样本后的回调,接到全量累计上。</summary>
+        internal static Action Discarded;
+        /// <summary>1.7.6:一段「有键按下」的墙钟时间结束(秒)后的回调。</summary>
+        internal static Action<double> Active;
 
         private struct Pending
         {
@@ -64,6 +79,9 @@ namespace KeyMouseStats
             public long Ticks;
         }
         private static readonly Dictionary<int, Pending> Down = new Dictionary<int, Pending>();
+        /// <summary>1.7.6:当前这段「有键按下」的墙钟区间。Day 为 null 表示区间未开。</summary>
+        private static DayRecord _activeDay;
+        private static long _activeStart;
 
         /// <summary>首次按下(自动重复不会重置起点)。
         /// 若上一个按下还没等到抬起(抬起被吞掉),旧样本按「丢失抬起」丢弃,再以本次按下重新起算。</summary>
@@ -82,6 +100,7 @@ namespace KeyMouseStats
             pending.Day = day;
             pending.Ticks = ticks;
             Down[vk] = pending;
+            RefreshActive(day, ticks);
         }
 
         /// <summary>抬起时结算;返回是否计入了有效样本。</summary>
@@ -90,7 +109,9 @@ namespace KeyMouseStats
             Pending pending;
             if (!Down.TryGetValue(vk, out pending)) return false;
             Down.Remove(vk);
-            return Settle(pending, vk, ticks);
+            bool counted = Settle(pending, vk, ticks);
+            RefreshActive(pending.Day, ticks);
+            return counted;
         }
 
         private static bool Settle(Pending pending, int vk, long ticks)
@@ -110,6 +131,7 @@ namespace KeyMouseStats
             KeyHold hold;
             if (!day.Holds.TryGetValue(vk, out hold)) { hold = new KeyHold(); day.Holds[vk] = hold; }
             hold.Add(milliseconds);
+            if (Settled != null) Settled(milliseconds);
             return true;
         }
 
@@ -117,10 +139,36 @@ namespace KeyMouseStats
         private static void Discard(Pending pending)
         {
             if (pending.Day != null) pending.Day.HoldDiscarded++;
+            if (Discarded != null) Discarded();
+        }
+
+        /// <summary>维持「至少有一个键被按住」的墙钟区间:按下集从空变非空时开区间,变空时结算。</summary>
+        private static void RefreshActive(DayRecord day, long ticks)
+        {
+            if (Down.Count > 0)
+            {
+                if (_activeDay == null) { _activeDay = day; _activeStart = ticks; }
+                return;
+            }
+            if (_activeDay == null) return;
+            double seconds = (ticks - _activeStart) * 1.0 / Stopwatch.Frequency;
+            DayRecord owner = _activeDay;
+            _activeDay = null;
+            _activeStart = 0;
+            // 负数与超长段只能是休眠或丢事件:不计入占用,也不计丢弃(它不是一次按键样本)。
+            if (seconds <= 0 || seconds * 1000.0 > MaxActiveSpanMs) return;
+            if (owner != null) owner.HoldActiveSeconds += seconds;
+            if (Active != null) Active(seconds);
         }
 
         /// <summary>把还按着的键全部丢弃(锁屏、休眠、断开、替换数据、退出前调用)。</summary>
         public static int DiscardPending()
+        {
+            return DiscardPending(Stopwatch.GetTimestamp());
+        }
+
+        /// <summary>同上,但用给定的单调时钟结算当前这段墙钟占用。</summary>
+        public static int DiscardPending(long ticks)
         {
             int count = 0;
             foreach (KeyValuePair<int, Pending> pending in Down)
@@ -129,6 +177,7 @@ namespace KeyMouseStats
                 count++;
             }
             Down.Clear();
+            RefreshActive(null, ticks);
             return count;
         }
 
@@ -236,7 +285,17 @@ namespace KeyMouseStats
             if (summary != null) lines.Add("hold_v1=" + summary);
             string keys = EncodeKeys(day);
             if (keys != null) lines.Add("hold_key_v1=" + keys);
+            // 1.7.6 新增的可选行:有键按下的墙钟占用。旧版本读到会忽略。
+            if (day != null && day.HoldActiveSeconds > 0)
+                lines.Add("hold_active_v1=" + day.HoldActiveSeconds.ToString("R", CultureInfo.InvariantCulture));
             return lines.ToArray();
+        }
+
+        /// <summary>1.7.6:解析墙钟占用(秒)。</summary>
+        public static void LoadActive(DayRecord day, string value)
+        {
+            if (day == null || string.IsNullOrEmpty(value)) return;
+            day.HoldActiveSeconds += ParseNumber(value, 0);
         }
 
         /// <summary>hold_key_v1=vk:次数:总毫秒:最大毫秒,... 按次数从多到少,超出上限并入 vk=-1。</summary>

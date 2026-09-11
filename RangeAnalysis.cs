@@ -293,6 +293,13 @@ namespace KeyMouseStats
     /// <summary>区间聚合入口。</summary>
     internal static class RangeStats
     {
+        /// <summary>按键时长类页面共用的口径:除了「完整日区间以昨天结尾」,请求区间覆盖今天时也要接上进行中的今天。</summary>
+        public static bool IncludesRunningToday(RangeMetrics range, DateTime start, DateTime end)
+        {
+            return (range.Days > 0 && range.End == DateTime.Today.AddDays(-1))
+                || (end.Date >= DateTime.Today && start.Date <= DateTime.Today);
+        }
+
         /// <summary>规范化并聚合区间;区间内没有任何完整日时返回空指标(Days = 0)。</summary>
         public static RangeMetrics Of(DateTime start, DateTime end)
         {

@@ -111,6 +111,9 @@ namespace KeyMouseStats
         public long Wheel;
         public double MovePx;
         public double MoveMeters;
+        /// <summary>1.7.6:按住时长的全量累计(跨归档、不随保留期清理而减少)。</summary>
+        public long HoldCount, HoldDiscarded;
+        public double HoldTotalMs, HoldMaxMs, HoldActiveSeconds;
     }
 
     /// <summary>单日完整记录(含小时分布与按键细分)。</summary>
@@ -140,15 +143,17 @@ namespace KeyMouseStats
         public double AppObservedSeconds;
         public long AppSwitches, PeakApm;
         public readonly CrossDay Cross=new CrossDay();
-        /// <summary>按键时长(1.7.3 起采集):逐键聚合、8 档直方图与丢弃计数。</summary>
+        /// <summary>按键时长(1.7.3 起采集):逐键聚合、8 档直方图与丢弃计数。1.7.6 起增加墙钟占用。</summary>
         public readonly Dictionary<int, KeyHold> Holds = new Dictionary<int, KeyHold>();
         public readonly long[] HoldBuckets = new long[HoldTracker.BucketCount];
         public long HoldCount, HoldDiscarded;
         public double HoldTotalMs, HoldMaxMs;
+        /// <summary>1.7.6:至少有一个键被按住的墙钟秒数(区间并集,不重复计同时按下的键)。</summary>
+        public double HoldActiveSeconds;
 
         public bool IsEmpty
         {
-            get { return Keys == 0 && Clicks == 0 && Wheel == 0 && MovePx < 0.5 && MoveMeters == 0 && ActiveSeconds == 0 && IdleSeconds == 0 && Cross.Packets==0 && Cross.Clicks==0; }
+            get { return Keys == 0 && Clicks == 0 && Wheel == 0 && MovePx < 0.5 && MoveMeters == 0 && ActiveSeconds == 0 && IdleSeconds == 0 && Cross.Packets==0 && Cross.Clicks==0 && HoldCount == 0 && HoldActiveSeconds == 0; }
         }
 
         /// <summary>合并另一份同日记录(多机合并的「相加」策略)。</summary>
@@ -195,6 +200,7 @@ namespace KeyMouseStats
             HoldCount += other.HoldCount;
             HoldDiscarded += other.HoldDiscarded;
             HoldTotalMs += other.HoldTotalMs;
+            HoldActiveSeconds += other.HoldActiveSeconds;
             if (other.HoldMaxMs > HoldMaxMs) HoldMaxMs = other.HoldMaxMs;
             for (int i = 0; i < HoldBuckets.Length && i < other.HoldBuckets.Length; i++) HoldBuckets[i] += other.HoldBuckets[i];
             foreach (KeyValuePair<int, KeyHold> pair in other.Holds)
@@ -341,6 +347,16 @@ namespace KeyMouseStats
         {
             Today.Date = DateTime.Today;
             History[DateTime.Today] = Today;
+            // 1.7.6:按住时长的全量累计。回调读的是调用时的 Store.Total,所以导入整体替换
+            // (Total 会被换成解析出来的新对象)之后,后续样本仍然记到新对象上。
+            HoldTracker.Settled = delegate(double milliseconds)
+            {
+                Total.HoldCount++;
+                Total.HoldTotalMs += milliseconds;
+                if (milliseconds > Total.HoldMaxMs) Total.HoldMaxMs = milliseconds;
+            };
+            HoldTracker.Discarded = delegate { Total.HoldDiscarded++; };
+            HoldTracker.Active = delegate(double seconds) { Total.HoldActiveSeconds += seconds; };
         }
 
         public static void RollDay(DateTime newDay)
@@ -449,6 +465,7 @@ namespace KeyMouseStats
                         case "cross_hours_v1": case "app_hours_v1": case "session_coverage_v1": case "session_app_v1": case "mouse_vector_v1": CrossTelemetry.Load(cur,key,val);break;
                         case "hold_v1": HoldCodec.Load(cur,val);break;
                         case "hold_key_v1": HoldCodec.LoadKeys(cur,val);break;
+                        case "hold_active_v1": HoldCodec.LoadActive(cur,val);break;
                         case "app_keys_v1": AppKeyCodec.Load(cur,val);break;
                     }
                 }
@@ -492,6 +509,12 @@ namespace KeyMouseStats
                         case "total_wheel": result.Total.Wheel = ParseL(val); break;
                         case "total_move": result.Total.MovePx = ParseD(val); break;
                         case "total_move_m": result.Total.MoveMeters = NonNegative(ParseD(val)); break;
+                        // 1.7.6 新增的可选行:按住时长的全量累计
+                        case "total_hold_count": result.Total.HoldCount = Math.Max(0, ParseL(val)); break;
+                        case "total_hold_ms": result.Total.HoldTotalMs = NonNegative(ParseD(val)); break;
+                        case "total_hold_max": result.Total.HoldMaxMs = NonNegative(ParseD(val)); break;
+                        case "total_hold_active": result.Total.HoldActiveSeconds = NonNegative(ParseD(val)); break;
+                        case "total_hold_discarded": result.Total.HoldDiscarded = Math.Max(0, ParseL(val)); break;
                         case "mouse_dpi":
                             double dpi = ParseD(val);
                             result.MouseDpi = MouseDistance.ValidDpi(dpi) ? dpi : 0;
@@ -835,6 +858,12 @@ namespace KeyMouseStats
             sb.AppendLine("total_wheel=" + c.Wheel.ToString(CultureInfo.InvariantCulture));
             sb.AppendLine("total_move=" + c.MovePx.ToString("0.###", CultureInfo.InvariantCulture));
             sb.AppendLine("total_move_m=" + c.MoveMeters.ToString("R", CultureInfo.InvariantCulture));
+            // 1.7.6 新增的可选行:按住时长的全量累计。旧版本读到会忽略。
+            sb.AppendLine("total_hold_count=" + c.HoldCount.ToString(CultureInfo.InvariantCulture));
+            sb.AppendLine("total_hold_ms=" + c.HoldTotalMs.ToString("R", CultureInfo.InvariantCulture));
+            sb.AppendLine("total_hold_max=" + c.HoldMaxMs.ToString("R", CultureInfo.InvariantCulture));
+            sb.AppendLine("total_hold_active=" + c.HoldActiveSeconds.ToString("R", CultureInfo.InvariantCulture));
+            sb.AppendLine("total_hold_discarded=" + c.HoldDiscarded.ToString(CultureInfo.InvariantCulture));
         }
 
         private static string EncodeHourBuckets(long[] buckets)
@@ -1191,6 +1220,8 @@ namespace KeyMouseStats
                             Marshal.PtrToStructure(lParam, typeof(Native.KBDLLHOOKSTRUCT));
                         _combos.Process(msg, (int)released.vkCode, released.scanCode, released.flags);
                         HoldTracker.Release(ShortcutTracker.Normalize((int)released.vkCode, released.scanCode, released.flags), System.Diagnostics.Stopwatch.GetTimestamp());
+                        // 1.7.6:抬起会结算样本与墙钟占用(全量累计随之变化),所以抬起也要标记待保存。
+                        MarkDirty();
                     }
                     if (msg == Native.WM_KEYDOWN || msg == Native.WM_SYSKEYDOWN)
                     {
@@ -1354,6 +1385,9 @@ namespace KeyMouseStats
             DayRecord r = new DayRecord();
             r.Keys = c.Keys; r.Clicks = c.Clicks; r.Wheel = c.Wheel; r.MovePx = c.MovePx;
             r.MoveMeters = c.MoveMeters;
+            r.HoldCount = c.HoldCount; r.HoldDiscarded = c.HoldDiscarded;
+            r.HoldTotalMs = c.HoldTotalMs; r.HoldMaxMs = c.HoldMaxMs;
+            r.HoldActiveSeconds = c.HoldActiveSeconds;
             return r;
         }
 
