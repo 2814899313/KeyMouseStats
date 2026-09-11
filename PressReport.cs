@@ -21,7 +21,7 @@ namespace KeyMouseStats
     /// <summary>按键时长报告。</summary>
     internal sealed class HoldReportData
     {
-        public const string Note = "按键时长 = 首次按下到抬起的间隔,由单调时钟测量;系统的自动重复不会重置起点。\n抬起被吞掉之后再次按下同一个键时,旧样本按丢失抬起丢弃,以本次按下重新起算;超过 60 秒的按住视为挂机或丢失抬起,直接丢弃并计入丢弃数;锁屏、休眠、断开与退出时未抬起的按键同样丢弃。按住时长不是按压力度——普通键盘没有压力感应。\n覆盖率 = 有效样本 ÷ 该区间击键数。丢 UP 是常态(Alt+Tab、Win 键、游戏吞键),覆盖率偏低说明样本偏少,结论要谨慎。\n「累计按住」是逐键时长之和,同时按下多个键会各算一份,可以大于「有键按下」;「有键按下」是至少一个键被按住的墙钟时间(区间并集,不重复计时),它不会超过活跃时长。\n全量累计不受保留期影响:超期日折进月度归档后仍计入;1.7.6 之前的数据没有「有键按下」这一项。";
+        public const string Note = "按键时长 = 首次按下到抬起的间隔,由单调时钟测量;系统的自动重复不会重置起点。\n抬起被吞掉之后再次按下同一个键时,旧样本按丢失抬起丢弃,以本次按下重新起算;超过 60 秒的按住视为挂机或丢失抬起,直接丢弃并计入丢弃数;锁屏、休眠、断开与退出时未抬起的按键同样丢弃。按住时长不是按压力度——普通键盘没有压力感应。\n覆盖率 = 有效样本 ÷ 采集期内的击键数。采集期从区间内第一个有按住时长数据的日子算起:1.7.3 之前的日子没有这一维度,把它们算进分母只会得到虚低的覆盖率。丢 UP 是常态(Alt+Tab、Win 键、游戏吞键),覆盖率偏低说明样本偏少,结论要谨慎。\n「累计按住」是逐键时长之和,同时按下多个键会各算一份,可以大于「有键按下」;「有键按下」是至少一个键被按住的墙钟时间(区间并集,不重复计时),它不会超过活跃时长。\n全量累计不受保留期影响:超期日折进月度归档后仍计入;1.7.6 之前的数据没有「有键按下」这一项。";
 
         public string Caption, Footer;
         public string[] Cards = new string[6], CardValues = new string[6];
@@ -30,6 +30,12 @@ namespace KeyMouseStats
         public readonly long[] Buckets = new long[HoldTracker.BucketCount];
         public readonly List<KeyValuePair<int, KeyHold>> TopKeys = new List<KeyValuePair<int, KeyHold>>();
         public long Samples, Discarded, Keys;
+        /// <summary>1.8.0:采集期内的击键数(覆盖率分母)。按 1.7.3 起采集,更早的日子不该拉低覆盖率。</summary>
+        public long KeysSinceHold;
+        /// <summary>1.8.0:有按住时长样本(含丢弃)的天数。</summary>
+        public int HoldDays;
+        /// <summary>1.8.0:区间内第一个有按住时长数据的日子;没有数据时为 DateTime.MinValue。</summary>
+        public DateTime FirstHoldDate = DateTime.MinValue;
         public double TotalMs, MaxMs;
         /// <summary>区间内的活跃时长与「有键按下」的墙钟占用(秒)。</summary>
         public double ActiveSeconds, HoldActiveSeconds;
@@ -78,6 +84,12 @@ namespace KeyMouseStats
                 {
                     DayRecord day = Analysis.GetDay(date);
                     if (day == null || day.IsEmpty) continue;
+                    // 1.8.0:覆盖率分母只算「采集期」内的击键。1.7.3 之前没有按住时长这一维度,
+                    // 把它们算进分母会让刚升级的用户看到个位数覆盖率,那是口径问题不是样本问题。
+                    bool hasHold = day.HoldCount > 0 || day.HoldDiscarded > 0;
+                    if (hasHold && data.FirstHoldDate == DateTime.MinValue) data.FirstHoldDate = date;
+                    if (hasHold) data.HoldDays++;
+                    if (data.FirstHoldDate != DateTime.MinValue) data.KeysSinceHold += day.Keys;
                     data.Samples += day.HoldCount;
                     data.Discarded += day.HoldDiscarded;
                     data.TotalMs += day.HoldTotalMs;
@@ -129,7 +141,14 @@ namespace KeyMouseStats
             if (data.Rows.Count == 0)
                 data.Rows.Add(new string[] { "暂无有效样本", "--", "--", "0", "--", "--", "--" });
 
-            double coverage = data.Keys > 0 ? (double)data.Samples / data.Keys : double.NaN;
+            // 1.8.0:覆盖率分母用「采集期内的击键」。今天的样本也要算进去(今天还没结束)。
+            if (includesToday && (Store.Today.HoldCount > 0 || Store.Today.HoldDiscarded > 0))
+            {
+                if (data.FirstHoldDate == DateTime.MinValue) data.FirstHoldDate = DateTime.Today;
+                data.HoldDays++;
+                data.KeysSinceHold += Store.Today.Keys;
+            }
+            double coverage = data.KeysSinceHold > 0 ? (double)data.Samples / data.KeysSinceHold : double.NaN;
             double mean = data.Samples > 0 ? data.TotalMs / data.Samples : double.NaN;
             data.AllSamples = Store.Total.HoldCount;
             data.AllDiscarded = Store.Total.HoldDiscarded;
@@ -147,6 +166,8 @@ namespace KeyMouseStats
                 : "累计按住 " + Duration(data.TotalMs) + " · 有键按下 " + Duration(data.HoldActiveSeconds * 1000)
                     + (data.ActiveSeconds > 0 ? "（活跃时长的 " + Share(data.HoldActiveSeconds, data.ActiveSeconds) + "）" : "")
                     + " · 丢弃 " + data.Discarded.ToString("N0", CultureInfo.InvariantCulture)
+                    + " · 覆盖率按采集期(" + (data.FirstHoldDate == DateTime.MinValue ? "无样本" : data.FirstHoldDate.ToString("MM.dd", CultureInfo.InvariantCulture)) + " 起 "
+                    + data.HoldDays + " 天)的 " + data.KeysSinceHold.ToString("N0", CultureInfo.InvariantCulture) + " 次击键计算"
                     + " · 全量累计(含归档) " + Duration(data.AllTotalMs)
                     + (data.AllActiveSeconds > 0 ? " / 有键按下 " + Duration(data.AllActiveSeconds * 1000) : "");
             return data;

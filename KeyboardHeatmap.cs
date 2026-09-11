@@ -255,10 +255,52 @@ namespace KeyMouseStats
         }
         private readonly List<RectangleF> _keyboardHoverRects=new List<RectangleF>();
         private Bitmap _keyboardPlate;
+        /// <summary>1.8.0:上一张键位板,用于换口径/换区间时的交叉淡入。</summary>
+        private Bitmap _keyboardPlatePrev;
         private string _keyboardPlateStamp;
         private bool _showKeyboardHeatmap;
         private bool _keyboardHoldMode;   // 1.7.6:热力图口径——false 击键次数 / true 累计按住时长
         private bool _keyboardDevicesRead;
+        /// <summary>1.8.0:与 _keyboardHoverRects 同序的扫描码,供点击下钻使用。</summary>
+        private readonly List<int> _keyboardScans = new List<int>();
+        /// <summary>1.8.0:下钻选中的键位(扫描码;-1 表示看全部按键)。</summary>
+        private int _selectedKeyScan = -1;
+
+        /// <summary>选中键位的名字;找不到时返回空串。</summary>
+        private string SelectedKeyLabel()
+        {
+            if (_selectedKeyScan < 0) return "";
+            int layout = Store.KeyboardLayout == 0 ? KeyboardDevices.Suggested : Store.KeyboardLayout;
+            foreach (HeatKey key in KeyboardHeat.Layout(layout))
+                if (key.Scan == _selectedKeyScan) return key.Label;
+            return "已选键位";
+        }
+        /// <summary>1.8.0:点击下钻——命中某个键帽返回 true。</summary>
+        internal bool HitKeyboardKey(PointF contentPoint, out int scan)
+        {
+            scan = -1;
+            for (int i = 0; i < _keyboardHoverRects.Count && i < _keyboardScans.Count; i++)
+            {
+                if (!_keyboardHoverRects[i].Contains(contentPoint)) continue;
+                scan = _keyboardScans[i];
+                return scan != 0;   // Fn 由硬件处理,没有可统计的键位
+            }
+            return false;
+        }
+        internal void SelectKey(int scan)
+        {
+            _selectedKeyScan = scan;
+            Motion.Start("keydetail", 180, Ease.OutCubic);
+            Invalidate();
+        }
+        internal bool ClearSelectedKey()
+        {
+            if (_selectedKeyScan < 0) return false;
+            _selectedKeyScan = -1;
+            Motion.Start("keydetail", 180, Ease.OutCubic);
+            Invalidate();
+            return true;
+        }
         private void KeyboardMenu()
         {
             ContextMenuStrip menu=PreparePopup(ref _keyboardMenu);
@@ -285,6 +327,16 @@ namespace KeyMouseStats
             double luminance=channels[0]*0.2126+channels[1]*0.7152+channels[2]*0.0722;
             return luminance>0.20?Color.FromArgb(16,25,32):Color.FromArgb(250,252,255);
         }
+        /// <summary>1.8.0:某个键位在配列内的次数排位(从 1 开始;只数配列里的键)。</summary>
+        private static int KeyRankFor(Dictionary<int, long> counts, List<HeatKey> keys, int scan)
+        {
+            long mine = KeyboardHeat.Count(counts, scan);
+            int rank = 1;
+            foreach (HeatKey key in keys)
+                if (key.Scan != scan && KeyboardHeat.Count(counts, key.Scan) > mine) rank++;
+            return rank;
+        }
+
         private void PaintKeyboardHeatmap(Graphics g, IEnumerable<DayRecord> days)
         {
             if(!_keyboardDevicesRead) { KeyboardDevices.Refresh(); _keyboardDevicesRead=true; }
@@ -318,6 +370,27 @@ namespace KeyMouseStats
             }
             string[] labels=holdMode?new[]{"累计按住","最久按键","点亮键位"}:new[]{"记录击键","最常用键","点亮键位"};
             string[] values=holdMode?new[]{HoldReportData.Duration(total),favorite,used+" / "+keys.Count}:new[]{Analysis.FmtCount(total),favorite,used+" / "+keys.Count};
+            // 1.8.0:下钻后这三格改成「这个键」的数字,不再是全局。
+            if(_selectedKeyScan>=0)
+            {
+                string keyName=SelectedKeyLabel();
+                if(!string.IsNullOrEmpty(keyName)) favorite=keyName;
+                if(holdMode)
+                {
+                    KeyHold keyHold=KeyboardHeat.HoldDetail(holds,_selectedKeyScan);
+                    labels=new[]{"该键累计","该键平均","该键最长"};
+                    values=keyHold==null?new[]{"--","--","--"}
+                        :new[]{HoldReportData.Duration(keyHold.TotalMs),HoldReportData.Duration(keyHold.Mean),HoldReportData.Duration(keyHold.MaxMs)};
+                }
+                else
+                {
+                    long keyValue=KeyboardHeat.Count(counts,_selectedKeyScan);
+                    labels=new[]{"该键击键","占全部","本键排位"};
+                    values=new[]{Analysis.FmtCount(keyValue),
+                        total>0?(100.0*keyValue/total).ToString("0.0",CultureInfo.InvariantCulture)+"%":"--",
+                        keyValue>0?"第 "+KeyRankFor(counts,keys,_selectedKeyScan)+" / "+keys.Count:"--"};
+                }
+            }
             for(int i=0;i<3;i++)
             {
                 float x=Cx+22+i*185;
@@ -333,6 +406,7 @@ namespace KeyMouseStats
             using(Pen edge=new Pen(ArtTheme.Mix(Ccard,Ctext,0.07))) { g.FillPath(b,shell);g.DrawPath(edge,shell); }
             float unit=(Cw-48)/width, row=Math.Min(42,220/height), originY=272+(220-height*row)/2;
             _keyboardHoverRects.Clear();
+            _keyboardScans.Clear();
             PointF mouse=ToBase(_mouse);mouse=new PointF(mouse.X-ContentX,mouse.Y-ContentY);
             HeatKey hover=null;long hoverCount=0;KeyHold hoverHold=null;
             RectangleF hoverRect=RectangleF.Empty;
@@ -346,7 +420,14 @@ namespace KeyMouseStats
                 keyGraphics=null;
                 if(_keyboardPlate==null || _keyboardPlateStamp!=signature)
                 {
-                    if(_keyboardPlate!=null)_keyboardPlate.Dispose();
+                    // 1.8.0:重建时把旧板留下来做交叉淡入,让换口径/换区间的颜色变化是渐变而不是跳变。
+                    // 注意:只保留一张旧板(不做逐帧重建),所以动画期间不会重复解码或反复分配位图。
+                    if(_keyboardPlate!=null)
+                    {
+                        if(_keyboardPlatePrev!=null)_keyboardPlatePrev.Dispose();
+                        _keyboardPlatePrev=_keyboardPlate;
+                        if(Visible)Motion.Start("platefade",200,Ease.OutCubic);
+                    }
                     _keyboardPlate=new Bitmap((int)Math.Ceiling(plateBounds.Width*_s),(int)Math.Ceiling(plateBounds.Height*_s),System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
                     _keyboardPlateStamp=signature;
                     keyGraphics=Graphics.FromImage(_keyboardPlate);keyGraphics.Clear(tray);
@@ -360,6 +441,7 @@ namespace KeyMouseStats
             {
                 RectangleF rect=new RectangleF(Cx+24+key.Bounds.X*unit,originY+key.Bounds.Y*row,key.Bounds.Width*unit-4,key.Bounds.Height*row-5);
                 _keyboardHoverRects.Add(rect);
+                _keyboardScans.Add(key.Scan);
                 long value=holdMode?(long)KeyboardHeat.HoldMs(holds,key.Scan):KeyboardHeat.Count(counts,key.Scan);bool hovered=rect.Contains(mouse);
                 if(hovered) {hover=key;hoverCount=value;hoverHold=holdMode?KeyboardHeat.HoldDetail(holds,key.Scan):null;hoverRect=rect;}
                 if(keyGraphics==null)continue;
@@ -390,7 +472,40 @@ namespace KeyMouseStats
                 if(keyGraphics!=null)keyGraphics.Dispose();
                 PointF[] corner={plateBounds.Location};using(Matrix matrix=g.Transform)matrix.TransformPoints(corner);
                 GraphicsState state=g.Save();g.ResetTransform();g.DrawImageUnscaled(_keyboardPlate,(int)Math.Round(corner[0].X),(int)Math.Round(corner[0].Y));g.Restore(state);
+                // 1.8.0:旧板按 alpha 渐隐,和上新板叠成一次交叉淡入;动画跑完就释放,不留额外常驻内存。
+                if(_keyboardPlatePrev!=null)
+                {
+                    double fade=Motion.Progress("platefade");
+                    if(fade>=1){_keyboardPlatePrev.Dispose();_keyboardPlatePrev=null;}
+                    else
+                    {
+                        state=g.Save();g.ResetTransform();
+                        using(System.Drawing.Imaging.ImageAttributes attributes=new System.Drawing.Imaging.ImageAttributes())
+                        {
+                            float alpha=(float)(1-fade);
+                            System.Drawing.Imaging.ColorMatrix matrix=new System.Drawing.Imaging.ColorMatrix();
+                            matrix.Matrix33=alpha;
+                            attributes.SetColorMatrix(matrix);
+                            g.DrawImage(_keyboardPlatePrev,new Rectangle((int)Math.Round(corner[0].X),(int)Math.Round(corner[0].Y),_keyboardPlatePrev.Width,_keyboardPlatePrev.Height),
+                                0,0,_keyboardPlatePrev.Width,_keyboardPlatePrev.Height,GraphicsUnit.Pixel,attributes);
+                        }
+                        g.Restore(state);
+                    }
+                }
                 if(hover!=null)using(GraphicsPath outline=RoundedRect(hoverRect.X,hoverRect.Y,hoverRect.Width,hoverRect.Height,8))using(Pen pen=new Pen(Cblue,1.6f))g.DrawPath(pen,outline);
+            }
+            // 1.8.0:下钻选中的键位加一圈描边,淡入由 keydetail 通道驱动。
+            if(_selectedKeyScan>=0)
+            {
+                for(int i=0;i<_keyboardHoverRects.Count && i<_keyboardScans.Count;i++)
+                {
+                    if(_keyboardScans[i]!=_selectedKeyScan)continue;
+                    int alpha=(int)(255*Motion.Progress("keydetail"));
+                    if(alpha<40)alpha=40;
+                    using(GraphicsPath ring=RoundedRect(_keyboardHoverRects[i].X-1,_keyboardHoverRects[i].Y-1,_keyboardHoverRects[i].Width+2,_keyboardHoverRects[i].Height+2,8))
+                    using(Pen pen=new Pen(Color.FromArgb(alpha,Ccyan),2f)) g.DrawPath(pen,ring);
+                    break;
+                }
             }
             string keyLabel=hover==null?"探索键位":hover.Label;
             RectangleF badge=new RectangleF(Cx+22,516,80,29);
@@ -408,9 +523,12 @@ namespace KeyMouseStats
             if(EuroTruckArt.Active && hover==null && !holdMode)detail=max>0?favorite+" 驶上热键榜首 · "+Analysis.FmtCount(max)+" 次 · 获得黄金方向盘":"车队待命 · 等待第一条击键记录。";
             if(WuxiaArt.Active && hover==null && !holdMode)detail=max>0?favorite+" 登临键谱榜首 · "+Analysis.FmtCount(max)+" 次 · 朱砂金边封为盟主键":"江湖谱尚空 · 等待第一式落键。";
             AppText(g,detail,_fBody,Ctext,new RectangleF(Cx+114,519,445,24),false);
+            // 1.8.0:把这条明细留给 Ctrl+C 复制(有悬停就复制悬停项,否则复制本页提示)。
+            _hoverDetail = hover==null ? "" : keyLabel + " · " + detail;
             AppText(g,"配列覆盖 "+(total>0?(100.0*visible/total).ToString("0.0",CultureInfo.InvariantCulture):"0.0")+"%",_fSmall,Csub,new RectangleF(Cx+Cw-183,519,160,24),true);
             string note;
-            if(holdMode) note=unmappedHold>0?"含 "+HoldReportData.Duration(unmappedHold)+" 无法定位到键位(每天 Top 48 以外的按键) · 逐键明细按虚拟键归位，主区 Enter 与小键盘 Enter 合并。":"逐键明细按虚拟键归位：主区 Enter 与小键盘 Enter 合并，其余键位一一对应。";
+            if(_selectedKeyScan>=0) note="已下钻到单个键位 · 按 Esc 或点空白处回到全部按键 · 三格统计已切换为该键的数据。";
+            else if(holdMode) note=unmappedHold>0?"含 "+HoldReportData.Duration(unmappedHold)+" 无法定位到键位(每天 Top 48 以外的按键) · 逐键明细按虚拟键归位，主区 Enter 与小键盘 Enter 合并。":"逐键明细按虚拟键归位：主区 Enter 与小键盘 Enter 合并，其余键位一一对应。";
             else note=legacy>0?"含 "+Analysis.FmtCount(legacy)+" 次旧记录，按键名近似归位；旧 Enter 无法区分主区与小键盘。":"按物理键位统计 · 标准 ANSI 示意，厂商自定义键位与 Fn 层可能不同。";
             AppText(g,note,_fSmall,Csub,new RectangleF(Cx+22,551,Cw-44,20),false);
         }

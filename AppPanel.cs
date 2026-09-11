@@ -17,7 +17,48 @@ namespace KeyMouseStats
         private int _appPageCount = 1;
         private readonly List<RectangleF> _appEditRects = new List<RectangleF>();
         private readonly List<AppActivity.Row> _appEditRows = new List<AppActivity.Row>();
+        /// <summary>1.8.0:应用对比——最多选两个应用做并排对比(逐应用小时维度还不存在,所以对比的是现有指标)。</summary>
+        private readonly List<RectangleF> _appCompareRects = new List<RectangleF>();
+        private readonly List<AppActivity.Row> _appCompareRows = new List<AppActivity.Row>();
+        private readonly List<AppActivity.Row> _comparePicked = new List<AppActivity.Row>();
+        private RectangleF _appCompareClearRect;
 
+        private void ToggleCompare(AppActivity.Row row)
+        {
+            if (row == null) return;
+            // 同一个应用再点一次就取消;已有两个时替换掉最早选的那个。
+            for (int i = 0; i < _comparePicked.Count; i++)
+                if (ReferenceEquals(_comparePicked[i], row)) { _comparePicked.RemoveAt(i); Invalidate(); return; }
+            if (_comparePicked.Count >= 2) _comparePicked.RemoveAt(0);
+            _comparePicked.Add(row);
+            Motion.Start("appcompare", 180, Ease.OutCubic);
+            Invalidate();
+        }
+        private bool IsCompared(AppActivity.Row row)
+        {
+            foreach (AppActivity.Row picked in _comparePicked) if (ReferenceEquals(picked, row)) return true;
+            return false;
+        }
+        /// <summary>对比摘要:两行应用的四项现有指标 + 倍数。没有选满两个时返回 null。</summary>
+        internal string CompareSummary()
+        {
+            if (_comparePicked.Count < 2) return null;
+            AppActivity.Row a = _comparePicked[0], b = _comparePicked[1];
+            StringBuilder text = new StringBuilder();
+            text.Append(a.Name).Append(" ↔ ").Append(b.Name).Append("：");
+            text.Append("击键 ").Append(Analysis.FmtCount(a.Keys)).Append(" / ").Append(Analysis.FmtCount(b.Keys)).Append(Ratio(a.Keys, b.Keys));
+            text.Append(" · 点击 ").Append(Analysis.FmtCount(a.Clicks)).Append(" / ").Append(Analysis.FmtCount(b.Clicks));
+            text.Append(" · 滚轮 ").Append(Analysis.FmtCount(a.Wheel)).Append(" / ").Append(Analysis.FmtCount(b.Wheel));
+            // 活跃时长要两边都有观测才值得比;老数据 AppObservedSeconds 为 0,显示「0 秒 / 0 秒」只是噪音。
+            if (a.ActiveSeconds > 0 || b.ActiveSeconds > 0)
+                text.Append(" · 时长 ").Append(ActivityMonitor.FormatDuration(a.ActiveSeconds)).Append(" / ").Append(ActivityMonitor.FormatDuration(b.ActiveSeconds));
+            if (a.Keys == 0 && b.Keys == 0) text.Append("（两者都没有击键记录）");
+            return text.ToString();
+        }
+        private static string Ratio(long a, long b)
+        {
+            return b > 0 ? "（×" + (a / (double)b).ToString("0.##", CultureInfo.InvariantCulture) + "）" : "";
+        }
         private void ApplyAppChip(int id)
         {
             if (id == 64) { using (StatisticsReport report = new StatisticsReport(DateTime.Today, 2)) report.ShowDialog(this); return; }
@@ -31,6 +72,19 @@ namespace KeyMouseStats
 
         private bool HandleAppClick(PointF point)
         {
+            for (int i = 0; i < _appCompareRects.Count; i++)
+                if (_appCompareRects[i].Contains(point))
+                {
+                    ToggleCompare(i < _appCompareRows.Count ? _appCompareRows[i] : null);
+                    return true;
+                }
+            if (_appCompareClearRect.Width > 0 && _appCompareClearRect.Contains(point))
+            {
+                _comparePicked.Clear();
+                Motion.Start("appcompare", 180, Ease.OutCubic);
+                Invalidate();
+                return true;
+            }
             for (int i = 0; i < _appEditRects.Count; i++)
                 if (_appEditRects[i].Contains(point))
                 {
@@ -244,10 +298,32 @@ namespace KeyMouseStats
                     RectangleF edit = new RectangleF(766, y + 5, 70, 27);
                     _appEditRects.Add(edit); _appEditRows.Add(row);
                     PaintChip(g, edit, "手动分类", false, null);
+                    // 1.8.0:对比选择(最多两个,选中的行左侧加一条高亮)。
+                    RectangleF compare = new RectangleF(694, y + 5, 64, 27);
+                    _appCompareRects.Add(compare); _appCompareRows.Add(row);
+                    PaintChip(g, compare, "对比", IsCompared(row), null);
+                    if (IsCompared(row))
+                    {
+                        double pop = 1;
+                        if (Motion.Running("appcompare")) pop = Ease.Apply(Ease.OutQuad, Motion.Progress("appcompare"));
+                        using (SolidBrush mark = new SolidBrush(ArtTheme.Mix(Cblue, Ctext, (float)(0.25 + 0.35 * pop))))
+                            g.FillRectangle(mark, Cx + 4, y, 3, 37);
+                    }
                 }
             }
-            AppText(g, reason, _fSmall, Csub, new RectangleF(Cx + 18, 538, Cw - 230, 18), false);
-            AppText(g, "共 " + rows.Count + " 项 · 按击键排序 · " + (_appPage + 1) + " / " + _appPageCount + " 页",
+            // 1.8.0:选满两个应用时,把提示行换成并排对比结果。
+            string summary = CompareSummary();
+            _appCompareClearRect = RectangleF.Empty;
+            if (summary != null)
+            {
+                // 文本不换行,所以宽度要卡死在「清除对比」chip 左侧,不能让它压到 chip 上。
+                AppText(g, summary, _fSmall, Ctext, new RectangleF(Cx + 18, 536, Cw - 274, 22), false);
+                _appCompareClearRect = new RectangleF(Cx + Cw - 250, 532, 96, 27);
+                PaintChip(g, _appCompareClearRect, "清除对比", false, null);
+            }
+            else AppText(g, reason, _fSmall, Csub, new RectangleF(Cx + 18, 538, Cw - 230, 18), false);
+            AppText(g, "共 " + rows.Count + " 项 · 按击键排序 · " + (_appPage + 1) + " / " + _appPageCount + " 页"
+                + (_comparePicked.Count == 1 ? " · 再选一个应用即可对比" : ""),
                 _fSmall, Csub, new RectangleF(Cx + 18, 558, 460, 24), false);
             AppChip(g, 40, Cx + Cw - 186, 547, 80, "上一页", false);
             AppChip(g, 41, Cx + Cw - 96, 547, 80, "下一页", false);

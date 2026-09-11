@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -120,6 +120,10 @@ namespace KeyMouseStats
     {
         internal float UiScale;internal readonly CrossReportData Data;private readonly int page;private readonly DateTime date;private int hover=-1;
         private readonly List<KeyValuePair<RectangleF,string>> targets=new List<KeyValuePair<RectangleF,string>>();
+        /// <summary>1.8.0:图例点击隐藏的系列(仅影响图,不影响明细表与导出)。</summary>
+        private readonly HashSet<int> _hiddenSeries=new HashSet<int>();
+        private readonly List<RectangleF> _legendRects=new List<RectangleF>();
+        private int _legendCount;
         public CrossReportVisual(DateTime date,int page,CrossReportData snapshot=null)
         {
             this.date=date;this.page=page;Data=snapshot??CrossReportData.Build(date,page);DoubleBuffered=true;ResizeRedraw=true;
@@ -127,6 +131,30 @@ namespace KeyMouseStats
             MouseLeave+=delegate{hover=-1;Invalidate();};
         }
         private readonly ToolTip detailTip=new ToolTip{InitialDelay=250,ReshowDelay=100,AutoPopDelay=20000};
+        /// <summary>1.8.0:点图例切换系列显示。第 7 页(会话应用)的堆叠条才有图例。</summary>
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if(page!=7||Data.SeriesNames==null||e.Button!=MouseButtons.Left)return;
+            float scale=DeviceScale;PointF point=new PointF(e.X/scale,e.Y/scale);
+            for(int i=0;i<_legendRects.Count&&i<_legendCount;i++)
+            {
+                if(!_legendRects[i].Contains(point))continue;
+                if(!_hiddenSeries.Remove(i))_hiddenSeries.Add(i);
+                if(_hiddenSeries.Count>=_legendCount){_hiddenSeries.Clear();_hiddenSeries.Add(i);}   // 不允许全关
+                hover=-1;Invalidate();
+                return;
+            }
+        }
+        /// <summary>是否有系列被隐藏(供测试与导出说明使用)。</summary>
+        internal int HiddenSeriesCount{get{return _hiddenSeries.Count;}}
+        internal void ToggleLegend(int index)
+        {
+            if(index<0||index>=_legendCount)return;
+            if(!_hiddenSeries.Remove(index))_hiddenSeries.Add(index);
+            if(_hiddenSeries.Count>=_legendCount){_hiddenSeries.Clear();_hiddenSeries.Add(index);}
+            Invalidate();
+        }
         protected override void Dispose(bool disposing){if(disposing)detailTip.Dispose();base.Dispose(disposing);}
         private float DeviceScale=1;
         private static void TextAt(Graphics g,string text,Font font,Color color,RectangleF rect)
@@ -173,7 +201,12 @@ namespace KeyMouseStats
                     for(int i=0;i<count;i++)
                     {
                         CrossChartRow row=Data.Chart[i];float y=119+i*20;TextAt(g,row.Name,small,t.Text,new RectangleF(14,y, left-22,20));RectangleF bar=new RectangleF(left,y+3,barWidth,12);Fill(g,t.Raised,bar);
-                        double cursor=0;for(int part=0;part<row.Values.Length;part++){double fraction=row.Total>0?Math.Max(0,Math.Min(1-cursor,Math.Max(0,row.Values[part]/row.Total))):0;RectangleF segment=new RectangleF(bar.X+(float)cursor*bar.Width,bar.Y,(float)fraction*bar.Width,bar.Height);Fill(g,row.Values.Length==1?colors[i%colors.Length]:colors[part%colors.Length],segment);
+                        // 1.8.0:图例可以关掉某一系列,堆叠条按「可见系列」重新归一化。
+                        double visibleTotal=row.Total;
+                        if(page==7&&_hiddenSeries.Count>0){visibleTotal=0;for(int part=0;part<row.Values.Length;part++)if(!_hiddenSeries.Contains(part))visibleTotal+=Math.Max(0,row.Values[part]);}
+                        double cursor=0;for(int part=0;part<row.Values.Length;part++){
+                            if(page==7&&_hiddenSeries.Contains(part))continue;
+                            double fraction=visibleTotal>0?Math.Max(0,Math.Min(1-cursor,Math.Max(0,row.Values[part]/visibleTotal))):0;RectangleF segment=new RectangleF(bar.X+(float)cursor*bar.Width,bar.Y,(float)fraction*bar.Width,bar.Height);Fill(g,row.Values.Length==1?colors[i%colors.Length]:colors[part%colors.Length],segment);
                         if(page==7&&fraction>0)targets.Add(new KeyValuePair<RectangleF,string>(segment,row.Detail+" · "+Data.SeriesPaths[part]+" · "+ActivityMonitor.FormatDuration(row.Values[part])+" · "+(fraction*100).ToString("0.#")+"%"));cursor+=fraction;}
                         string label=page==10?"≈ "+ActivityMonitor.FormatDuration(row.Values[0]):page==7?ActivityMonitor.FormatDuration(row.Total):row.Values.Length==1?(row.Total>0?(row.Values[0]*100/row.Total).ToString("0.#")+"%":"--"):row.Total.ToString("N0")+" 次";
                         TextAt(g,label,small,t.Text,new RectangleF(w-121,y,110,20));
@@ -184,7 +217,19 @@ namespace KeyMouseStats
                 }
                 if(hover>=targets.Count)hover=-1;
                 if(hover>=0)using(Pen pen=new Pen(t.Accent,1.4f)){RectangleF r=targets[hover].Key;g.DrawRectangle(pen,r.X-1,r.Y-1,r.Width+2,r.Height+2);}
-                if(page==7&&Data.SeriesNames!=null){for(int i=0;i<Data.SeriesNames.Length;i++){float x=14+(i%4)*(w-28)/4,y=240+(i/4)*20;Fill(g,colors[i%colors.Length],new RectangleF(x,y+4,8,8));TextAt(g,Data.SeriesNames[i],small,t.Muted,new RectangleF(x+14,y,(w-28)/4-18,19));}TextAt(g,hover>=0?targets[hover].Value:Data.Footer,small,t.Muted,new RectangleF(14,285,w-28,24));}
+                if(page==7&&Data.SeriesNames!=null){
+                    _legendRects.Clear();_legendCount=Data.SeriesNames.Length;
+                    for(int i=0;i<Data.SeriesNames.Length;i++){
+                        float x=14+(i%4)*(w-28)/4,y=240+(i/4)*20;
+                        RectangleF hit=new RectangleF(x-2,y,Math.Max(40,(w-28)/4-4),19);
+                        _legendRects.Add(hit);
+                        bool hidden=_hiddenSeries.Contains(i);
+                        Fill(g,hidden?t.Raised:colors[i%colors.Length],new RectangleF(x,y+4,8,8));
+                        if(hidden)using(Pen pen=new Pen(t.Muted))g.DrawLine(pen,x,y+8,x+8,y+8);
+                        TextAt(g,Data.SeriesNames[i]+(hidden?"（已隐藏）":""),small,hidden?t.Muted:t.Text,new RectangleF(x+14,y,(w-28)/4-18,19));
+                    }
+                    TextAt(g,hover>=0?targets[hover].Value:(_hiddenSeries.Count>0?"已隐藏 "+_hiddenSeries.Count+" 个系列 · 点图例可切换 · 明细表不受影响 · "+Data.Footer:Data.Footer+" · 点图例可只看某几个系列"),small,t.Muted,new RectangleF(14,285,w-28,24));
+                }
                 else TextAt(g,hover>=0?targets[hover].Value:Data.Footer,small,t.Muted,new RectangleF(14,251,w-28,24));
             }
         }

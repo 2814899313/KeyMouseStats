@@ -342,6 +342,12 @@ namespace KeyMouseStats
         public static int IdleThresholdSeconds = 60;
         /// <summary>备份轮转保留的份数。</summary>
         public static int BackupKeep = 7;
+        /// <summary>1.8.0:动效档位(0 关 / 1 精简 / 2 完整),默认完整。</summary>
+        public static int MotionLevel = Motion.LevelFull;
+        /// <summary>1.8.0:跟随系统的「减少动态效果」。</summary>
+        public static bool MotionFollowSystem = true;
+        /// <summary>1.8.0:全局快捷键(打开面板),默认关闭。</summary>
+        public static bool GlobalHotkey;
 
         static Store()
         {
@@ -398,6 +404,10 @@ namespace KeyMouseStats
             public bool HasKeepDays;
             public readonly Dictionary<string, MonthArchive> Archives = new Dictionary<string, MonthArchive>(StringComparer.Ordinal);
             public bool HasMouseDpi, HasIdleThreshold, HasBackupKeep;
+            /// <summary>1.8.0:动效档位 / 跟随系统 / 全局快捷键(默认关)。</summary>
+            public int MotionLevel = Motion.LevelFull;
+            public bool MotionFollowSystem = true, GlobalHotkey;
+            public bool HasMotion;
         }
 
         private static Parsed Parse(string[] lines)
@@ -485,6 +495,15 @@ namespace KeyMouseStats
                             result.HasKeepDays = true;
                             break;
                         case "format": result.FormatVersion = (int)ParseL(val); break;
+                        // 1.8.0 新增的可选行:动效档位 | 跟随系统 | 全局快捷键
+                        case "motion_v1":
+                            string[] motion = (val ?? "").Split('|');
+                            int motionLevel = motion.Length > 0 ? (int)ParseL(motion[0]) : Motion.LevelFull;
+                            result.MotionLevel = motionLevel < Motion.LevelOff || motionLevel > Motion.LevelFull ? Motion.LevelFull : motionLevel;
+                            result.MotionFollowSystem = motion.Length < 2 || ParseL(motion[1]) != 0;
+                            result.GlobalHotkey = motion.Length >= 3 && ParseL(motion[2]) != 0;
+                            result.HasMotion = true;
+                            break;
                         case "archive_v1": MonthArchive.AddTo(result.Archives, val); break;
                         case "backup_keep":
                             int keep = (int)ParseL(val);
@@ -591,6 +610,12 @@ namespace KeyMouseStats
                 if (parsed.HasBackupKeep) BackupKeep = parsed.BackupKeep;
                 if (!string.IsNullOrEmpty(parsed.Wellbeing)) WellbeingSettings.Load(parsed.Wellbeing);
                 if (parsed.HasKeepDays) KeepDays = parsed.KeepDays;
+                if (parsed.HasMotion)
+                {
+                    MotionLevel = parsed.MotionLevel < Motion.LevelOff || parsed.MotionLevel > Motion.LevelFull ? Motion.LevelFull : parsed.MotionLevel;
+                    MotionFollowSystem = parsed.MotionFollowSystem;
+                    GlobalHotkey = parsed.GlobalHotkey;
+                }
                 PosX = parsed.PosX; PosY = parsed.PosY;
                 AppActivity.Rules.Clear();
                 foreach (string rule in parsed.AppRules) AppActivity.LoadRule(rule);
@@ -790,6 +815,8 @@ namespace KeyMouseStats
                 sb.AppendLine("backup_keep=" + BackupKeep.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("wellbeing_v1=" + WellbeingSettings.Encode());
                 sb.AppendLine("keep_days=" + KeepDays.ToString(CultureInfo.InvariantCulture));
+                // 1.8.0 新增的可选行:动效档位 | 跟随系统 | 全局快捷键
+                sb.AppendLine("motion_v1=" + MotionLevel.ToString(CultureInfo.InvariantCulture) + "|" + (MotionFollowSystem ? "1" : "0") + "|" + (GlobalHotkey ? "1" : "0"));
                 foreach (MonthArchive archive in Archives.Values) sb.AppendLine("archive_v1=" + MonthArchive.Encode(archive));
                 sb.AppendLine("art_theme=" + ArtTheme.Validate(ThemeId).ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("keyboard_layout=" + KeyboardHeat.Valid(KeyboardLayout).ToString(CultureInfo.InvariantCulture));
@@ -910,6 +937,16 @@ namespace KeyMouseStats
         public static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
         public static extern IntPtr GetModuleHandle(string lpModuleName);
+
+        // 1.8.0:全局快捷键(默认关闭)。Ctrl+Alt+K 打开详细面板。
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool RegisterHotKey(IntPtr window, int id, uint modifiers, uint key);
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool UnregisterHotKey(IntPtr window, int id);
+        public const int WM_HOTKEY = 0x0312;
+        public const int HotkeyId = 0x4B53;   // "KS"
+        public const uint MOD_ALT = 0x0001, MOD_CONTROL = 0x0002, MOD_SHIFT = 0x0004, MOD_NOREPEAT = 0x4000;
+        public const uint HotkeyKey = 0x4B;   // K
 
         public const int WH_KEYBOARD_LL = 13;
         public const int WH_MOUSE_LL = 14;
@@ -1038,6 +1075,23 @@ namespace KeyMouseStats
                 null, -1, false);
         }
 
+        /// <summary>1.8.0:按设置注册 / 注销全局快捷键(默认关闭)。注册失败不打扰用户:
+        /// 多半是被别的程序占用,菜单里的勾选状态会在下次打开菜单时按实际结果修正。</summary>
+        private bool _hotkeyRegistered;
+        private void ApplyGlobalHotkey()
+        {
+            if (Handle == IntPtr.Zero) return;
+            bool wanted = Store.GlobalHotkey;
+            if (wanted == _hotkeyRegistered) return;
+            try
+            {
+                if (wanted) _hotkeyRegistered = Native.RegisterHotKey(Handle, Native.HotkeyId, Native.MOD_CONTROL | Native.MOD_ALT | Native.MOD_NOREPEAT, Native.HotkeyKey);
+                else { Native.UnregisterHotKey(Handle, Native.HotkeyId); _hotkeyRegistered = false; }
+            }
+            catch { _hotkeyRegistered = false; }
+            if (wanted && !_hotkeyRegistered) Store.GlobalHotkey = false;   // 被占用:回退成关闭,不留一个假的勾
+        }
+
         private void OpenDashboard()
         {
             try
@@ -1062,18 +1116,23 @@ namespace KeyMouseStats
             base.OnHandleCreated(e);
             _rawMouse.Register(Handle); // 鼠标穿透会重建句柄，需要重新注册。
             ActivityMonitor.Register(Handle);
+            _hotkeyRegistered = false;  // 句柄重建后快捷键注册也失效,按设置重来
+            ApplyGlobalHotkey();
         }
 
         protected override void OnHandleDestroyed(EventArgs e)
         {
             _rawMouse.Unregister();
             ActivityMonitor.Unregister(Handle);
+            if (_hotkeyRegistered) { try { Native.UnregisterHotKey(Handle, Native.HotkeyId); } catch { } _hotkeyRegistered = false; }
             base.OnHandleDestroyed(e);
         }
 
         protected override void WndProc(ref Message m)
         {
             ActivityMonitor.Message(m.Msg, m.WParam);
+            // 1.8.0:全局快捷键(默认关闭)打开详细面板。
+            if (m.Msg == Native.WM_HOTKEY && m.WParam.ToInt32() == Native.HotkeyId) OpenDashboard();
             if(m.Msg==0x02B1||m.Msg==0x0218)_mouseVectors.Reset();
             if (_combos != null && (m.Msg == 0x02B1 || m.Msg == 0x0218
                 && (m.WParam.ToInt64() == 4 || m.WParam.ToInt64() == 7 || m.WParam.ToInt64() == 18))) _combos.Reset();
@@ -1351,6 +1410,8 @@ namespace KeyMouseStats
 
             using (SolidBrush b = new SolidBrush(ArtTheme.Current.Text))
                 g.DrawString("键鼠统计", _fTitle, b, 16 * s, 9 * s);
+            // 1.8.0:目标达成的庆祝(一次性,播完自动停表;按住键/锁屏时由 Motion.Paused 停住)。
+            PaintCelebration(g, s);
 
             string modeName = _mode == 2 ? "累计" : _mode == 1 ? "目标" : "今日";
             string modeText = string.Format("{0} · {1:MM-dd}", modeName, Store.Day);
@@ -1365,19 +1426,22 @@ namespace KeyMouseStats
             DayRecord c = _mode == 2 ? ToDayRecord(Store.Total) : Store.Today;
             float col2 = ClientSize.Width / 2f + 6;
 
-            DrawCard(g, 18 * s, 46 * s, ArtTheme.Current.Accent, "键盘击键", Analysis.FmtCount(c.Keys));
-            DrawCard(g, 18 * s, 92 * s, ArtTheme.Current.Green, "鼠标点击", Analysis.FmtCount(c.Clicks));
-            DrawCard(g, col2, 46 * s, ArtTheme.Current.Orange, "滚轮滚动", Analysis.FmtCount(c.Wheel));
+            // 1.8.0:数值滚动——小部件每 250 ms 才刷新一次,直接跳变很生硬;这里让显示值追上真实值。
+            DrawCard(g, 18 * s, 46 * s, ArtTheme.Current.Accent, "键盘击键", Analysis.FmtCount(Motion.Roll("w-keys", c.Keys, 200)));
+            DrawCard(g, 18 * s, 92 * s, ArtTheme.Current.Green, "鼠标点击", Analysis.FmtCount(Motion.Roll("w-clicks", c.Clicks, 200)));
+            DrawCard(g, col2, 46 * s, ArtTheme.Current.Orange, "滚轮滚动", Analysis.FmtCount(Motion.Roll("w-wheel", c.Wheel, 200)));
             DrawCard(g, col2, 92 * s, ArtTheme.Current.Purple, "鼠标路程(估算)",
-                !_rawMouse.Registered ? "采集不可用" : Analysis.FmtDistance(c.MoveMeters));
+                !_rawMouse.Registered ? "采集不可用" : Analysis.FmtDistance(Motion.Roll("w-meters", c.MoveMeters, 200)));
             using (Pen line = new Pen(ArtTheme.Current.Line)) g.DrawLine(line, 14 * s, 137 * s, ClientSize.Width - 14 * s, 137 * s);
             ActiveSession current = ActivityMonitor.CurrentSession;
-            string live = "APM " + LiveRate.Apm + " · 本段 " + (current == null ? "--" : ActivityMonitor.FormatDuration(current.Seconds));
+            string live = "APM " + Motion.Roll("w-apm", LiveRate.Apm, 200) + " · 本段 " + (current == null ? "--" : ActivityMonitor.FormatDuration(current.Seconds));
             using (SolidBrush text = new SolidBrush(ArtTheme.Current.Muted))
             using (StringFormat format = new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap })
                 g.DrawString(live, _fMode, text, new RectangleF(16 * s, 143 * s, ClientSize.Width - 32 * s, 22 * s), format);
             LiveRate.PaintTrend(g,new RectangleF(16*s,172*s,ClientSize.Width-32*s,19*s),ArtTheme.Current.Cyan);
             using(SolidBrush label=new SolidBrush(ArtTheme.Current.Muted))g.DrawString("最近 5 分钟 APM",_fMode,label,16*s,192*s);
+            // 数值滚动期间按 30 ms 出帧;没有动效时立刻停表。
+            if (Motion.Active || Motion.AnyChaseMoving(0.4)) EnsureMotionFrames();
         }
 
         private static DayRecord ToDayRecord(Counters c)
@@ -1461,6 +1525,8 @@ namespace KeyMouseStats
             {
                 DateTime now = DateTime.Now;
                 string message = Wellbeing.GoalMessage(now, Store.Today);
+                // 1.8.0:目标达成时在小部件上放一次庆祝动效(贴纸弹入 + 一次光晕),只播一次。
+                if (message != null) StartCelebration();
                 if (message == null) message = Wellbeing.ContinuousMessage(now, ActivityMonitor.CurrentSession);
                 if (message == null) message = Wellbeing.SummaryMessage(now);
                 if (message == null) return;
@@ -1468,6 +1534,62 @@ namespace KeyMouseStats
                 MarkDirty();
             }
             catch { }
+        }
+
+        // ------------------------------------------------------------ 目标达成庆祝
+        /// <summary>1.8.0:小部件的动效帧定时器(30 ms)。只在有动效或数值滚动时运行,其余时间完全停表。</summary>
+        private System.Windows.Forms.Timer _celebrateTimer;
+        /// <summary>按需启动帧定时器。</summary>
+        private void EnsureMotionFrames()
+        {
+            if (_celebrateTimer == null)
+            {
+                _celebrateTimer = new System.Windows.Forms.Timer();
+                _celebrateTimer.Interval = 30;
+                _celebrateTimer.Tick += delegate
+                {
+                    Motion.Paused = ActivityMonitor.Busy || HoldTracker.PendingCount > 0;
+                    Invalidate();
+                    if (!Motion.Active && !Motion.AnyChaseMoving(0.4)) { _celebrateTimer.Stop(); Motion.Sweep(); }
+                };
+            }
+            if (!_celebrateTimer.Enabled) _celebrateTimer.Start();
+        }
+        /// <summary>开始一次庆祝(重复调用会重新开始,不会叠加)。</summary>
+        internal void StartCelebration()
+        {
+            if (!Motion.Enabled) return;
+            Motion.Start("celebrate", 900, Ease.OutCubic);
+            EnsureMotionFrames();
+            Invalidate();
+        }
+        /// <summary>是否正在庆祝(供测试与绘制判断)。</summary>
+        internal bool Celebrating { get { return Motion.Running("celebrate"); } }
+
+        /// <summary>庆祝动效:一次光晕 + 贴纸弹入。全部画在小部件自己的矩形里,不额外分配位图。</summary>
+        private void PaintCelebration(Graphics g, float s)
+        {
+            if (!Motion.Running("celebrate")) return;
+            double progress = Motion.Progress("celebrate");
+            // 前 55% 弹入,后 45% 淡出。
+            double appear = Math.Min(1, progress / 0.55);
+            double fade = progress <= 0.55 ? 1 : 1 - (progress - 0.55) / 0.45;
+            if (fade <= 0) return;
+            double pop = Ease.Apply(Ease.OutQuad, appear);
+            RectangleF bounds = new RectangleF(0, 0, ClientSize.Width, ClientSize.Height);
+            for (int ring = 3; ring >= 1; ring--)
+            {
+                int alpha = (int)(38 * fade * pop / ring);
+                if (alpha <= 0) continue;
+                float inset = -(ring - 1) * 4 * s;
+                using (GraphicsPath halo = RoundedPath(Rectangle.Round(new RectangleF(bounds.X + inset, bounds.Y + inset, bounds.Width - inset * 2, bounds.Height - inset * 2)), (int)Math.Round(16 * s)))
+                using (Pen pen = new Pen(Color.FromArgb(alpha, ArtTheme.Current.OnAccent), 2f * s)) g.DrawPath(pen, halo);
+            }
+            float size = (float)(30 * s * (0.4 + 0.6 * pop));
+            float x = ClientSize.Width - size - 8 * s;
+            float y = 3 * s - (size - 30 * s) / 2;
+            // 贴纸不带 alpha(不为一次庆祝分配中间位图);淡出由光晕轮廓与缩放共同表达。
+            if (ThemeArt.Active) ThemeArt.Sticker(g, 2, new RectangleF(x, y, size, size));
         }
 
         internal static GraphicsPath RoundedPath(Rectangle r, int radius)
@@ -1622,6 +1744,35 @@ namespace KeyMouseStats
 
             ToolStripSeparator sep3 = new ToolStripSeparator();
 
+            // 1.8.0:外观 / 动效(默认完整;可关;可跟随系统的「减少动态效果」)
+            ToolStripMenuItem motionMenu = new ToolStripMenuItem("外观 / 动效");
+            ToolStripMenuItem[] motionLevels = new ToolStripMenuItem[3];
+            for (int i = 0; i < 3; i++)
+            {
+                int level = i;
+                ToolStripMenuItem item = new ToolStripMenuItem("动效：" + Motion.LevelName(level));
+                item.Click += delegate { Store.MotionLevel = level; Motion.StopAll(); Store.Save(); _dirtyUI = true; if (_dash != null && !_dash.IsDisposed) _dash.Invalidate(); };
+                motionLevels[i] = item;
+                motionMenu.DropDownItems.Add(item);
+            }
+            ToolStripMenuItem motionFollow = new ToolStripMenuItem("跟随系统「减少动态效果」");
+            motionFollow.Click += delegate { Store.MotionFollowSystem = !Store.MotionFollowSystem; Motion.StopAll(); Store.Save(); };
+            motionMenu.DropDownItems.Add(motionFollow);
+            ToolStripMenuItem motionSystem = new ToolStripMenuItem("系统要求减少动态效果：当前按「精简」运行") { Enabled = false };
+            motionMenu.DropDownItems.Add(motionSystem);
+            motionMenu.DropDownItems.Add(new ToolStripSeparator());
+            ToolStripMenuItem motionHotkey = new ToolStripMenuItem("全局快捷键：Ctrl+Alt+K 打开面板（默认关闭）");
+            motionHotkey.Click += delegate { Store.GlobalHotkey = !Store.GlobalHotkey; ApplyGlobalHotkey(); Store.Save(); };
+            motionMenu.DropDownItems.Add(motionHotkey);
+            motionMenu.DropDownOpening += delegate
+            {
+                int level = Store.MotionLevel;
+                for (int i = 0; i < 3; i++) motionLevels[i].Checked = level == i;
+                motionFollow.Checked = Store.MotionFollowSystem;
+                motionHotkey.Checked = _hotkeyRegistered;
+                motionSystem.Visible = Store.MotionFollowSystem && Motion.SystemPrefersReducedMotion;
+            };
+
             ToolStripMenuItem miExit = new ToolStripMenuItem("退出", null, delegate { Close(); });
 
             _menu.Items.AddRange(new ToolStripItem[] {
@@ -1630,6 +1781,7 @@ namespace KeyMouseStats
                 new ToolStripMenuItem("今日连续使用段...", null, delegate { using (SessionDetails dialog = new SessionDetails()) dialog.ShowDialog(this); }),
                 new ToolStripMenuItem("数据管理(备份 / 导入 / 校验)...", null, delegate { using (DataSettingsDialog dialog = new DataSettingsDialog()) dialog.ShowDialog(this); }),
                 new ToolStripMenuItem("目标 / 提醒...", null, delegate { using (WellbeingSettingsDialog dialog = new WellbeingSettingsDialog()) dialog.ShowDialog(this); }),
+                motionMenu,
                 _miShow, hudMenu, sep1, _miTopMost, _miClickThrough, _miAutoStart,
                 sep2, miResetToday, miResetAll, sep3, miExit });
         }

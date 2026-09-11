@@ -158,6 +158,8 @@ namespace KeyMouseStats
         static ActivityMonitor() { Tracker.OnActiveInterval = AppTelemetry.Interval; }
         public static string Status = "等待采样";
         public static bool IsActive { get { return !_locked && !_disconnected && !_suspended && Tracker.IsActive; } }
+        /// <summary>1.8.0:锁屏 / 会话断开 / 休眠期间为 true。动效在这段时间停表(见 1.8 计划)。</summary>
+        public static bool Busy { get { return _locked || _disconnected || _suspended; } }
         public static ActiveSession CurrentSession { get { return IsActive ? Tracker.CurrentSession : null; } }
         public static void Reset(SessionStartReason reason=SessionStartReason.Startup) { Tracker.Reset(reason); AppTelemetry.Reset(); Status = "等待采样"; }
         public static void Register(IntPtr window) { _notificationsReady = WTSRegisterSessionNotification(window, 0); }

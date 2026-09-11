@@ -40,6 +40,22 @@ internal static class ThemeLoadingTests
                     Stopwatch watch=Stopwatch.StartNew();
                     for(int frame=0;frame<6;frame++){graphics.ResetTransform();paint.Invoke(form,args);}
                     watch.Stop();slowest=Math.Max(slowest,watch.Elapsed.TotalMilliseconds/6);
+                    // 1.8.0:动效中间帧的帧预算。换页淡入只多一次半透明填充,所以必须留在
+                    // 静态帧的 1.6 倍以内(上限 33 ms ≈ 30 FPS)。用假时钟把时间轴钉在 50%。
+                    Motion.ResetForTests();
+                    Motion.UseFakeClock(1000000);
+                    Motion.Start("page",150,Ease.Linear);
+                    Motion.AdvanceFakeClock(75);
+                    graphics.ResetTransform();paint.Invoke(form,args);
+                    Stopwatch animated=Stopwatch.StartNew();
+                    for(int frame=0;frame<6;frame++){graphics.ResetTransform();paint.Invoke(form,args);}
+                    animated.Stop();
+                    double animationFrame=animated.Elapsed.TotalMilliseconds/6;
+                    Motion.ResetForTests();
+                    double budget=Math.Max(33,slowest*1.6);
+                    if(animationFrame>budget)
+                        throw new Exception("Animation frame budget exceeded on "+pages[page]+" (theme "+theme+"): "
+                            +animationFrame.ToString("0.0")+" ms > "+budget.ToString("0.0")+" ms");
                     if(ThemeImages.AllocatedBytes>ThemeImages.Budget||NikkiArt.ScaledBytes>40L*1024*1024)throw new Exception("Unbounded original-image cache");
                     if(pass==1 && (page==3||theme>=9))
                     {
@@ -56,7 +72,7 @@ internal static class ThemeLoadingTests
             if(ThemeImages.Get("MissingTestResource")!=null)throw new Exception("Missing asset fallback");
             typeof(Dashboard).GetMethod("OnFormClosed",flags).Invoke(form,new object[]{new FormClosedEventArgs(CloseReason.None)});
         }
-        Console.WriteLine("PASS: 84 page transitions, bounded original cache, async loading and missing-image fallback");
+        Console.WriteLine("PASS: 84 page transitions, bounded original cache, async loading, animation frame budget and missing-image fallback");
     }
     static void Wait(string resource)
     {

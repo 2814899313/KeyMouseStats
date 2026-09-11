@@ -26,13 +26,15 @@ namespace KeyMouseStats
         private readonly Label _validationStatus = new Label();
         private readonly NumericUpDown _retentionDays = new NumericUpDown { Minimum = 30, Maximum = 3650, Increment = 30 };
         private readonly CheckBox _retentionForever = new CheckBox { Text = "永久保留" };
+        /// <summary>1.8.0:已归档月份一览。超期日折进月度归档后,按住时长就在这里看。</summary>
+        private readonly ListView _archives = new ListView { View = View.Details, FullRowSelect = true, BorderStyle = BorderStyle.FixedSingle };
         private ImportPreview _preview;
 
         public DataSettingsDialog()
         {
             Text = "数据管理"; FormBorderStyle = FormBorderStyle.FixedDialog; StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false; MinimizeBox = false; ShowInTaskbar = false; AutoScaleMode = AutoScaleMode.None;
-            Font = new Font("Microsoft YaHei UI", 9f); ClientSize = new Size(620, 664);
+            Font = new Font("Microsoft YaHei UI", 9f); ClientSize = new Size(620, 834);
             _keep.Value = Math.Max(1, Math.Min(60, Store.BackupKeep));
 
             Label backupTitle = Header("备份");
@@ -96,6 +98,19 @@ namespace KeyMouseStats
                 validateTitle, validate, _validationStatus, _issues,
                 retentionTitle, retentionLabel, _retentionDays, retentionTail, _retentionForever });
 
+            // 1.8.0:已归档月份。保留期之外的日会折进这里,按住时长不再凭空消失。
+            Label archiveTitle = Header("已归档月份");
+            _archives.Columns.Add("月份", 96);
+            _archives.Columns.Add("天数", 56);
+            _archives.Columns.Add("击键", 96);
+            _archives.Columns.Add("累计按住", 108);
+            _archives.Columns.Add("有键按下", 108);
+            _archives.Columns.Add("丢弃", 70);
+            archiveTitle.SetBounds(20, 664, 300, 22);
+            _archives.SetBounds(20, 692, 580, 122);
+            Controls.Add(archiveTitle);
+            Controls.Add(_archives);
+
             _keep.ValueChanged += delegate { Store.BackupKeep = (int)_keep.Value; Store.Save(); RefreshBackupStatus(); };
             backupNow.Click += delegate { Backup(); };
             openFolder.Click += delegate { try { Process.Start("explorer.exe", Store.DataDirectory); } catch { } };
@@ -105,7 +120,36 @@ namespace KeyMouseStats
             validate.Click += delegate { RunValidation(); };
 
             RefreshBackupStatus();
+            RefreshArchives();
             UpdateImportSummary();
+        }
+
+        /// <summary>1.8.0:列出已归档月份(新的在前),含按住时长与墙钟占用。</summary>
+        private void RefreshArchives()
+        {
+            _archives.Items.Clear();
+            List<MonthArchive> list = new List<MonthArchive>(Store.Archives.Values);
+            list.Sort(delegate(MonthArchive a, MonthArchive b) { return string.CompareOrdinal(b.Key, a.Key); });
+            foreach (MonthArchive archive in list)
+            {
+                ListViewItem item = new ListViewItem(archive.Label);
+                item.SubItems.Add(archive.Days.ToString(CultureInfo.InvariantCulture));
+                item.SubItems.Add(archive.Keys.ToString("N0", CultureInfo.InvariantCulture));
+                item.SubItems.Add(archive.HoldCount > 0 || archive.HoldTotalMs > 0 ? HoldReportData.Duration(archive.HoldTotalMs) : "--");
+                item.SubItems.Add(archive.HoldActiveSeconds > 0 ? HoldReportData.Duration(archive.HoldActiveSeconds * 1000) : "--");
+                item.SubItems.Add(archive.HoldDiscarded.ToString("N0", CultureInfo.InvariantCulture));
+                _archives.Items.Add(item);
+            }
+            if (list.Count == 0)
+            {
+                ListViewItem empty = new ListViewItem("暂无归档");
+                empty.SubItems.Add("—");
+                empty.SubItems.Add("超出保留期的日会先折进月度归档,");
+                empty.SubItems.Add("再从这里查看");
+                empty.SubItems.Add("不会直接删除");
+                empty.SubItems.Add("—");
+                _archives.Items.Add(empty);
+            }
         }
 
         private static Label Header(string text)

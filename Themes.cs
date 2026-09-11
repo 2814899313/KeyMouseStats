@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -200,6 +200,39 @@ namespace KeyMouseStats
                     for (int y = 0; y < BH; y += 24) g.DrawLine(p, ContentX, y, BW, y);
                 }
             }
+        }
+
+        // ---------------------------------------------------------------- 主题切换淡入
+        /// <summary>1.8.0:换主题时用旧主题的背景色做一次全窗交叉淡化。
+        /// 刻意不重绘旧主题的美术层:主题图片缓存可能已经释放,而且重绘一整页正好是这个
+        /// 项目最贵的操作(150% 下最重页 20+ ms)。一次全窗 alpha 填充在预算内。</summary>
+        private void ThemeFadeTick()
+        {
+            if (_paintedTheme < 0) { _paintedTheme = Store.ThemeId; return; }   // 首帧只记状态,不做淡化
+            if (_paintedTheme == Store.ThemeId) return;
+            Color previous = ThemeFadeColor(_paintedTheme);
+            _paintedTheme = Store.ThemeId;
+            if (!Visible || previous == Color.Empty) return;
+            _themeScrim = previous;
+            Motion.Start("themefade", 220, Ease.OutCubic);
+        }
+
+        /// <summary>某个主题的底色;未知主题返回空色(表示不做淡化)。</summary>
+        private static Color ThemeFadeColor(int theme)
+        {
+            ArtTheme previous = ArtTheme.All[ArtTheme.Validate(theme)];
+            return previous == null ? Color.Empty : previous.Background;
+        }
+
+        private void PaintThemeFade(Graphics g)
+        {
+            if (_themeScrim == Color.Empty) return;
+            double progress = Motion.Progress("themefade");
+            if (progress >= 1) { _themeScrim = Color.Empty; return; }
+            int alpha = (int)(170 * (1 - progress));
+            if (alpha <= 0) return;
+            using (SolidBrush scrim = new SolidBrush(Color.FromArgb(alpha, _themeScrim)))
+                g.FillRectangle(scrim, 0, 0, BW, BH);
         }
     }
 }

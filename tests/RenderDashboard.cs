@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -166,8 +167,65 @@ internal static class RenderDashboard
             Set(form,"_mouse",new Point(350,428));
             Render(form,"keyboard-hold-hover",1f);
             Set(form,"_mouse",new Point(-100,-100));
+            // 1.8.0:点击热力图上的一个键下钻(三格统计切成该键),再按 Esc 回到全部按键。
+            Render(form,"keyboard-drill-base",1f);   // 先画一帧,填充命中矩形与扫描码表
+            List<RectangleF> caps=(List<RectangleF>)typeof(Dashboard).GetField("_keyboardHoverRects",Private).GetValue(form);
+            List<int> caps2=(List<int>)typeof(Dashboard).GetField("_keyboardScans",Private).GetValue(form);
+            int keyIndex=-1;
+            for(int i=0;i<caps2.Count;i++) if(caps2[i]==17) { keyIndex=i; break; }   // W 键
+            if(keyIndex<0) throw new Exception("keyboard hit rectangles were not recorded");
+            PointF cap=new PointF(caps[keyIndex].X+caps[keyIndex].Width/2,caps[keyIndex].Y+caps[keyIndex].Height/2);
+            Point capClick=new Point((int)(cap.X+176),(int)(cap.Y+64));
+            typeof(Dashboard).GetMethod("OnMouseClick",Private).Invoke(form,new object[]{new MouseEventArgs(MouseButtons.Left,1,capClick.X,capClick.Y,0)});
+            if((int)typeof(Dashboard).GetField("_selectedKeyScan",Private).GetValue(form)!=17)
+                throw new Exception("keyboard drill-down hit target failed");
+            if(((string)typeof(Dashboard).GetField("_crumb",Private).GetValue(form)).Length==0)
+                throw new Exception("keyboard drill-down did not set the breadcrumb");
+            Render(form,"keyboard-drill",1f);
+            typeof(Dashboard).GetMethod("OnKeyDown",Private).Invoke(form,new object[]{new KeyEventArgs(Keys.Escape)});
+            if((int)typeof(Dashboard).GetField("_selectedKeyScan",Private).GetValue(form)!=-1)
+                throw new Exception("escape did not leave the drilled key");
             Set(form,"_keyboardHoldMode",false);
             Set(form,"_showKeyboardHeatmap",false);
+            // 1.8.0:键盘导航(Tab 选筛选项 / Enter 激活 / 方向键翻页)与 Ctrl+C 复制。
+            typeof(Dashboard).GetMethod("OnKeyDown",Private).Invoke(form,new object[]{new KeyEventArgs(Keys.Tab)});
+            int focus=(int)typeof(Dashboard).GetField("_chipFocus",Private).GetValue(form);
+            if(focus<0) throw new Exception("tab did not focus a filter chip");
+            List<int> chipIds=(List<int>)typeof(Dashboard).GetField("_chipIds",Private).GetValue(form);
+            int heatIndex=-1;
+            for(int i=0;i<chipIds.Count;i++) if(chipIds[i]==74) { heatIndex=i; break; }
+            if(heatIndex<0) throw new Exception("the keyboard heatmap chip was not registered");
+            typeof(Dashboard).GetField("_chipFocus",Private).SetValue(form,heatIndex);
+            typeof(Dashboard).GetMethod("OnKeyDown",Private).Invoke(form,new object[]{new KeyEventArgs(Keys.Enter)});
+            if(!(bool)typeof(Dashboard).GetField("_showKeyboardHeatmap",Private).GetValue(form))
+                throw new Exception("enter did not activate the focused chip");
+            Render(form,"keyboard-nav-focus",1f);
+            Set(form,"_mouse",new Point(350,428));
+            Render(form,"keys-hover-detail",1f);
+            string copied=(string)typeof(Dashboard).GetMethod("CopyText",Private).Invoke(form,null);
+            if(string.IsNullOrEmpty(copied)) throw new Exception("ctrl+c copied nothing");
+            Set(form,"_mouse",new Point(-100,-100));
+            Set(form,"_showKeyboardHeatmap",false);
+            int before=(int)Enum.ToObject(tabField.FieldType,tabField.GetValue(form));
+            typeof(Dashboard).GetMethod("OnKeyDown",Private).Invoke(form,new object[]{new KeyEventArgs(Keys.Right)});
+            if((int)Enum.ToObject(tabField.FieldType,tabField.GetValue(form))==before)
+                throw new Exception("the right arrow did not change page");
+            // 1.8.0:换页淡入的关键帧预览。离屏渲染默认不做动效,这里用假时钟显式推进时间轴,
+            // 于是同一段动画可以稳定地取到 0% / 50% / 100% 三帧。
+            Motion.ResetForTests();
+            Motion.UseFakeClock(100000);
+            Motion.Live = true;
+            FieldInfo paintedTab = typeof(Dashboard).GetField("_paintedTab", Private);
+            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 3));
+            paintedTab.SetValue(form, Enum.ToObject(paintedTab.FieldType, 5));   // 伪造「上一帧在别的页」
+            Motion.Start("page", 150, Ease.Linear);
+            Render(form, "page-transition-0", 1f);
+            Motion.AdvanceFakeClock(75);
+            Render(form, "page-transition-50", 1f);
+            Motion.AdvanceFakeClock(75);
+            Render(form, "page-transition-100", 1f);
+            Motion.ResetForTests();
+            Motion.Live = true;
             tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 1));
             Render(form, "trend", 1f);
             Render(form, "trend", 1f);
@@ -180,6 +238,20 @@ internal static class RenderDashboard
                 new object[] { new MouseEventArgs(MouseButtons.Left, 1, 742, 174, 0) });
             if (!(bool)typeof(Dashboard).GetField("_trendHourly", Private).GetValue(form)) throw new Exception("Hourly trend switch hit target failed");
             Render(form, "trend-hourly", 1f); Render(form, "trend-hourly-150", 1.5f);
+            // 1.8.0:图表入场生长的关键帧(时段分布的柱子从基线长出)。
+            Motion.ResetForTests();
+            Motion.UseFakeClock(200000);
+            Motion.Live = true;
+            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 2));
+            Motion.Start("enter", 280, Ease.Linear);
+            Render(form, "hours-enter-0", 1f);
+            Motion.AdvanceFakeClock(140);
+            Render(form, "hours-enter-50", 1f);
+            Motion.AdvanceFakeClock(140);
+            Render(form, "hours-enter-100", 1f);
+            Motion.ResetForTests();
+            Motion.Live = true;
+            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 1));   // 回到趋势页,后续预览仍属于它
             Set(form, "_hourlyCompareDays", 7); Render(form, "trend-hourly-compare-week", 1f);
             Set(form, "_hourlyTrendMetric", 2); Render(form, "trend-hourly-active", 1f);
             Set(form, "_hourlyTrendDay", DateTime.Today.AddDays(-80)); Render(form, "trend-hourly-missing", 1f);
@@ -220,6 +292,53 @@ internal static class RenderDashboard
             Set(form, "_mouse", new Point(500 + contentX, 295 + contentY));
             Render(form, "app-keygroups-hover", 1f);
             Set(form, "_mouse", new Point(0, 0));
+
+            // 1.8.0:应用对比——点两个「对比」chip,页脚给出并排对比;再点「清除对比」恢复提示。
+            Set(form, "_appKeyGroups", false);
+            Render(form, "apps", 1f);
+            IList compareRects = (IList)typeof(Dashboard).GetField("_appCompareRects", Private).GetValue(form);
+            if (compareRects.Count < 2) throw new Exception("the apps page did not register compare hit targets");
+            for (int i = 0; i < 2; i++)
+            {
+                RectangleF rect = (RectangleF)compareRects[i];
+                ClickContent(form, rect);
+            }
+            string compareSummary = (string)typeof(Dashboard).GetMethod("CompareSummary", Private).Invoke(form, null);
+            if (string.IsNullOrEmpty(compareSummary)) throw new Exception("comparing two apps produced no summary");
+            if (compareSummary.IndexOf("击键") < 0 || compareSummary.IndexOf('×') < 0)
+                throw new Exception("the comparison summary dropped the keystroke ratio: " + compareSummary);
+            // 没有观测时长的数据不该显示「0 秒 / 0 秒」这种噪音。
+            if (compareSummary.IndexOf("时长") >= 0 && compareSummary.IndexOf("0 秒 / 0 秒") >= 0)
+                throw new Exception("the comparison summary shows two zero durations: " + compareSummary);
+            Render(form, "apps-compare", 1f);
+            IList picked = (IList)typeof(Dashboard).GetField("_comparePicked", Private).GetValue(form);
+            if (picked.Count != 2) throw new Exception("two compared apps were not kept");
+            // 最多保留两个:再点第三个「对比」时,最早选的那个被替换掉(而不是被拒绝)。
+            if (compareRects.Count > 2)
+            {
+                IList seeded = (IList)typeof(Dashboard).GetField("_comparePicked", Private).GetValue(form);
+                object first = seeded[0];
+                ClickContent(form, (RectangleF)compareRects[2]);
+                IList after = (IList)typeof(Dashboard).GetField("_comparePicked", Private).GetValue(form);
+                if (after.Count != 2) throw new Exception("the comparison kept more than two apps");
+                bool droppedFirst = true;
+                foreach (object row in after) if (ReferenceEquals(row, first)) droppedFirst = false;
+                if (!droppedFirst) throw new Exception("the oldest compared app was not replaced");
+                ClickContent(form, (RectangleF)compareRects[2]);   // 取消第三个 → 只剩最初选的第二个
+                ClickContent(form, (RectangleF)compareRects[0]);   // 再选回第一个
+                if (((IList)typeof(Dashboard).GetField("_comparePicked", Private).GetValue(form)).Count != 2)
+                    throw new Exception("could not restore the two-app comparison");
+            }
+            RectangleF clearRect = (RectangleF)typeof(Dashboard).GetField("_appCompareClearRect", Private).GetValue(form);
+            if (clearRect.Width <= 0) throw new Exception("the comparison clear target was not registered");
+            // chip 必须落在页脚范围内,不能压住上一页/下一页。
+            if (clearRect.X + clearRect.Width > 24 + 832 - 96)
+                throw new Exception("the clear-comparison chip collides with the pager buttons");
+            ClickContent(form, clearRect);
+            if (((IList)typeof(Dashboard).GetField("_comparePicked", Private).GetValue(form)).Count != 0)
+                throw new Exception("clearing the comparison did not work");
+            if ((string)typeof(Dashboard).GetMethod("CompareSummary", Private).Invoke(form, null) != null)
+                throw new Exception("the summary survived clearing the comparison");
 
             // 1.7.4: the keys page gains a hold-duration mode reusing the report data.
             tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 3));
@@ -360,6 +479,25 @@ internal static class RenderDashboard
             Store.ThemeId=6;
             WaitTheme(form, new[] { "HaloIcons", "HaloOverview", "HaloTrend", "HaloHours", "HaloKeys", "HaloApps", "HaloInsights" });
             if(!HaloArt.HasIcons)throw new Exception("Missing Halo icons");
+            // 1.8.0:换主题的交叉淡化关键帧(用假时钟钉住时间轴;离屏渲染本来不做动效,
+            // 所以这里直接按生产代码在可见时的做法记下旧底色)。
+            Motion.ResetForTests();
+            Motion.UseFakeClock(300000);
+            Motion.Live = true;
+            Set(form,"_paintedTheme",0);
+            typeof(Dashboard).GetField("_themeScrim",Private).SetValue(form,Color.FromArgb(255,12,18,24));
+            Motion.Start("themefade",220,Ease.Linear);
+            Render(form,"theme-fade-0",1f);
+            if(((Color)typeof(Dashboard).GetField("_themeScrim",Private).GetValue(form))==Color.Empty)
+                throw new Exception("theme fade did not keep the previous background");
+            Motion.AdvanceFakeClock(110);
+            Render(form,"theme-fade-50",1f);
+            Motion.AdvanceFakeClock(110);
+            Render(form,"theme-fade-100",1f);
+            if(((Color)typeof(Dashboard).GetField("_themeScrim",Private).GetValue(form))!=Color.Empty)
+                throw new Exception("theme fade should release the scrim once it finishes");
+            Motion.ResetForTests();
+            Motion.Live = true;
             for(int page=0;page<6;page++)if(!HaloArt.HasScene(page))throw new Exception("Missing Halo scene "+page);
             tabField.SetValue(form,Enum.ToObject(tabField.FieldType,3));Set(form,"_showKeyboardHeatmap",true);
             Render(form,"halo-heatmap",1f);
@@ -439,6 +577,19 @@ internal static class RenderDashboard
             return;
         }
         throw new Exception("Chip " + id + " is not registered on the current page");
+    }
+
+    /// <summary>点击内容坐标系里的矩形:按当前 _s 换算回窗口坐标,再走 OnMouseClick 的 ToBase。</summary>
+    private static void ClickContent(Dashboard form, RectangleF content)
+    {
+        int contentX = Convert.ToInt32(typeof(Dashboard).GetField("ContentX", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null));
+        int contentY = Convert.ToInt32(typeof(Dashboard).GetField("ContentY", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null));
+        float s = Convert.ToSingle(typeof(Dashboard).GetField("_s", Private).GetValue(form));
+        if (s <= 0) s = 1f;
+        int x = (int)Math.Round((content.X + content.Width / 2 + contentX) * s);
+        int y = (int)Math.Round((content.Y + content.Height / 2 + contentY) * s);
+        typeof(Dashboard).GetMethod("OnMouseClick", Private).Invoke(form,
+            new object[] { new MouseEventArgs(MouseButtons.Left, 1, x, y, 0) });
     }
 
     private static void Render(Dashboard form, string name, float scale)
