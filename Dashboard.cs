@@ -1252,8 +1252,13 @@ namespace KeyMouseStats
                 if(i<_distributionTop){values[i]=rank[i].Value;names[i]=rank[i].Key;}
                 else values[_distributionTop]+=rank[i].Value;
             }
-            Color[] colors={Cblue,Cgreen,Corange,Cpurple,Ccyan,Cred,ArtTheme.Mix(Cgreen,Corange,.5),ArtTheme.Mix(Cpurple,Ccyan,.5),ArtTheme.Mix(Corange,Cred,.5),ArtTheme.Mix(Cblue,Cpurple,.5),Csub};
-            colors[_distributionTop]=Csub;
+            // 1.8.0:扇区颜色绑按键名,不绑扇区顺序。切区间后同一个键的颜色不变。
+            List<string> sliceNames = new List<string>();
+            for (int i = 0; i < _distributionTop; i++) sliceNames.Add(names[i]);
+            Color[] colors = new Color[_distributionTop + 1];
+            Color[] rankColors = KeyPalette.ForRanking(sliceNames);
+            for (int i = 0; i < _distributionTop; i++) colors[i] = rankColors[i];
+            colors[_distributionTop] = Csub;   // 「其他」始终是中性灰,不参与身份色
             RectangleF ring=new RectangleF(x+82,y+43,176,176);
             PointF pointer=ToBase(_mouse);pointer.X-=ContentX;pointer.Y-=ContentY;
             int hovered=DistributionHit(pointer,ring,18,values);
@@ -1327,8 +1332,12 @@ namespace KeyMouseStats
             }
 
             long max = rank[0].Value;
-            Color[] cols = { Cblue, Ccyan, Cgreen, Corange, Cpurple };
+            // 1.8.0:颜色绑按键不绑排名。同一按键在任何区间都是同一个颜色,
+            // 排名只由位置和条长表达;前六名做一次撞色去重。
+            List<string> rankNames = new List<string>();
             int n = Math.Min(5, rank.Count);
+            for (int i = 0; i < n; i++) rankNames.Add(rank[i].Key);
+            Color[] cols = KeyPalette.ForRanking(rankNames);
             float rowH = h / 5f;
             for (int i = 0; i < n; i++)
             {
