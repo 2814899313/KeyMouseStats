@@ -160,6 +160,18 @@ namespace KeyMouseStats
         public static bool IsActive { get { return !_locked && !_disconnected && !_suspended && Tracker.IsActive; } }
         /// <summary>1.8.0:锁屏 / 会话断开 / 休眠期间为 true。动效在这段时间停表(见 1.8 计划)。</summary>
         public static bool Busy { get { return _locked || _disconnected || _suspended; } }
+
+        /// <summary>
+        /// 系统层面的「距离上一次任何输入」有多少毫秒。钩子看门狗用它区分
+        /// 「用户没动」和「用户一直在动但我们没记到」。读不到返回 uint.MaxValue。
+        /// </summary>
+        public static uint SystemIdleMilliseconds()
+        {
+            LastInput info = new LastInput();
+            info.Size = (uint)Marshal.SizeOf(typeof(LastInput));
+            if (!GetLastInputInfo(ref info)) return uint.MaxValue;
+            return unchecked((uint)Environment.TickCount - info.Time);
+        }
         public static ActiveSession CurrentSession { get { return IsActive ? Tracker.CurrentSession : null; } }
         public static void Reset(SessionStartReason reason=SessionStartReason.Startup) { Tracker.Reset(reason); AppTelemetry.Reset(); Status = "等待采样"; }
         public static void Register(IntPtr window) { _notificationsReady = WTSRegisterSessionNotification(window, 0); }

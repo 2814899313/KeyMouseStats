@@ -228,8 +228,8 @@ namespace KeyMouseStats
         private const int TabY = 52, TabH = 40;
         private const int Cx = 24, Cw = 832, Cy = 98, Cb = 586;
 
-        private enum TabId { Overview = 0, Trend = 1, Hours = 2, Keys = 3, Apps = 4, Insights = 5 }
-        private readonly string[] _tabNames = { "总览", "趋势", "时段分布", "按键排行", "应用统计", "使用洞察" };
+        private enum TabId { Overview = 0, Trend = 1, Hours = 2, Keys = 3, Apps = 4, Insights = 5, Text = 6, Day = 7 }
+        private readonly string[] _tabNames = { "总览", "趋势", "时段分布", "按键排行", "应用统计", "使用洞察", "字符内容", "日报" };
 
         private TabId _tab = TabId.Overview;
         private int _trendMetric = 0;     // 0击键 1点击 2滚轮 3移动
@@ -258,7 +258,7 @@ namespace KeyMouseStats
         private bool _showCombos;
         private int _hover = -1;          // 图表悬停索引
 
-        private readonly RectangleF[] _tabRects = new RectangleF[6];
+        private readonly RectangleF[] _tabRects = new RectangleF[8];
         private readonly List<RectangleF> _chips = new List<RectangleF>();
         private readonly List<int> _chipIds = new List<int>();
         private bool _showHoldDuration, _appKeyGroups;
@@ -425,6 +425,9 @@ namespace KeyMouseStats
             _fChip = new Font("Microsoft YaHei UI", 12f, FontStyle.Regular, GraphicsUnit.Pixel);
 
             _timer.Start();
+
+            // 「每日首次打开面板」:把昨天的日报生成并落盘。一天只做一次,记在数据文件里。
+            TryGenerateDailyReport();
         }
 
         protected override void OnKeyDown(KeyEventArgs e)
@@ -467,19 +470,21 @@ namespace KeyMouseStats
             else if (e.KeyCode == Keys.D4) { _tab = TabId.Keys; _hover = -1; Invalidate(); }
             else if (e.KeyCode == Keys.D5) { _tab = TabId.Apps; _hover = -1; Invalidate(); }
             else if (e.KeyCode == Keys.D6) { _tab = TabId.Insights; _hover = -1; Invalidate(); }
+            else if (e.KeyCode == Keys.D7) { _tab = TabId.Text; _hover = -1; Invalidate(); }
+            else if (e.KeyCode == Keys.D8) { _tab = TabId.Day; _hover = -1; Invalidate(); }
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             _loadingTimer.Stop();_loadingTimer.Dispose();
             base.OnFormClosed(e);
-            foreach(ContextMenuStrip menu in new[]{_keyboardMenu,_categoryMenu,_distributionMenu})if(menu!=null)menu.Dispose();
+            foreach(ContextMenuStrip menu in new[]{_keyboardMenu,_categoryMenu,_distributionMenu,_textRefreshMenu})if(menu!=null)menu.Dispose();
             _timer.Stop();
             _timer.Dispose();
             _hoverPaintTimer.Stop();_hoverPaintTimer.Dispose();
             if(_keyboardPlate!=null){_keyboardPlate.Dispose();_keyboardPlate=null;}
             if(_keyboardPlatePrev!=null){_keyboardPlatePrev.Dispose();_keyboardPlatePrev=null;}
-            foreach (Font font in new Font[] { _fTitle, _fTab, _fH2, _fBody, _fSmall, _fAxis, _fNum, _fNum2, _fChip })
+            foreach (Font font in new Font[] { _fTitle, _fTab, _fH2, _fBody, _fSmall, _fAxis, _fNum, _fNum2, _fChip, _fChar })
                 if (font != null) font.Dispose();
         }
 
@@ -546,7 +551,7 @@ namespace KeyMouseStats
                     break;
                 case TabId.Trend:
                     if (_trendHourly) { start = end = _hourlyTrendDay; }
-                    else start = DateTime.Today;
+                    else start = DateTime.Today.AddDays(-(_trendRange - 1));   // 与趋势页 Analysis.RangeDays(_trendRange) 同口径:含今天、共 _trendRange 天
                     break;
                 case TabId.Insights:
                     start = end = _insightDay;
@@ -641,6 +646,8 @@ namespace KeyMouseStats
         private void ApplyChip(int id)
         {
             if (id == 45) { OpenReport(); return; }   // 在报告中查看(带当前筛选)
+            if (id >= 420 && id <= 429) { ApplyDayChip(id); return; }
+            if (id >= 400) { ApplyTextChip(id); return; }
             if (id >= 300) { ApplyHourlyTrendChip(id); return; }
             if (id >= 200) { ApplyInsightChip(id); return; }
             if (_tab == TabId.Keys && (id == 76 || id == 77)) { _keyRange=id-74;return; }
@@ -665,6 +672,8 @@ namespace KeyMouseStats
             int h = ComputeHover();
             _hover = h;
             PointF p = ToBase(_mouse);
+            // 字符内容页的悬停靠自己登记的元素表(图表柱、排行行),与趋势/时段页的索引式悬停不同。
+            if (_tab == TabId.Text) UpdateTextHover(true);
             bool clickable = Hit(_closeRect, p) || Hit(_exportRect, p) || (_tab==TabId.Trend&&!_trendHourly&&h>=0);
             if (_tab == TabId.Overview) clickable |= Hit(_activityRect, new PointF(p.X - ContentX, p.Y - ContentY))
                 || Hit(_sessionsRect, new PointF(p.X - ContentX, p.Y - ContentY))
@@ -804,6 +813,8 @@ namespace KeyMouseStats
                 case TabId.Hours: PaintHours(g); break;
                 case TabId.Keys: PaintKeys(g); break;
                 case TabId.Apps: PaintApps(g); break;
+                case TabId.Text: PaintText(g); break;
+                case TabId.Day: PaintDay(g); break;
                 default: PaintInsights(g); break;
             }
             g.Restore(contentState);
@@ -885,14 +896,16 @@ namespace KeyMouseStats
 
             using (SolidBrush b = new SolidBrush(Csub)) g.DrawString((EuroTruckArt.Active?"长途之路  /  ":WuxiaArt.Active?"碧血丹心  /  ":BalatroArt.Active?"幻彩牌桌  /  ":MinecraftArt.Active?"方块世界  /  ":ResidentArt.Active?"幸存者档案  /  ":ThemeArt.Dark?"战术终端  /  ":"工作空间  /  ") + _tabNames[(int)_tab] + (_crumb.Length>0?"  /  "+_crumb+"   ·   Esc 返回":""), _fSmall, b, 200, 24);
             using (SolidBrush b = new SolidBrush(Ctext)) g.DrawString(_tabNames[(int)_tab], _fTitle, b, 198, 61);
-            if(_tab!=TabId.Insights || _insightView!=1 || _insightDay.Date==DateTime.Today)InteractionBadge.Draw(g,new RectangleF(336,74,112,23),_fSmall,"● 今日累积中");
+            if(_tab!=TabId.Text && (_tab!=TabId.Insights || _insightView!=1 || _insightDay.Date==DateTime.Today))InteractionBadge.Draw(g,new RectangleF(336,74,112,23),_fSmall,"● 今日累积中");
             string[] descriptions = {
                 "每一次输入，都有迹可循。查看今天的活动与使用习惯。",
                 "沿着时间轴，发现每天的节奏与变化。",
                 "找到最活跃的时刻，了解一天中的输入分布。",
                 "从常用按键中，发现你的操作习惯。",
                 "这些输入用在了哪里？按应用与窗口，拆解你的每一次操作。",
-                "从每天的使用节奏，发现活跃时刻、连续使用段与休息间隔。" };
+                "从每天的使用节奏，发现活跃时刻、连续使用段与休息间隔。",
+                "记录输入的节奏，发现常用的文字。数据来自本机 Rime 日志。",
+                "把昨天收成一张卡片：数字、时段、应用、文字，还有几句不太客气的点评。" };
             using (SolidBrush b = new SolidBrush(Csub)) g.DrawString(descriptions[(int)_tab], _fBody, b, 200, 104);
             GraphicsState clockState=g.Save();if(ResidentArt.Active)g.TranslateTransform(-398,-52);
             using (GraphicsPath p = RoundedRect(828, 72, 204, 42, 12))
@@ -902,14 +915,14 @@ namespace KeyMouseStats
             g.Restore(clockState);
             if(NikkiArt.Active)
             {
-                int[] emotes={1,2,3,0,4,5};
+                int[] emotes={1,2,3,0,4,5,2};
                 int emote=_tab==TabId.Insights&&_insightView==1?3:emotes[(int)_tab];
                 NikkiArt.Sticker(g,emote,new RectangleF(716,7,110,110));
             }
             if(ThemeArt.Dark)
             {
-                ThemeArt.Symbol(g,EuroTruckArt.Active?EuroTruckArt.NavSymbols[(int)_tab]:WuxiaArt.Active?WuxiaArt.NavSymbols[(int)_tab]:BalatroArt.Active?BalatroArt.NavSymbols[(int)_tab]:(int)_tab,ResidentArt.Active?new RectangleF(646,6,64,64):new RectangleF(742,4,78,78));
-                AppText(g,(EuroTruckArt.Active?EuroTruckArt.PageLabels:WuxiaArt.Active?WuxiaArt.PageLabels:BalatroArt.Active?BalatroArt.PageLabels:MinecraftArt.Active?MinecraftArt.PageLabels:ResidentArt.Active?ResidentArt.PageLabels:HaloArt.PageLabels)[(int)_tab],_fSmall,EuroTruckArt.Active?Corange:WuxiaArt.Active?Corange:Ccyan,ResidentArt.Active?new RectangleF(452,64,180,22):new RectangleF(646,78,180,22),true);
+                ThemeArt.Symbol(g,NavSymbolFor((int)_tab),ResidentArt.Active?new RectangleF(646,6,64,64):new RectangleF(742,4,78,78));
+                AppText(g,PageLabelFor((int)_tab),_fSmall,EuroTruckArt.Active?Corange:WuxiaArt.Active?Corange:Ccyan,ResidentArt.Active?new RectangleF(452,64,180,22):new RectangleF(646,78,180,22),true);
             }
             _closeRect = new RectangleF(BW - 48, 16, 28, 28);
             bool hov = Hit(_closeRect, ToBase(_mouse));
@@ -927,7 +940,8 @@ namespace KeyMouseStats
         {
             for (int i = 0; i < _tabNames.Length; i++)
             {
-                RectangleF r = new RectangleF(14, 146 + i * 54, 148, 44);
+                // 8 页之后行距收到 42、行高 38:再按 48 排,最后一页会压到左下的主题选择器上。
+                RectangleF r = new RectangleF(14, 146 + i * 42, 148, 38);
                 _tabRects[i] = r;
                 bool sel = (int)_tab == i;
                 bool hov = Hit(r, ToBase(_mouse));
@@ -935,23 +949,41 @@ namespace KeyMouseStats
                     using (GraphicsPath p = RoundedRect(r.X, r.Y, r.Width, r.Height, 10))
                     using (SolidBrush b = new SolidBrush(sel ? ArtTheme.Mix(Ccard, Cblue, 0.18) : Ccard)) g.FillPath(b, p);
                 Color color = sel ? Cblue : hov ? Ctext : Csub;
-                if(ThemeArt.Dark)ThemeArt.Symbol(g,EuroTruckArt.Active?EuroTruckArt.NavSymbols[i]:WuxiaArt.Active?WuxiaArt.NavSymbols[i]:BalatroArt.Active?BalatroArt.NavSymbols[i]:i,new RectangleF(23,r.Y+7,30,30));else DrawGlyph(g, i, 28, r.Y + 14, color);
-                using (SolidBrush b = new SolidBrush(color)) g.DrawString(_tabNames[i], _fTab, b, 56, r.Y + 11);
+                if(ThemeArt.Dark)ThemeArt.Symbol(g,NavSymbolFor(i),new RectangleF(23,r.Y+4,30,30));else DrawGlyph(g, i, 28, r.Y + 12, color);
+                using (SolidBrush b = new SolidBrush(color)) g.DrawString(_tabNames[i], _fTab, b, 56, r.Y + 9);
                 if (sel)
-                    using (SolidBrush b = new SolidBrush(Cblue)) g.FillRectangle(b, 14, r.Y + 13, 3, 18);
+                    using (SolidBrush b = new SolidBrush(Cblue)) g.FillRectangle(b, 14, r.Y + 11, 3, 16);
             }
-            using (Pen p = new Pen(Cline)) g.DrawLine(p, 24, BH - 158, 152, BH - 158);
+            using (Pen p = new Pen(Cline)) g.DrawLine(p, 24, BH - 142, 152, BH - 142);
             using (SolidBrush b = new SolidBrush(Csub))
             {
-                g.DrawString("快捷操作", _fSmall, b, 24, BH - 148);
-                g.DrawString("1 — 6   切换页面", _fSmall, b, 24, BH - 128);
-                g.DrawString("← →     上一页 / 下一页", _fSmall, b, 24, BH - 110);
-                g.DrawString("Tab     选中筛选项", _fSmall, b, 24, BH - 92);
-                g.DrawString("Ctrl+C  复制明细", _fSmall, b, 24, BH - 74);
-                g.DrawString("Esc      返回 / 关闭", _fSmall, b, 24, BH - 56);
+                g.DrawString("1—8 / ← →   切换页面", _fAxis, b, 24, BH - 126);
+                g.DrawString("Tab       选中筛选项", _fAxis, b, 24, BH - 104);
+                g.DrawString("Ctrl+C   复制明细", _fAxis, b, 24, BH - 82);
+                g.DrawString("Esc       返回 / 关闭", _fAxis, b, 24, BH - 60);
             }
             using (SolidBrush b = new SolidBrush(Cgreen)) g.FillEllipse(b, 24, BH - 22, 6, 6);
             using (SolidBrush b = new SolidBrush(Csub)) g.DrawString(BuildInfo.Version + " · 本地记录 365 天", _fSmall, b, 38, BH - 28);
+        }
+
+        /// <summary>
+        /// 页脚上的按钮:在窗口坐标里画,但命中区按内容坐标登记(页脚不参与内容平移)。
+        /// 直接往 _chips 里塞窗口坐标就是 1.8.1 里「在报告中查看点不动」的那个偏移 bug。
+        /// </summary>
+        private void PaintFooterChip(Graphics g, RectangleF windowRect, string text, int id)
+        {
+            PointF p = ToBase(_mouse);
+            bool hov = windowRect.Contains(p);
+            using (GraphicsPath path = RoundedRect(windowRect.X, windowRect.Y, windowRect.Width, windowRect.Height, 8))
+            {
+                using (SolidBrush b = new SolidBrush(hov ? Ccard2 : Ccard)) g.FillPath(b, path);
+                using (Pen pen = new Pen(Cline)) g.DrawPath(pen, path);
+            }
+            using (SolidBrush b = new SolidBrush(hov ? Ctext : Csub))
+            using (StringFormat format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+                g.DrawString(text, _fChip, b, windowRect, format);
+            _chips.Add(new RectangleF(windowRect.X - ContentX, windowRect.Y - ContentY, windowRect.Width, windowRect.Height));
+            _chipIds.Add(id);
         }
 
         private void PaintFooter(Graphics g)
@@ -959,8 +991,27 @@ namespace KeyMouseStats
             using (Pen p = new Pen(Cline)) g.DrawLine(p, 200, 666, 1032, 666);
             _exportRect = new RectangleF(912, 680, 120, 28);
             RectangleF reportRect = new RectangleF(778, 680, 124, 28);
-            _chips.Add(reportRect); _chipIds.Add(45);
-            PaintChip(g, reportRect, "在报告中查看", false, null);
+            // 字符内容页没有对应的统计报告(那份数据不进 stats.txt),所以不挂这个入口 ——
+            // 挂一个点了跳不到正确内容的按钮,比没有更糟。
+            if (_tab != TabId.Text && _tab != TabId.Day)
+            {
+                _chips.Add(reportRect); _chipIds.Add(45);
+                PaintChip(g, reportRect, "在报告中查看", false, null);
+            }
+            else if (_tab == TabId.Text)
+            {
+                // 字符内容页没有对应的统计报告,这个位置放「重新读取」。
+                PaintFooterChip(g, new RectangleF(800, 680, 104, 28), "重新读取", 404);
+            }
+            if (_tab == TabId.Day)
+            {
+                // 日报页:导出换成「保存 Markdown / 复制」。
+                PaintFooterChip(g, new RectangleF(792, 680, 108, 28), "复制简报", 424);
+                PaintFooterChip(g, new RectangleF(908, 680, 124, 28), "保存 Markdown", 423);
+                if(!_loaderVisible)
+                    AppText(g, StatusText(FooterHint()), _fSmall, Csub, new RectangleF(200, 683, 580, 24), false);
+                return;
+            }
             bool hov = Hit(_exportRect, ToBase(_mouse));
             using (GraphicsPath p = RoundedRect(_exportRect.X, _exportRect.Y, 120, 28, 8))
             using (SolidBrush b = new SolidBrush(hov ? ArtTheme.Mix(Cblue, Ctext, 0.18) : Cblue)) g.FillPath(b, p);
@@ -972,14 +1023,16 @@ namespace KeyMouseStats
                 g.DrawLine(p, 923, 701, 933, 701);
             }
             using (SolidBrush b = new SolidBrush(ArtTheme.Current.OnAccent)) g.DrawString("导出 CSV", _fChip, b, 947, 685);
-            if(!_loaderVisible)using (SolidBrush b = new SolidBrush(Csub))
-                g.DrawString(StatusText(FooterHint()), _fSmall, b, 200, 687);
+            if(!_loaderVisible)
+                AppText(g, StatusText(FooterHint()), _fSmall, Csub, new RectangleF(200, 683, 580, 24), false);
         }
 
         /// <summary>页脚提示(也用于 Ctrl+C 复制「你在看什么」)。</summary>
         private string FooterHint()
         {
             return _tab == TabId.Apps ? "按捕获时的前台窗口归因 · 分类可手动调整 · 本页导出应用明细"
+                    : _tab == TabId.Day ? DayFooterHint()
+                    : _tab == TabId.Text ? TextFooterHint()
                     : _tab == TabId.Insights ? "活跃不等于专注 · 空白可能未采集 · 导出 " + _insightDay.ToString("yyyy-MM-dd") + " 的时间区间"
                     : _tab == TabId.Trend && _trendHourly ? "均值不含当前小时 · 数值仅为已采集部分 · 本页导出小时明细"
                     : _tab == TabId.Keys && _showKeyboardHeatmap ? (_keyboardHoldMode ? "物理键位热力 · 按住时长口径:逐键累计,悬停看平均与最长 · 右上角切换次数 / 配列 · 导出同时包含两种口径" : "物理键位热力 · 长按计一次 · 右上角切换口径与配列 · 导出包含配列外已归位按键")
@@ -1021,6 +1074,29 @@ namespace KeyMouseStats
             return true;
         }
 
+        /// <summary>主题侧栏图标的编号。数组比标签页少一项时夹到末项,不让以后加页变成运行时越界。</summary>
+        private static int NavSymbolFor(int index)
+        {
+            int[] symbols = EuroTruckArt.Active ? EuroTruckArt.NavSymbols
+                : WuxiaArt.Active ? WuxiaArt.NavSymbols
+                : BalatroArt.Active ? BalatroArt.NavSymbols : null;
+            if (symbols == null || symbols.Length == 0) return index;
+            return symbols[Math.Max(0, Math.Min(index, symbols.Length - 1))];
+        }
+
+        /// <summary>主题的页面英文名,同样夹取末项。</summary>
+        private static string PageLabelFor(int index)
+        {
+            string[] labels = EuroTruckArt.Active ? EuroTruckArt.PageLabels
+                : WuxiaArt.Active ? WuxiaArt.PageLabels
+                : BalatroArt.Active ? BalatroArt.PageLabels
+                : MinecraftArt.Active ? MinecraftArt.PageLabels
+                : ResidentArt.Active ? ResidentArt.PageLabels
+                : HaloArt.Active ? HaloArt.PageLabels : null;
+            if (labels == null || labels.Length == 0) return "";
+            return labels[Math.Max(0, Math.Min(index, labels.Length - 1))];
+        }
+
         private void DrawGlyph(Graphics g, int kind, float x, float y, Color color)
         {
             using (Pen p = new Pen(color, 1.5f))
@@ -1042,6 +1118,14 @@ namespace KeyMouseStats
                     g.DrawRectangle(p, x, y, 16, 16);
                     g.DrawLine(p, x, y + 5, x + 16, y + 5);
                     g.DrawLine(p, x + 5, y + 5, x + 5, y + 16);
+                }
+                else if (kind == 6)
+                {
+                    // 第 7 页「字符内容」:一张纸 + 三行字,最后一行短。
+                    g.DrawRectangle(p, x, y, 16, 16);
+                    g.DrawLine(p, x + 3, y + 5, x + 13, y + 5);
+                    g.DrawLine(p, x + 3, y + 9, x + 13, y + 9);
+                    g.DrawLine(p, x + 3, y + 13, x + 9, y + 13);
                 }
                 else
                 {
@@ -1115,12 +1199,16 @@ namespace KeyMouseStats
             PaintInsights(g, Cx, cardY + cardH + 14, Cw, 24);
         }
 
-        private void PaintTile(Graphics g, float x, float y, float w, float h, string label, string value, Color c, int haloSymbol = 1)
+        private void PaintTile(Graphics g, float x, float y, float w, float h, string label, string value, Color c, int haloSymbol = 1, string extra = null)
         {
             PaintCardBase(g, x, y, w, h);
             using (SolidBrush b = new SolidBrush(Csub)) g.DrawString(label, _fBody, b, x + 18, y + 13);
             Font valueFont = g.MeasureString(value, _fNum).Width > w - 32 ? _fNum2 : _fNum;
-            using (SolidBrush b = new SolidBrush(Ctext)) g.DrawString(value, valueFont, b, x + 16, y + 36);
+            // 有副标(例如「较上期 +12%」)时数字要上提一点,否则 29 px 的字会压到副标上。
+            float valueTop = string.IsNullOrEmpty(extra) ? y + 36 : y + 30;
+            using (SolidBrush b = new SolidBrush(Ctext)) g.DrawString(value, valueFont, b, x + 16, valueTop);
+            if (!string.IsNullOrEmpty(extra))
+                using (SolidBrush b = new SolidBrush(Csub)) g.DrawString(extra, _fAxis, b, x + 18, y + h - 19);
             using (GraphicsPath p = RoundedRect(x + w - 48, y + 18, 30, 30, 10))
             using (SolidBrush b = new SolidBrush(Color.FromArgb(24, c))) g.FillPath(b, p);
             if(ThemeArt.Dark){ThemeArt.Symbol(g,haloSymbol,new RectangleF(x+w-51,y+14,37,37));return;}
@@ -2009,6 +2097,7 @@ namespace KeyMouseStats
 
         private void ExportCsv()
         {
+            if (_tab == TabId.Text) { ExportText(); return; }
             if (_tab == TabId.Keys && _showKeyboardHeatmap) { ExportKeyboardHeatmap(); return; }
             if (_tab == TabId.Trend && _trendHourly) { ExportHourlyTrend(); return; }
             if (_tab == TabId.Insights) { ExportInsights(); return; }

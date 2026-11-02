@@ -19,7 +19,7 @@ namespace KeyMouseStats
             if(!Active||!HasScene(page))return;
             Image image=NikkiArt.Load(Resources[page]);NikkiArt.DrawCached(g,image,new Rectangle(0,0,image.Width,image.Height),bounds,.82f,"halo-page-"+page);
         }
-        public static readonly string[] PageLabels={"HALO / ORBIT","SIGNAL / TREND","RADAR / 24H","INPUT / TERMINAL","MAP / UPLINK","AI / ANALYSIS"};
+        public static readonly string[] PageLabels={"HALO / ORBIT","SIGNAL / TREND","RADAR / 24H","INPUT / TERMINAL","MAP / UPLINK","AI / ANALYSIS","LOG / WORDSTREAM"};
         private static Image Icons { get { return NikkiArt.Load("HaloIcons"); } }
         public static bool HasIcons { get { return Icons!=null; } }
         public static void Symbol(Graphics g,int kind,RectangleF bounds)

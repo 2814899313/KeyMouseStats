@@ -1,5 +1,6 @@
 # Local tooling and editor state
 .opensquilla/
+.workbuddy/
 .tools/
 .vs/
 .vscode/
@@ -17,6 +18,8 @@
 *.tmp
 bin/
 obj/
+# 单文件发布产物(几十 MB 的 exe),只该出现在 CI artifact 里,不进仓库
+artifacts/
 
 # Generated visual checks and bulk previews
 previews/

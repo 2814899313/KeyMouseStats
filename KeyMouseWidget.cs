@@ -83,6 +83,22 @@ namespace KeyMouseStats
             catch { }
         }
         private static readonly object LogGate=new object();
+        /// <summary>往 diagnostics.log 记一行事件(钩子自愈、日历滚动这类)。超 1 MB 轮换。</summary>
+        internal static void LogEvent(string context)
+        {
+            try
+            {
+                lock (LogGate)
+                {
+                    string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KeyMouseStats");
+                    Directory.CreateDirectory(folder);
+                    string path = Path.Combine(folder, "diagnostics.log");
+                    if (File.Exists(path) && new FileInfo(path).Length > 1048576) File.Delete(path);
+                    File.AppendAllText(path, DateTime.Now.ToString("O") + " " + context + Environment.NewLine);
+                }
+            }
+            catch { }
+        }
         internal static void LogFailure(string context,Exception error)
         {
             try
@@ -348,6 +364,10 @@ namespace KeyMouseStats
         public static bool MotionFollowSystem = true;
         /// <summary>1.8.0:全局快捷键(打开面板),默认关闭。</summary>
         public static bool GlobalHotkey;
+        /// <summary>1.9.0:字符内容页重新读取 Rime 日志的最小间隔(秒);0 = 只在文件改动时重读。</summary>
+        public static int TextRefreshSeconds = 15;
+        /// <summary>2.0:最近一次在「每日首次打开面板」时生成日报的日期。用来保证一天只生成一次。</summary>
+        public static DateTime DailyReportDay = DateTime.MinValue;
 
         static Store()
         {
@@ -408,6 +428,11 @@ namespace KeyMouseStats
             public int MotionLevel = Motion.LevelFull;
             public bool MotionFollowSystem = true, GlobalHotkey;
             public bool HasMotion;
+            /// <summary>1.9.0:字符内容页自动重读间隔(秒),0 = 手动。</summary>
+            public int TextRefreshSeconds = 15;
+            public bool HasTextRefresh;
+            /// <summary>2.0:上次自动生成日报的日期(字符串形式,便于和文件里那一行直读)。</summary>
+            public string DailyReportDay = "";
         }
 
         private static Parsed Parse(string[] lines)
@@ -504,6 +529,12 @@ namespace KeyMouseStats
                             result.GlobalHotkey = motion.Length >= 3 && ParseL(motion[2]) != 0;
                             result.HasMotion = true;
                             break;
+                        // 1.9.0 新增的可选行:字符内容页的自动重读间隔(秒),0 = 手动
+                        case "text_refresh_v1":
+                            result.TextRefreshSeconds = RimeTextStats.NormalizeRefresh((int)ParseL(val));
+                            result.HasTextRefresh = true;
+                            break;
+                        case "daily_report_v1": result.DailyReportDay = val; break;
                         case "archive_v1": MonthArchive.AddTo(result.Archives, val); break;
                         case "backup_keep":
                             int keep = (int)ParseL(val);
@@ -616,6 +647,11 @@ namespace KeyMouseStats
                     MotionFollowSystem = parsed.MotionFollowSystem;
                     GlobalHotkey = parsed.GlobalHotkey;
                 }
+                if (parsed.HasTextRefresh) TextRefreshSeconds = RimeTextStats.NormalizeRefresh(parsed.TextRefreshSeconds);
+                DateTime reportDay;
+                if (DateTime.TryParseExact(parsed.DailyReportDay, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                        DateTimeStyles.None, out reportDay))
+                    DailyReportDay = reportDay;
                 PosX = parsed.PosX; PosY = parsed.PosY;
                 AppActivity.Rules.Clear();
                 foreach (string rule in parsed.AppRules) AppActivity.LoadRule(rule);
@@ -817,6 +853,8 @@ namespace KeyMouseStats
                 sb.AppendLine("keep_days=" + KeepDays.ToString(CultureInfo.InvariantCulture));
                 // 1.8.0 新增的可选行:动效档位 | 跟随系统 | 全局快捷键
                 sb.AppendLine("motion_v1=" + MotionLevel.ToString(CultureInfo.InvariantCulture) + "|" + (MotionFollowSystem ? "1" : "0") + "|" + (GlobalHotkey ? "1" : "0"));
+                sb.AppendLine("text_refresh_v1=" + TextRefreshSeconds.ToString(CultureInfo.InvariantCulture));
+                sb.AppendLine("daily_report_v1=" + (DailyReportDay == DateTime.MinValue ? "" : DailyReportDay.ToString("yyyy-MM-dd")));
                 foreach (MonthArchive archive in Archives.Values) sb.AppendLine("archive_v1=" + MonthArchive.Encode(archive));
                 sb.AppendLine("art_theme=" + ArtTheme.Validate(ThemeId).ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("keyboard_layout=" + KeyboardHeat.Valid(KeyboardLayout).ToString(CultureInfo.InvariantCulture));
@@ -989,18 +1027,55 @@ namespace KeyMouseStats
         }
     }
 
+    /// <summary>
+    /// 钩子看门狗。Windows 会在两种情况下**静默**摘掉低级键鼠钩子:
+    ///  1. 回调超过 LowLevelHooksTimeout(默认 300 ms)—— 我们的回调里做过跨进程取标题;
+    ///  2. 安全软件 / 会话切换主动卸载。
+    /// 摘掉之后界面照常刷新、计数却永久停住,只有重启程序才恢复 —— 这就是「抽风」的来源。
+    /// 这里把判断抽成纯函数,便于回归:什么情况下该重装钩子、什么情况下不该动。
+    /// </summary>
+    internal static class HookWatchdog
+    {
+        /// <summary>多久检查一次。</summary>
+        public const int CheckIntervalMs = 5000;
+        /// <summary>「系统一直在收输入,我们却这么久没记到任何事件」就判定钩子死了。</summary>
+        public const int StallWindowMs = 30000;
+        /// <summary>系统空闲超过这么久,说明用户本来就没在动,不能当成钩子坏了。</summary>
+        public const uint SystemIdleLimitMs = 10000;
+
+        /// <summary>
+        /// 是否该重装钩子。
+        /// alive:两个钩子句柄都非零;busy:锁屏/休眠/断连;systemIdleMs:系统空闲毫秒(uint.MaxValue = 读不到);
+        /// msSinceLastEvent:距离上一次收到键鼠事件的毫秒数。
+        /// </summary>
+        public static bool ShouldRepair(bool alive, bool busy, uint systemIdleMs, long msSinceLastEvent)
+        {
+            // 锁屏 / 休眠 / 会话断开:钩子本来就收不到输入,重装没有意义,反而会打断仍在按住的状态。
+            if (busy) return false;
+            // 句柄丢了(或启动时就没装上):无条件重装。
+            if (!alive) return true;
+            // 读不到空闲时间:只信句柄,不做「停滞」判断,避免误杀。
+            if (systemIdleMs == uint.MaxValue) return false;
+            // 用户本来就没动,不算停滞。
+            if (systemIdleMs >= SystemIdleLimitMs) return false;
+            return msSinceLastEvent > StallWindowMs;
+        }
+    }
+
     /// <summary>悬浮小组件窗体。</summary>
     internal sealed class StatsWidget : Form
     {
         private const int BaseW = 248;
         private const int BaseH = 208;
-        private const string RunKeyPath = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-        private const string RunValueName = "KeyMouseStatsWidget";
-
         private readonly Native.HookProc _kbProc;
         private readonly Native.HookProc _msProc;
         private IntPtr _kbHook = IntPtr.Zero;
         private IntPtr _msHook = IntPtr.Zero;
+        /// <summary>最近一次收到键鼠事件的 TickCount,看门狗用它判断「是不是停摆了」。</summary>
+        private long _lastCountedTick;
+        private long _lastHealthTick;
+        private int _healthFailures;
+        private bool _hookWarningShown;
 
         private float _s = 1f;
         private int _mode;   // 0 今日 / 1 目标 / 2 累计
@@ -1008,6 +1083,10 @@ namespace KeyMouseStats
         private bool _initialized = false;
         private Dashboard _dash;
         private readonly RawMouseInput _rawMouse = new RawMouseInput();
+        /// <summary>键盘原始输入探针:只报「有按键」,计数仍由低级钩子做。</summary>
+        private readonly RawKeyInput _rawKeys = new RawKeyInput();
+        private long _lastKeyTick;
+        private long _lastProbeRepairTick;
         private readonly MouseVectorTracker _mouseVectors=new MouseVectorTracker();
         private readonly ShortcutTracker _combos = new ShortcutTracker();
         private DistanceSettings _distanceSettings;
@@ -1115,6 +1194,7 @@ namespace KeyMouseStats
         {
             base.OnHandleCreated(e);
             _rawMouse.Register(Handle); // 鼠标穿透会重建句柄，需要重新注册。
+            _rawKeys.Register(Handle);  // 键盘探针:只用来发现「钩子被摘」,不计数
             ActivityMonitor.Register(Handle);
             _hotkeyRegistered = false;  // 句柄重建后快捷键注册也失效,按设置重来
             ApplyGlobalHotkey();
@@ -1123,6 +1203,7 @@ namespace KeyMouseStats
         protected override void OnHandleDestroyed(EventArgs e)
         {
             _rawMouse.Unregister();
+            _rawKeys.Unregister();
             ActivityMonitor.Unregister(Handle);
             if (_hotkeyRegistered) { try { Native.UnregisterHotKey(Handle, Native.HotkeyId); } catch { } _hotkeyRegistered = false; }
             base.OnHandleDestroyed(e);
@@ -1134,13 +1215,28 @@ namespace KeyMouseStats
             // 1.8.0:全局快捷键(默认关闭)打开详细面板。
             if (m.Msg == Native.WM_HOTKEY && m.WParam.ToInt32() == Native.HotkeyId) OpenDashboard();
             if(m.Msg==0x02B1||m.Msg==0x0218)_mouseVectors.Reset();
+            // 解锁 / 休眠唤醒:钩子是会话级对象,恢复后重新装一次最稳(幂等,代价只有两次系统调用)。
+            if (m.Msg == 0x02B1 && m.WParam.ToInt64() == 8) InstallHooks();
+            else if (m.Msg == 0x0218 && (m.WParam.ToInt64() == 0x07 || m.WParam.ToInt64() == 0x12)) InstallHooks();
             if (_combos != null && (m.Msg == 0x02B1 || m.Msg == 0x0218
                 && (m.WParam.ToInt64() == 4 || m.WParam.ToInt64() == 7 || m.WParam.ToInt64() == 18))) _combos.Reset();
             if (m.Msg == 0x00FF && _rawMouse != null)
             {
+                // 键盘探针:只判断「钩子是不是已经不干活了」,不参与计数。
+                if (_rawKeys.Registered)
+                {
+                    ushort rawVk;
+                    bool rawDown;
+                    if (_rawKeys.Read(m.LParam, out rawVk, out rawDown)) NoteRawKeyArrived();
+                }
+
                 double counts;
                 if (_rawMouse.Read(m.LParam, out counts))
                 {
+                    // 点击与滚轮改由原始输入计数:这条路径不经过低级钩子,
+                    // 不会被 LowLevelHooksTimeout 摘掉,所以鼠标计数不再有「停摆」这种状态。
+                    DispatchRawButtons(_rawMouse.LastButtonFlags, _rawMouse.LastWheelDelta);
+
                     bool calibrating = _distanceSettings != null && _distanceSettings.Collect(counts);
                     if(calibrating)_mouseVectors.Reset();
                     else if(counts>0)
@@ -1223,6 +1319,11 @@ namespace KeyMouseStats
             }
 
             InstallHooks();
+            // 自启是「计划任务」而不是注册表 Run:每次启动同步一次,把旧 Run 项迁过来、
+            // 并保证任务指向当前这个 exe(复制改名之后自启才不会指向旧文件)。
+            // 放到线程池:这一串要经过计划任务服务,万一它卡住,不能把装好钩子的 UI 线程一起拖住。
+            string exePath = Application.ExecutablePath;
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate { AutoStart.Sync(exePath); });
             if (!_rawMouse.Registered)
                 _tray.ShowBalloonTip(5000, "移动距离无法采集", _rawMouse.Status, ToolTipIcon.Warning);
             else if (!MouseDistance.ValidDpi(Store.MouseDpi))
@@ -1247,15 +1348,69 @@ namespace KeyMouseStats
         private void InstallHooks()
         {
             _combos.Seed(Native.IsKeyDown);
+            // 幂等:重复安装前必须先卸,否则旧钩子会一直挂在系统里。
+            ReleaseHooks();
+            InstallHooksRaw();
+            _lastCountedTick = Environment.TickCount;
+            _lastHealthTick = _lastCountedTick;
+        }
+
+        /// <summary>真正调 SetWindowsHookEx 的地方。装失败不算致命:看门狗每 5 秒会再试。</summary>
+        private bool InstallHooksRaw()
+        {
             IntPtr hMod = Native.GetModuleHandle(null);
             _kbHook = Native.SetWindowsHookEx(Native.WH_KEYBOARD_LL, _kbProc, hMod, 0);
             _msHook = Native.SetWindowsHookEx(Native.WH_MOUSE_LL, _msProc, hMod, 0);
-            if (_kbHook == IntPtr.Zero || _msHook == IntPtr.Zero)
+            bool ok = _kbHook != IntPtr.Zero && _msHook != IntPtr.Zero;
+            if (!ok && _tray != null && !_hookWarningShown)
             {
-                if (_tray != null)
-                    _tray.ShowBalloonTip(5000, "键鼠统计",
-                        "统计钩子安装失败(可能被安全软件拦截),计数可能不准确。", ToolTipIcon.Warning);
+                _hookWarningShown = true;
+                _tray.ShowBalloonTip(6000, "键鼠统计",
+                    "统计钩子安装失败(可能被安全软件拦截),计数可能不准确。程序会每 5 秒自动重试。",
+                    ToolTipIcon.Warning);
             }
+            return ok;
+        }
+
+        private void ReleaseHooks()
+        {
+            if (_kbHook != IntPtr.Zero) { Native.UnhookWindowsHookEx(_kbHook); _kbHook = IntPtr.Zero; }
+            if (_msHook != IntPtr.Zero) { Native.UnhookWindowsHookEx(_msHook); _msHook = IntPtr.Zero; }
+        }
+
+        /// <summary>
+        /// 每 5 秒体检一次。两种信号会触发重装:
+        ///  * 钩子句柄变成 0(被安全软件或系统卸掉);
+        ///  * 句柄还在,但系统一直在收输入,我们 30 秒没记到任何事件(被 LowLevelHooksTimeout 静默摘钩)。
+        /// </summary>
+        private void HookHealth()
+        {
+            long now = Environment.TickCount;
+            if (now - _lastHealthTick < HookWatchdog.CheckIntervalMs) return;
+            _lastHealthTick = now;
+
+            bool alive = _kbHook != IntPtr.Zero && _msHook != IntPtr.Zero;
+            uint idle = ActivityMonitor.SystemIdleMilliseconds();
+            bool repair = HookWatchdog.ShouldRepair(alive, ActivityMonitor.Busy, idle, now - _lastCountedTick);
+            if (!repair) { _healthFailures = 0; return; }
+
+            string reason = alive ? "计数停滞 30 秒(系统仍在收输入)" : "钩子句柄丢失";
+            ReleaseHooks();
+            _combos.Seed(Native.IsKeyDown);   // 重装期间正按着的修饰键要重新对齐
+            bool ok = InstallHooksRaw();
+            _lastCountedTick = now;
+            if (ok)
+            {
+                _healthFailures = 0;
+                Program.LogEvent("钩子自愈:" + reason + " → 已重装");
+                return;
+            }
+            _healthFailures++;
+            Program.LogEvent("钩子自愈:" + reason + " → 重装失败(第 " + _healthFailures + " 次)");
+            // 连续失败才值得打扰用户一次。
+            if (_healthFailures == 3)
+                _tray.ShowBalloonTip(8000, "统计可能已经停摆",
+                    "键鼠钩子反复安装失败,可能被安全软件拦截。把本程序加入白名单,或重启程序。", ToolTipIcon.Error);
         }
 
         // ---------------------------------------------------------------- 钩子
@@ -1270,6 +1425,9 @@ namespace KeyMouseStats
         {
             if (code >= 0)
             {
+                long nowTick = Environment.TickCount;
+                _lastCountedTick = nowTick;   // 看门狗:我确实收到了事件
+                _lastKeyTick = nowTick;       // 键盘探针用它判断「钩子还活着」
                 try
                 {
                     int msg = unchecked((int)wParam.ToInt64());
@@ -1326,6 +1484,10 @@ namespace KeyMouseStats
         {
             if (code >= 0)
             {
+                long nowTick = Environment.TickCount;
+                _lastCountedTick = nowTick;   // 看门狗:我确实收到了事件
+                // 鼠标事件不算键盘存活证据:
+                // (这里不更新 _lastKeyTick)
                 try
                 {
                     int msg = unchecked((int)wParam.ToInt64());
@@ -1336,54 +1498,127 @@ namespace KeyMouseStats
                     bool isClick = msg == Native.WM_LBUTTONDOWN || msg == Native.WM_RBUTTONDOWN
                         || msg == Native.WM_MBUTTONDOWN || msg == Native.WM_XBUTTONDOWN;
                     bool isWheel = msg == Native.WM_MOUSEWHEEL || msg == Native.WM_MOUSEHWHEEL;
-                    if (isClick || isWheel) AppActivity.Record(Store.Today, ForegroundApp.Capture(), isClick ? 1 : 2);
+                    // 原始输入可用时,点击/滚轮由 WM_INPUT 那条路径计数(它不会被摘钩),
+                    // 这里只保留作为「原始输入注册失败」时的兜底。
+                    bool countHere = !_rawMouse.Registered;
+                    if (countHere && (isClick || isWheel)) AppActivity.Record(Store.Today, ForegroundApp.Capture(), isClick ? 1 : 2);
                     DayRecord t = Store.Today;
                     Counters g = Store.Total;
                     int button=msg==0x0201||msg==0x0202?1:msg==0x0204||msg==0x0205?2:msg==0x0207||msg==0x0208?3:msg==0x020B||msg==0x020C?4+(int)((info.mouseData>>16)&0xffff):0;
-                    if(button!=0&&(!isClick||_rawMouse.Registered&&_rawMouse.RelativeSeen&&!(_distanceSettings!=null&&_distanceSettings.Collect(0))))_mouseVectors.Button(t,VectorNow(),button,isClick);
+                    // 按下事件由原始输入计数(见 DispatchRawButtons),这里只处理「抬起」和兜底,
+                    // 免得同一次点击被两条路径各记一遍。
+                    if(button!=0&&(!isClick||(countHere&&_rawMouse.RelativeSeen&&!(_distanceSettings!=null&&_distanceSettings.Collect(0)))))_mouseVectors.Button(t,VectorNow(),button,isClick);
                     int h = now.Hour;
-                    switch (msg)
+                    if (countHere || !(isClick || isWheel))
                     {
-                        case Native.WM_MOUSEMOVE:
-                            if (_lastValid)
-                            {
-                                int dx = info.pt.X - _lastX;
-                                int dy = info.pt.Y - _lastY;
-                                double d = Math.Sqrt((double)dx * dx + (double)dy * dy);
-                                t.MovePx += d;
-                                g.MovePx += d;
-                            }
-                            _lastX = info.pt.X;
-                            _lastY = info.pt.Y;
-                            _lastValid = true;
-                            MarkDirty();
-                            break;
-                        case Native.WM_LBUTTONDOWN:
-                            t.Clicks++; t.Left++; t.HourClicks[h]++;
-                            g.Clicks++; g.Left++;
-                            LiveRate.AddClick(); MarkDirty(); break;
-                        case Native.WM_RBUTTONDOWN:
-                            t.Clicks++; t.Right++; t.HourClicks[h]++;
-                            g.Clicks++; g.Right++;
-                            LiveRate.AddClick(); MarkDirty(); break;
-                        case Native.WM_MBUTTONDOWN:
-                            t.Clicks++; t.Middle++; t.HourClicks[h]++;
-                            g.Clicks++; g.Middle++;
-                            LiveRate.AddClick(); MarkDirty(); break;
-                        case Native.WM_XBUTTONDOWN:
-                            t.Clicks++; t.XButtons++; t.HourClicks[h]++;
-                            g.Clicks++; g.XButtons++;
-                            LiveRate.AddClick(); MarkDirty(); break;
-                        case Native.WM_MOUSEWHEEL:
-                        case Native.WM_MOUSEHWHEEL:
-                            t.Wheel++;
-                            g.Wheel++;
-                            MarkDirty(); break;
+                        switch (msg)
+                        {
+                            case Native.WM_MOUSEMOVE:
+                                if (_lastValid)
+                                {
+                                    int dx = info.pt.X - _lastX;
+                                    int dy = info.pt.Y - _lastY;
+                                    double d = Math.Sqrt((double)dx * dx + (double)dy * dy);
+                                    t.MovePx += d;
+                                    g.MovePx += d;
+                                }
+                                _lastX = info.pt.X;
+                                _lastY = info.pt.Y;
+                                _lastValid = true;
+                                MarkDirty();
+                                break;
+                            case Native.WM_LBUTTONDOWN:
+                                t.Clicks++; t.Left++; t.HourClicks[h]++;
+                                g.Clicks++; g.Left++;
+                                LiveRate.AddClick(); MarkDirty(); break;
+                            case Native.WM_RBUTTONDOWN:
+                                t.Clicks++; t.Right++; t.HourClicks[h]++;
+                                g.Clicks++; g.Right++;
+                                LiveRate.AddClick(); MarkDirty(); break;
+                            case Native.WM_MBUTTONDOWN:
+                                t.Clicks++; t.Middle++; t.HourClicks[h]++;
+                                g.Clicks++; g.Middle++;
+                                LiveRate.AddClick(); MarkDirty(); break;
+                            case Native.WM_XBUTTONDOWN:
+                                t.Clicks++; t.XButtons++; t.HourClicks[h]++;
+                                g.Clicks++; g.XButtons++;
+                                LiveRate.AddClick(); MarkDirty(); break;
+                            case Native.WM_MOUSEWHEEL:
+                            case Native.WM_MOUSEHWHEEL:
+                                t.Wheel++;
+                                g.Wheel++;
+                                MarkDirty(); break;
+                        }
                     }
                 }
                 catch { }
             }
             return Native.CallNextHookEx(_msHook, code, wParam, lParam);
+        }
+
+        // ---------------------------------------------------------------- 原始输入计数(点击/滚轮)
+
+        /// <summary>
+        /// 把一个 RAWMOUSE 包的按钮位派发成计数。RI_MOUSE_* 的「按下」位:
+        /// 左 0x0001 / 右 0x0004 / 中 0x0010 / 侧键 4、5 为 0x0040、0x0100;滚轮 0x0400、横滚 0x0800。
+        /// </summary>
+        private void DispatchRawButtons(ushort flags, short wheelDelta)
+        {
+            if (flags == 0) return;
+            if ((flags & 0x0001) != 0) CountClick(1);
+            if ((flags & 0x0004) != 0) CountClick(2);
+            if ((flags & 0x0010) != 0) CountClick(3);
+            if ((flags & 0x0040) != 0) CountClick(4);
+            if ((flags & 0x0100) != 0) CountClick(5);
+            if ((flags & 0x0400) != 0 || (flags & 0x0800) != 0) CountWheel();
+            GC.KeepAlive(wheelDelta);
+        }
+
+        private void CountClick(int button)
+        {
+            DateTime now = DateTime.Now;
+            if (Store.Day != now.Date) Store.RollDay(now.Date);
+            AppActivity.Record(Store.Today, ForegroundApp.Capture(), 1);
+            DayRecord t = Store.Today;
+            Counters g = Store.Total;
+            t.Clicks++;
+            t.HourClicks[now.Hour]++;
+            g.Clicks++;
+            switch (button)
+            {
+                case 1: t.Left++; g.Left++; break;
+                case 2: t.Right++; g.Right++; break;
+                case 3: t.Middle++; g.Middle++; break;
+                default: t.XButtons++; g.XButtons++; break;
+            }
+            if (_rawMouse.RelativeSeen && (_distanceSettings == null || !_distanceSettings.Collect(0)))
+                _mouseVectors.Button(t, VectorNow(), button, true);
+            LiveRate.AddClick();
+            MarkDirty();
+        }
+
+        private void CountWheel()
+        {
+            DateTime now = DateTime.Now;
+            if (Store.Day != now.Date) Store.RollDay(now.Date);
+            AppActivity.Record(Store.Today, ForegroundApp.Capture(), 2);
+            Store.Today.Wheel++;
+            Store.Total.Wheel++;
+            MarkDirty();
+        }
+
+        /// <summary>
+        /// 键盘探针:原始输入看到按键,但低级钩子 1.5 秒没有任何事件 —— 钩子已经被摘了。
+        /// 立刻重装,比 30 秒的看门狗快一个数量级。
+        /// </summary>
+        private void NoteRawKeyArrived()
+        {
+            long now = Environment.TickCount;
+            if (now - _lastKeyTick <= 1500) return;          // 钩子还活着,正常
+            if (now - _lastProbeRepairTick < 2000) return;   // 别在 1 秒内反复重装
+            _lastProbeRepairTick = now;
+            Program.LogEvent("键盘探针:系统有按键但钩子 1.5 秒无事件 → 重装");
+            InstallHooks();
         }
 
         // ---------------------------------------------------------------- 绘制
@@ -1705,11 +1940,24 @@ namespace KeyMouseStats
 
             _miAutoStart = new ToolStripMenuItem("开机自动启动", null, delegate
             {
-                bool on = !_miAutoStart.Checked;
-                SetAutoStart(on);
-                _miAutoStart.Checked = GetAutoStart();
+                bool enable = !AutoStart.IsEnabled();
+                string error;
+                bool ok = enable ? AutoStart.Enable(Application.ExecutablePath, out error) : AutoStart.Disable(out error);
+                _miAutoStart.Checked = AutoStart.IsEnabled();
+                if (!ok)
+                {
+                    ThemeMessage.Show(this, "没能" + (enable ? "打开" : "关闭") + "开机自启:\n" + error,
+                        "开机自动启动", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                else if (enable)
+                {
+                    // 成功也要给一句反馈:自启是「设完就忘」的开关,不确认一下用户根本不知道生效没有。
+                    _tray.ShowBalloonTip(4000, "开机自动启动已开启",
+                        "已登记到任务计划程序:开机并登录后自动启动。改用别的文件名运行本程序时,自启会自动跟着更新。",
+                        ToolTipIcon.Info);
+                }
             });
-            _miAutoStart.Checked = GetAutoStart();
+            _miAutoStart.Checked = AutoStart.IsEnabled();
 
             ToolStripSeparator sep2 = new ToolStripSeparator();
 
@@ -1816,32 +2064,6 @@ namespace KeyMouseStats
             RecreateHandle();
         }
 
-        private static bool GetAutoStart()
-        {
-            try
-            {
-                using (RegistryKey k = Registry.CurrentUser.OpenSubKey(RunKeyPath))
-                {
-                    return k != null && k.GetValue(RunValueName) != null;
-                }
-            }
-            catch { return false; }
-        }
-
-        private static void SetAutoStart(bool on)
-        {
-            try
-            {
-                using (RegistryKey k = Registry.CurrentUser.CreateSubKey(RunKeyPath))
-                {
-                    if (k == null) return;
-                    if (on) k.SetValue(RunValueName, "\"" + Application.ExecutablePath + "\"");
-                    else k.DeleteValue(RunValueName, false);
-                }
-            }
-            catch { }
-        }
-
         [DllImport("user32.dll")] private static extern bool DestroyIcon(IntPtr icon);
         internal void RefreshTheme()
         {
@@ -1904,6 +2126,9 @@ namespace KeyMouseStats
             }
             _lastTickStamp = nowTicks;
 
+            // 钩子体检:每 5 秒一次,被系统/安全软件摘掉后自己装回来,不用用户重启。
+            try { HookHealth(); } catch (Exception error) { Program.LogFailure("钩子体检", error); }
+
             long previousTrend=LiveRate.TrendVersion;
             long previousApm = LiveRate.Apm;
             ActiveSession previousSession = ActivityMonitor.CurrentSession;
@@ -1954,8 +2179,7 @@ namespace KeyMouseStats
             HoldTracker.DiscardPending();   // 退出时未抬起的按键不计入时长
             if(_hud!=null){_hud.Close();_hud.Dispose();}
             if (_dashWait != null) { try { _dashWait.Unregister(null); } catch { } }
-            if (_kbHook != IntPtr.Zero) { Native.UnhookWindowsHookEx(_kbHook); _kbHook = IntPtr.Zero; }
-            if (_msHook != IntPtr.Zero) { Native.UnhookWindowsHookEx(_msHook); _msHook = IntPtr.Zero; }
+            ReleaseHooks();
             if (_timer != null) { _timer.Stop(); _timer.Dispose(); }
             if (_tray != null) { _tray.Visible = false; Icon icon=_tray.Icon;_tray.Dispose();if(icon!=null)icon.Dispose(); }
         }

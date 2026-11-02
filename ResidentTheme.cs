@@ -19,7 +19,7 @@ namespace KeyMouseStats
             if(!Active||!HasScene(page))return;
             Image image=NikkiArt.Load(Resources[page]);NikkiArt.DrawCached(g,image,new Rectangle(0,0,image.Width,image.Height),bounds,.82f,"resident-page-"+page);
         }
-        public static readonly string[] PageLabels={"LEON / KENNEDY","JILL / VALENTINE","CHRIS / REDFIELD","CLAIRE / REDFIELD","ADA / WONG","REBECCA / CHAMBERS"};
+        public static readonly string[] PageLabels={"LEON / KENNEDY","JILL / VALENTINE","CHRIS / REDFIELD","CLAIRE / REDFIELD","ADA / WONG","REBECCA / CHAMBERS","FILE / TRANSCRIPT"};
         private static Image Icons { get { return NikkiArt.Load("ResidentIcons"); } }
         public static bool HasIcons { get { return Icons!=null; } }
         public static void Symbol(Graphics g,int kind,RectangleF bounds)

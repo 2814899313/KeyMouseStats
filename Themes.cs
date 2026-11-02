@@ -139,20 +139,17 @@ namespace KeyMouseStats
             string name = EuroTruckArt.Active ? "长途之路" : WuxiaArt.Active ? "碧血丹心" : ArtTheme.Current.Name;
             for (int i = 0; i < ArtTheme.All.Length; i++)
             {
-                RectangleF r = new RectangleF(24 + i % 4 * 35, 516 + i / 4 * 21, 29, 16);
-                _themeRects[i] = new RectangleF(r.X-2,r.Y-2,33,21);
+                RectangleF r = new RectangleF(26 + i % 6 * 22, 522 + i / 6 * 24, 14, 14);
+                _themeRects[i] = new RectangleF(r.X-3,r.Y-3,20,20);
                 ArtTheme theme = ArtTheme.All[i];
                 bool selected=Store.ThemeId==i;
-                if(selected)using(Pen glow=new Pen(Color.FromArgb(70,Cblue),6))g.DrawRectangle(glow,r.X,r.Y,r.Width,r.Height);
-                using (SolidBrush b = new SolidBrush(theme.Background)) g.FillRectangle(b, r);
-                using (SolidBrush b = new SolidBrush(theme.Accent)) g.FillRectangle(b, r.X + 4, r.Y + 4, 21, 8);
-                using (Pen p = new Pen(selected || _themeRects[i].Contains(mouse) ? Ctext : Cline, selected ? 3 : 1))
-                    g.DrawRectangle(p, r.X, r.Y, r.Width, r.Height);
-                if(selected)using(SolidBrush marker=new SolidBrush(Ctext))g.FillPolygon(marker,new[]{new PointF(r.Right-9,r.Bottom+1),new PointF(r.Right-3,r.Bottom+1),new PointF(r.Right-6,r.Bottom+4)});
+                using (SolidBrush b = new SolidBrush(theme.Accent)) g.FillEllipse(b, r);
+                if (selected || _themeRects[i].Contains(mouse))
+                    using (Pen p = new Pen(selected ? Ctext : Csub, 1.5f))
+                        g.DrawEllipse(p, r.X - 3, r.Y - 3, r.Width + 6, r.Height + 6);
                 if (_themeRects[i].Contains(mouse)) name = i==11 ? "长途之路" : i==10 ? "碧血丹心" : theme.Name;
             }
-            AppText(g, "外观 · " + name, _fSmall, Ctext, new RectangleF(24, 486, 132, 24), false);
-            AppText(g, "粗框 ▼ 当前主题", _fAxis, Csub, new RectangleF(24, 503, 132, 14), false);
+            AppText(g, "外观 · " + name, _fSmall, Csub, new RectangleF(24, 490, 132, 24), false);
 #endif
         }
         private bool HandleThemeClick(PointF point)

@@ -1,12 +1,12 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 namespace KeyMouseStats {
 internal static class EuroTruckArt {
  internal static bool Active { get { return Store.ThemeId==11; } }
- internal static readonly int[] NavSymbols={4,3,7,8,6,15};
+ internal static readonly int[] NavSymbols={4,3,7,8,6,15,5};
  internal static readonly int[] MetricSymbols={8,9,10,2,7,4,3,14};
- internal static readonly string[] PageLabels={"DEPOT / START","ROUTE / TREND","DRIVE / 24H","CONTROL / INPUT","FREIGHT / APPS","JOURNEY / REPORT"};
+ internal static readonly string[] PageLabels={"DEPOT / START","ROUTE / TREND","DRIVE / 24H","CONTROL / INPUT","FREIGHT / APPS","JOURNEY / REPORT","CABIN / NOTES"};
  static readonly string[] Pages={"EuroTruckOverview","EuroTruckTrend","EuroTruckHours","EuroTruckKeys","EuroTruckApps","EuroTruckInsights"};
  static Image Icons { get{return NikkiArt.Load("EuroTruckIcons");} } static Image Widget {get{return NikkiArt.Load("EuroTruckWidget");}}
  internal static void DrawPage(Graphics g,int page,RectangleF bounds){if(!Active||page<0||page>=Pages.Length)return;Image image=NikkiArt.Load(Pages[page]);if(image==null)return;NikkiArt.DrawCached(g,image,WuxiaArt.Cover(new Rectangle(0,0,image.Width,image.Height),bounds),bounds,.86f,"eurotruck-page-"+page);}

@@ -7,9 +7,9 @@ namespace KeyMouseStats
     internal static class WuxiaArt
     {
         internal static bool Active { get { return Store.ThemeId == 10; } }
-        internal static readonly int[] NavSymbols = { 0, 1, 2, 3, 4, 5 };
+        internal static readonly int[] NavSymbols = { 0, 1, 2, 3, 4, 5, 6 };
         internal static readonly int[] MetricSymbols = { 6, 7, 8, 9, 10, 11, 12, 13 };
-        internal static readonly string[] PageLabels = { "神捕 · 江湖录", "本草 · 行迹图", "红玉 · 十二时辰", "紫烟 · 百键谱", "倾城 · 万象册", "彩蝶 · 悟心鉴" };
+        internal static readonly string[] PageLabels = { "神捕 · 江湖录", "本草 · 行迹图", "红玉 · 十二时辰", "紫烟 · 百键谱", "倾城 · 万象册", "彩蝶 · 悟心鉴", "墨痕 · 千字文" };
 
         private static Image Backgrounds { get { return NikkiArt.Load("WuxiaBackgrounds"); } }
         private static Image Ui { get { return NikkiArt.Load("WuxiaUi"); } }

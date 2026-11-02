@@ -49,6 +49,10 @@ namespace KeyMouseStats
         private static string _lastPath = "";
         private static DateTime _expires;
         private static readonly StringBuilder TitleBuffer = new StringBuilder(513);
+        // 窗口标题缓存:同一个窗口 1 秒内只跨进程取一次(见 Capture 里的说明)。
+        private static IntPtr _titleWindow;
+        private static long _titleTick;
+        private static string _titleText = "";
 
         // Capture on the same UI thread as the low-level hooks. Never read files or enumerate processes here.
         public static AppUsage Capture()
@@ -76,12 +80,22 @@ namespace KeyMouseStats
                     _expires = DateTime.UtcNow.AddSeconds(2);
                 }
                 TitleBuffer.Length = 0;
-                GetWindowText(window, TitleBuffer, TitleBuffer.Capacity);
+                // 标题按 1 秒缓存:GetWindowText 是跨进程调用,目标程序卡住时会阻塞几百毫秒,
+                // 而这个回调跑在低级键鼠钩子里 —— 超过 LowLevelHooksTimeout(默认 300 ms)
+                // Windows 就会静默摘钩子,表现为「鼠标点击/滚轮突然不再统计」。
+                // 连续点击时没必要每次重新取标题,1 秒的误差对归因没有影响。
+                long nowTick = Environment.TickCount;
+                if (window != _titleWindow || nowTick - _titleTick > 1000)
+                {
+                    GetWindowText(window, TitleBuffer, TitleBuffer.Capacity);
+                    _titleWindow = window;
+                    _titleTick = nowTick;
+                    _titleText = TitleBuffer.Length == 0 ? "无标题窗口" : TitleBuffer.ToString();
+                }
                 uint verifiedPid;
                 if (GetForegroundWindow() != window || GetWindowThreadProcessId(window, out verifiedPid) == 0 || verifiedPid != pid)
                     return new AppUsage { Title = "窗口切换中 / 无法归因" };
-                string title = TitleBuffer.Length == 0 ? "无标题窗口" : TitleBuffer.ToString();
-                return new AppUsage { ProcessPath = _lastPath, Title = title };
+                return new AppUsage { ProcessPath = _lastPath, Title = _titleText };
             }
             catch { return new AppUsage { Title = "无法识别的前台窗口" }; }
         }

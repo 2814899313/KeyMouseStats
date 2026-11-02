@@ -48,6 +48,10 @@ namespace KeyMouseStats
         public int LastDy { get; private set; }
         public long LastDevice { get; private set; }
         public bool RelativeSeen { get; private set; }
+        /// <summary>最近一个包的按钮位(RI_MOUSE_* 常量),0 表示这个包没有按键变化。</summary>
+        public ushort LastButtonFlags { get; private set; }
+        /// <summary>最近一个包的滚轮增量(±120 的倍数通常代表一格)。</summary>
+        public short LastWheelDelta { get; private set; }
         private int _error;
         private bool _absoluteSeen;
         private bool _readFailed;
@@ -94,9 +98,30 @@ namespace KeyMouseStats
             {
                 int header=8+2*IntPtr.Size;LastDx=BitConverter.ToInt32(_buffer,header+12);LastDy=BitConverter.ToInt32(_buffer,header+16);
                 LastDevice=IntPtr.Size==8?BitConverter.ToInt64(_buffer,8):BitConverter.ToInt32(_buffer,8);
+                ushort flags; short wheel;
+                DecodeButtons(_buffer, IntPtr.Size, out flags, out wheel);
+                LastButtonFlags = flags;
+                LastWheelDelta = wheel;
                 if(counts>0)RelativeSeen=true;
             }
             return valid;
+        }
+
+        /// <summary>
+        /// 取一个 RAWMOUSE 包里的按钮位与滚轮增量。usButtonFlags 在 RAWMOUSE 偏移 4,
+        /// usButtonData 在偏移 6(两者是同一个 DWORD 的上下半字)。
+        /// </summary>
+        internal static bool DecodeButtons(byte[] packet, int pointerSize, out ushort buttonFlags, out short wheelDelta)
+        {
+            buttonFlags = 0;
+            wheelDelta = 0;
+            if (pointerSize != 4 && pointerSize != 8) return false;
+            int header = 8 + 2 * pointerSize;
+            if (packet == null || packet.Length < header + 24) return false;
+            if (BitConverter.ToUInt32(packet, 0) != 0) return false;   // 不是鼠标包
+            buttonFlags = BitConverter.ToUInt16(packet, header + 4);
+            wheelDelta = BitConverter.ToInt16(packet, header + 6);
+            return true;
         }
 
         internal static bool Decode(byte[] packet, int length, int pointerSize, out double counts, out bool absolute)
@@ -119,6 +144,74 @@ namespace KeyMouseStats
         }
     }
 
+    /// <summary>
+    /// 键盘原始输入。这里**不计数**——计数仍由低级键盘钩子做(它的时序更准,按住时长要用)。
+    /// 这个类的唯一职责是当「探针」:系统明明在收按键,钩子却一声不吭,说明钩子已经被摘了。
+    /// 有了它,键盘停摆的发现时间从「30 秒看门狗」缩短到「1.5 秒」。
+    /// </summary>
+    internal sealed class RawKeyInput
+    {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Device
+        {
+            public ushort Page, Usage;
+            public uint Flags;
+            public IntPtr Target;
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool RegisterRawInputDevices(Device[] devices, uint count, uint size);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint GetRawInputData(IntPtr input, uint command,
+            [Out] byte[] data, ref uint size, uint headerSize);
+
+        private readonly byte[] _buffer = new byte[8 + 2 * IntPtr.Size + 16];
+        public bool Registered { get; private set; }
+        private int _error;
+
+        public string Status { get { return Registered ? "键盘探针已启用" : "键盘探针注册失败,错误码 " + _error; } }
+
+        public void Register(IntPtr window)
+        {
+            Device device = new Device { Page = 1, Usage = 6, Flags = 0x100, Target = window };
+            Registered = RegisterRawInputDevices(new Device[] { device }, 1, (uint)Marshal.SizeOf(typeof(Device)));
+            _error = Registered ? 0 : Marshal.GetLastWin32Error();
+        }
+
+        public void Unregister()
+        {
+            if (!Registered) return;
+            Device device = new Device { Page = 1, Usage = 6, Flags = 1, Target = IntPtr.Zero };
+            RegisterRawInputDevices(new Device[] { device }, 1, (uint)Marshal.SizeOf(typeof(Device)));
+            Registered = false;
+        }
+
+        /// <summary>这个 WM_INPUT 是不是键盘包;是的话顺便带出虚拟键码与是按下还是抬起。</summary>
+        public bool Read(IntPtr input, out ushort vk, out bool down)
+        {
+            vk = 0;
+            down = false;
+            uint size = (uint)_buffer.Length;
+            uint read = GetRawInputData(input, 0x10000003, _buffer, ref size, (uint)(8 + 2 * IntPtr.Size));
+            if (read == uint.MaxValue) return false;
+            return Decode(_buffer, (int)read, IntPtr.Size, out vk, out down);
+        }
+
+        internal static bool Decode(byte[] packet, int length, int pointerSize, out ushort vk, out bool down)
+        {
+            vk = 0;
+            down = false;
+            if (pointerSize != 4 && pointerSize != 8) return false;
+            int header = 8 + 2 * pointerSize;
+            if (packet == null || length < header + 8 || length > packet.Length) return false;
+            if (BitConverter.ToUInt32(packet, 0) != 1) return false;   // RIM_TYPEKEYBOARD
+            ushort flags = BitConverter.ToUInt16(packet, header + 2);
+            vk = BitConverter.ToUInt16(packet, header + 6);
+            down = (flags & 1) == 0;    // RI_KEY_BREAK = 1
+            return true;
+        }
+    }
     internal sealed class DistanceSettings : ThemedDialog
     {
         private readonly NumericUpDown _dpi;
