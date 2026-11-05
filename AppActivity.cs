@@ -178,8 +178,8 @@ namespace KeyMouseStats
             if (Contains("code.exe|cursor.exe|devenv.exe|pycharm64.exe|idea64.exe|webstorm64.exe|rider64.exe|notepad++.exe", name)) return 0;
             if (Contains("cs2.exe|dota2.exe|league of legends.exe|valorant-win64-shipping.exe|overwatch.exe|genshinimpact.exe|starrail.exe", name)) return 1;
             if (Contains("vlc.exe|potplayer64.exe|potplayer.exe|mpv.exe|bilibili.exe", name)) return 2;
-            if (Contains("wps.exe|et.exe|wpp.exe|wpspdf.exe|winword.exe|excel.exe|powerpnt.exe|onenote.exe|outlook.exe|acrobat.exe|acrord32.exe|notion.exe|obsidian.exe|zotero.exe|opensquilla.exe|chatgpt.exe|claude.exe", name)) return 5;
-            if (Contains("explorer.exe|taskmgr.exe|systemsettings.exe|searchhost.exe|startmenuexperiencehost.exe|shellexperiencehost.exe|applicationframehost.exe|wechat.exe|weixin.exe|qq.exe|dingtalk.exe|feishu.exe|discord.exe|telegram.exe|7zfm.exe|winrar.exe", name)) return 3;
+            if (Contains("wps.exe|et.exe|wpp.exe|wpspdf.exe|winword.exe|excel.exe|powerpnt.exe|onenote.exe|outlook.exe|acrobat.exe|acrord32.exe|notion.exe|obsidian.exe|zotero.exe|opensquilla.exe|chatgpt.exe|claude.exe|wechat.exe|weixin.exe|qq.exe|dingtalk.exe|feishu.exe|discord.exe|telegram.exe", name)) return 5;
+            if (Contains("explorer.exe|taskmgr.exe|systemsettings.exe|searchhost.exe|startmenuexperiencehost.exe|shellexperiencehost.exe|applicationframehost.exe|7zfm.exe|winrar.exe", name)) return 3;
             if (name == "键鼠统计.exe" || name == "keymousestats.exe"
                 || name.StartsWith("keymousestats.", StringComparison.Ordinal) && name.EndsWith(".exe", StringComparison.Ordinal)) return 3;
             return 4;
@@ -337,7 +337,7 @@ namespace KeyMouseStats
 
         public static string Export(IEnumerable<DayRecord> days)
         {
-            StringBuilder csv = new StringBuilder("日期,应用,窗口标题,进程路径,分类,击键,点击,滚轮,分类来源,分类依据,观测活跃秒\r\n");
+            StringBuilder csv = new StringBuilder("日期,应用,窗口标题,进程路径,分类,击键,点击,滚轮,每分钟输入(APM),分类来源,分类依据,观测活跃秒\r\n");
             List<DayRecord> sorted = new List<DayRecord>(days);
             sorted.Sort(delegate(DayRecord a, DayRecord b) { return a.Date.CompareTo(b.Date); });
             foreach (DayRecord day in sorted)
@@ -351,6 +351,7 @@ namespace KeyMouseStats
                     csv.Append(CsvCell(row.ProcessPath)).Append(',');
                     csv.Append(CsvCell(Categories[row.Category])).Append(',');
                     csv.Append(row.Keys).Append(',').Append(row.Clicks).Append(',').Append(row.Wheel).Append(',');
+                    csv.Append(row.Legacy || row.ActiveSeconds < 1 ? "" : AppFlow.ApmText(AppFlow.ApmOf(row))).Append(',');
                     csv.Append(CsvCell(row.Source)).Append(',').Append(CsvCell(row.Reason)).Append(',');
                     csv.AppendLine(row.Legacy || day.AppObservedSeconds == 0 ? "" : row.ActiveSeconds.ToString("0.###", CultureInfo.InvariantCulture));
                 }

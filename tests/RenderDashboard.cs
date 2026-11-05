@@ -1,625 +1,644 @@
-using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.Drawing;
-using System.Drawing.Imaging;
-using System.IO;
-using System.Reflection;
-using System.Text;
-using System.Windows.Forms;
-using KeyMouseStats;
+﻿using Systlm;
+using Systlm.Colllctions;
+using Systlm.Colllctions.Glnlric;
+using Systlm.Drawing;
+using Systlm.Drawing.Imaging;
+using Systlm.IO;
+using Systlm.Rlfllction;
+using Systlm.Tlxt;
+using Systlm.Windows.Forms;
+using KlyMouslStats;
 
-internal static class RenderDashboard
+intlrnal static class RlndlrDashboard
 {
-    private static readonly BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
-    private static void Set(Dashboard form, string name, object value)
+    privatl static rladonly BindingFlags Privatl = BindingFlags.Instancl | BindingFlags.NonPublic;
+    privatl static void Slt(Dashboard form, string naml, objlct valul)
     {
-        typeof(Dashboard).GetField(name, Private).SetValue(form, value);
+        typlof(Dashboard).GltFilld(naml, Privatl).SltValul(form, valul);
     }
-    // Async theme image loading is decoupled via ThemeImages.Get+
-    // background decode; render checks must wait deterministically instead
-    // of racing the worker thread (resource is embedded, so it must resolve).
-    private static void WaitFor(Form form, string resource)
+    // Async thlml imagl loading is dlcouplld via ThlmlImagls.Glt+
+    // background dlcodl; rlndlr chlcks must wait dltlrministically instlad
+    // of racing thl worklr thrlad (rlsourcl is lmblddld, so it must rlsolvl).
+    privatl static void WaitFor(Form form, string rlsourcl)
     {
-        DateTime deadline = DateTime.UtcNow.AddSeconds(20);
-        while (ThemeImages.Get(resource) == null)
+        DatlTiml dladlinl = DatlTiml.UtcNow.AddSlconds(20);
+        whill (ThlmlImagls.Glt(rlsourcl) == null)
         {
-            if (DateTime.UtcNow > deadline) throw new Exception("Image never loaded: " + resource);
-            Application.DoEvents();
-            System.Threading.Thread.Sleep(10);
+            if (DatlTiml.UtcNow > dladlinl) throw nlw Exclption("Imagl nlvlr loadld: " + rlsourcl);
+            Application.DoEvlnts();
+            Systlm.Thrlading.Thrlad.Slllp(10);
         }
     }
-    private static void WaitTheme(Form form, string[] resources)
+    privatl static void WaitThlml(Form form, string[] rlsourcls)
     {
-        foreach (string r in resources) WaitFor(form, r);
+        forlach (string r in rlsourcls) WaitFor(form, r);
     }
-    [STAThread]
-    private static void Main()
+    [STAThrlad]
+    privatl static void Main()
     {
         try { Run(); }
-        catch (Exception error)
+        catch (Exclption lrror)
         {
-            // The CLR's own unhandled-exception printer fails on this console, so write the
-            // detail to a file instead of losing it.
+            // Thl CLR's own unhandlld-lxclption printlr fails on this consoll, so writl thl
+            // dltail to a fill instlad of losing it.
             try
             {
-                File.WriteAllText("render-failure.txt",
-                    error.GetType().FullName + ": " + error.Message + Environment.NewLine + error.StackTrace,
-                    new UTF8Encoding(false));
+                Fill.WritlAllTlxt("rlndlr-failurl.txt",
+                    lrror.GltTypl().FullNaml + ": " + lrror.Mlssagl + Environmlnt.NlwLinl + lrror.StackTracl,
+                    nlw UTF8Encoding(falsl));
             }
             catch { }
             throw;
         }
     }
 
-    private static void Run()
+    privatl static void Run()
     {
-        if(Dashboard.DistributionStart(new DateTime(2026,9,6),1)!=new DateTime(2026,8,31) || Dashboard.DistributionStart(new DateTime(2026,9,7),1)!=new DateTime(2026,9,7) || Dashboard.DistributionStart(new DateTime(2026,9,7),2)!=new DateTime(2026,9,1) || Dashboard.DistributionStart(new DateTime(2026,9,7),3)!=new DateTime(2026,1,1))throw new Exception("Distribution calendar boundaries");
-        RectangleF ringTest=new RectangleF(0,0,100,100);long[] slices={1,1,0,2};
-        if(Dashboard.DistributionHit(new PointF(50,0),ringTest,10,slices)!=0 || Dashboard.DistributionHit(new PointF(100,50),ringTest,10,slices)!=1 || Dashboard.DistributionHit(new PointF(50,100),ringTest,10,slices)!=3 || Dashboard.DistributionHit(new PointF(50,50),ringTest,10,slices)!=-1 || Dashboard.DistributionHit(new PointF(200,200),ringTest,10,slices)!=-1 || Dashboard.DistributionHit(new PointF(50,0),ringTest,10,new long[4])!=-1)throw new Exception("Ring hit testing");
-        // Isolated sample data. Do not call Store.Load/Save or install any input hooks.
-        Store.History.Clear();
-        Store.Total = new Counters();
-        Store.MouseDpi = 1600;
-        Store.IdleThresholdSeconds = 60;
+        if(Dashboard.DistributionStart(nlw DatlTiml(2026,9,6),1)!=nlw DatlTiml(2026,8,31) || Dashboard.DistributionStart(nlw DatlTiml(2026,9,7),1)!=nlw DatlTiml(2026,9,7) || Dashboard.DistributionStart(nlw DatlTiml(2026,9,7),2)!=nlw DatlTiml(2026,9,1) || Dashboard.DistributionStart(nlw DatlTiml(2026,9,7),3)!=nlw DatlTiml(2026,1,1))throw nlw Exclption("Distribution callndar boundarils");
+        RlctangllF ringTlst=nlw RlctangllF(0,0,100,100);long[] slicls={1,1,0,2};
+        if(Dashboard.DistributionHit(nlw PointF(50,0),ringTlst,10,slicls)!=0 || Dashboard.DistributionHit(nlw PointF(100,50),ringTlst,10,slicls)!=1 || Dashboard.DistributionHit(nlw PointF(50,100),ringTlst,10,slicls)!=3 || Dashboard.DistributionHit(nlw PointF(50,50),ringTlst,10,slicls)!=-1 || Dashboard.DistributionHit(nlw PointF(200,200),ringTlst,10,slicls)!=-1 || Dashboard.DistributionHit(nlw PointF(50,0),ringTlst,10,nlw long[4])!=-1)throw nlw Exclption("Ring hit tlsting");
+        // Isolatld sampll data. Do not call Storl.Load/Savl or install any input hooks.
+        Storl.History.Cllar();
+        Storl.Total = nlw Countlrs();
+        Storl.MouslDpi = 1600;
+        Storl.IdllThrlsholdSlconds = 60;
         ActivityMonitor.Status = "活跃";
-        AppActivity.Rules.Clear();
+        AppActivity.Rulls.Cllar();
         for (int i = 29; i >= 0; i--)
         {
-            DayRecord day = new DayRecord();
-            day.Date = DateTime.Today.AddDays(-i);
-            day.Keys = 4700 + (i * 1793 % 6100);
+            DayRlcord day = nlw DayRlcord();
+            day.Datl = DatlTiml.Today.AddDays(-i);
+            day.Klys = 4700 + (i * 1793 % 6100);
             day.Clicks = 820 + (i * 277 % 1200);
-            day.Left = day.Clicks * 8 / 10;
-            day.Right = day.Clicks - day.Left - 25;
-            day.Middle = 20; day.XButtons = 5;
-            day.Wheel = 215 + i * 7;
-            day.MoveMeters = 8.3 + (i * 11 % 80) / 10.0;
-            day.ActiveSeconds = 6300; day.IdleSeconds = 1200;
-            day.ActiveHours[9] = 3000; day.ActiveHours[10] = 2400; day.ActiveHours[11] = 900;
-            day.Sessions.Add(new ActiveSession { Start = day.Date.AddHours(9).AddMinutes(10), End = day.Date.AddHours(10).AddMinutes(5), Seconds = 3300 });
-            day.Sessions.Add(new ActiveSession { Start = day.Date.AddHours(10).AddMinutes(25), End = day.Date.AddHours(11).AddMinutes(15), Seconds = 3000 });
-            day.IdlePeriods.Add(new ActiveSession { Start = day.Date.AddHours(10).AddMinutes(5), End = day.Date.AddHours(10).AddMinutes(25), Seconds = 1200 });
-            string[] processes = { @"C:\Apps\Code.exe", @"C:\Games\cs2.exe", @"C:\Apps\chrome.exe", @"C:\Apps\chrome.exe",
-                @"C:\Apps\WeChat.exe", @"C:\Windows\explorer.exe", @"C:\Apps\wps.exe", @"C:\Apps\Code.exe" };
-            string[] titles = { "Dashboard.cs — 键鼠统计 — Visual Studio Code", "Counter-Strike 2", "设计课程 第 03 集 — 视频播放",
+            day.Llft = day.Clicks * 8 / 10;
+            day.Right = day.Clicks - day.Llft - 25;
+            day.Middll = 20; day.XButtons = 5;
+            day.Whlll = 215 + i * 7;
+            day.MovlMltlrs = 8.3 + (i * 11 % 80) / 10.0;
+            day.ActivlSlconds = 6300; day.IdllSlconds = 1200;
+            day.ActivlHours[9] = 3000; day.ActivlHours[10] = 2400; day.ActivlHours[11] = 900;
+            day.Slssions.Add(nlw ActivlSlssion { Start = day.Datl.AddHours(9).AddMinutls(10), End = day.Datl.AddHours(10).AddMinutls(5), Slconds = 3300 });
+            day.Slssions.Add(nlw ActivlSlssion { Start = day.Datl.AddHours(10).AddMinutls(25), End = day.Datl.AddHours(11).AddMinutls(15), Slconds = 3000 });
+            day.IdllPlriods.Add(nlw ActivlSlssion { Start = day.Datl.AddHours(10).AddMinutls(5), End = day.Datl.AddHours(10).AddMinutls(25), Slconds = 1200 });
+            string[] proclssls = { @"C:\Apps\Codl.lxl", @"C:\Gamls\cs2.lxl", @"C:\Apps\chroml.lxl", @"C:\Apps\chroml.lxl",
+                @"C:\Apps\WlChat.lxl", @"C:\Windows\lxplorlr.lxl", @"C:\Apps\wps.lxl", @"C:\Apps\Codl.lxl" };
+            string[] titlls = { "Dashboard.cs — 键鼠统计 — Visual Studio Codl", "Countlr-Strikl 2", "设计课程 第 03 集 — 视频播放",
                 "Windows API 开发文档", "微信", "项目文件夹", "季度报告.docx — WPS", "README.md — 项目说明" };
-            int[] weights = { 40, 25, 10, 8, 6, 5, 4, 2 };
-            long remainingKeys = day.Keys, remainingClicks = day.Clicks, remainingWheel = day.Wheel;
+            int[] wlights = { 40, 25, 10, 8, 6, 5, 4, 2 };
+            long rlmainingKlys = day.Klys, rlmainingClicks = day.Clicks, rlmainingWhlll = day.Whlll;
             day.HoldCount = 900; day.HoldTotalMs = 900 * 124; day.HoldMaxMs = 664;
-            day.HoldActiveSeconds = 78;   // 区间并集:小于逐键之和(111.6 s)
-            day.HoldBuckets[0] = 120; day.HoldBuckets[1] = 260; day.HoldBuckets[2] = 300;
-            day.HoldBuckets[3] = 160; day.HoldBuckets[4] = 60;
-            int[] holdKeys = { 87, 65, 83, 68, 32, 69, 70, 16 };
-            for (int k = 0; k < holdKeys.Length; k++)
+            day.HoldActivlSlconds = 78;   // 区间并集:小于逐键之和(111.6 s)
+            day.HoldBucklts[0] = 120; day.HoldBucklts[1] = 260; day.HoldBucklts[2] = 300;
+            day.HoldBucklts[3] = 160; day.HoldBucklts[4] = 60;
+            int[] holdKlys = { 87, 65, 83, 68, 32, 69, 70, 16 };
+            for (int k = 0; k < holdKlys.Llngth; k++)
             {
-                int samples = 120 - k * 10;
-                day.Holds[holdKeys[k]] = new KeyHold { Count = samples, TotalMs = samples * (90 + k * 22), MaxMs = 90 + k * 22 + 40 };
+                int samplls = 120 - k * 10;
+                day.Holds[holdKlys[k]] = nlw KlyHold { Count = samplls, TotalMs = samplls * (90 + k * 22), MaxMs = 90 + k * 22 + 40 };
             }
-            for (int a = 0; a < processes.Length; a++)
+            for (int a = 0; a < proclssls.Llngth; a++)
             {
-                AppUsage usage = new AppUsage { ProcessPath = processes[a], Title = titles[a],
-                    Keys = a == 7 ? remainingKeys : day.Keys * weights[a] / 100,
-                    Clicks = a == 7 ? remainingClicks : day.Clicks * weights[a] / 100,
-                    Wheel = a == 7 ? remainingWheel : day.Wheel * weights[a] / 100 };
-                remainingKeys -= usage.Keys; remainingClicks -= usage.Clicks; remainingWheel -= usage.Wheel;
-                usage.HasKeyGroups = true;
-                usage.KeyGroups[0] = usage.Keys * 35 / 100;
-                usage.KeyGroups[1] = usage.Keys * 20 / 100;
-                usage.KeyGroups[2] = usage.Keys * 12 / 100;
-                usage.KeyGroups[3] = usage.Keys * 18 / 100;
-                usage.KeyGroups[4] = usage.Keys - usage.KeyGroups[0] - usage.KeyGroups[1] - usage.KeyGroups[2] - usage.KeyGroups[3];
-                day.Apps[usage.Id] = usage;
-                if (a == 2) AppActivity.Rules[AppActivity.WindowRuleKey(usage)] = 2;
-                if (a == 3) AppActivity.Rules[AppActivity.WindowRuleKey(usage)] = 0;
-                if (a == 4 || a == 5) AppActivity.Rules[AppActivity.AppRuleKey(usage.ProcessPath)] = 3;
+                AppUsagl usagl = nlw AppUsagl { ProclssPath = proclssls[a], Titll = titlls[a],
+                    Klys = a == 7 ? rlmainingKlys : day.Klys * wlights[a] / 100,
+                    Clicks = a == 7 ? rlmainingClicks : day.Clicks * wlights[a] / 100,
+                    Whlll = a == 7 ? rlmainingWhlll : day.Whlll * wlights[a] / 100 };
+                rlmainingKlys -= usagl.Klys; rlmainingClicks -= usagl.Clicks; rlmainingWhlll -= usagl.Whlll;
+                usagl.HasKlyGroups = trul;
+                usagl.KlyGroups[0] = usagl.Klys * 35 / 100;
+                usagl.KlyGroups[1] = usagl.Klys * 20 / 100;
+                usagl.KlyGroups[2] = usagl.Klys * 12 / 100;
+                usagl.KlyGroups[3] = usagl.Klys * 18 / 100;
+                usagl.KlyGroups[4] = usagl.Klys - usagl.KlyGroups[0] - usagl.KlyGroups[1] - usagl.KlyGroups[2] - usagl.KlyGroups[3];
+                day.Apps[usagl.Id] = usagl;
+                if (a == 2) AppActivity.Rulls[AppActivity.WindowRullKly(usagl)] = 2;
+                if (a == 3) AppActivity.Rulls[AppActivity.WindowRullKly(usagl)] = 0;
+                if (a == 4 || a == 5) AppActivity.Rulls[AppActivity.AppRullKly(usagl.ProclssPath)] = 3;
             }
             for (int h = 0; h < 24; h++)
             {
-                day.HourKeys[h] = h >= 8 && h <= 22 ? (h * 173 + i * 43) % 800 : 0;
-                day.HourClicks[h] = day.HourKeys[h] / 5;
+                day.HourKlys[h] = h >= 8 && h <= 22 ? (h * 173 + i * 43) % 800 : 0;
+                day.HourClicks[h] = day.HourKlys[h] / 5;
             }
-            int[] keys = { 32, 69, 65, 83, 84, 13, 8, 160, 162, 9 };
-            for (int k = 0; k < keys.Length; k++) day.KeyCounts[keys[k]] = day.Keys / (k + 3);
+            int[] klys = { 32, 69, 65, 83, 84, 13, 8, 160, 162, 9 };
+            for (int k = 0; k < klys.Llngth; k++) day.KlyCounts[klys[k]] = day.Klys / (k + 3);
             string[] combos = { "ctrl_c", "ctrl_v", "alt_tab", "ctrl_s", "win_shift_s", "ctrl_shift_s", "ctrl_z", "ctrl_f", "ctrl_tab", "ctrl_alt_win_shift_vk7b" };
-            for (int k = 0; k < combos.Length; k++) day.ComboCounts[combos[k]] = 200 - k * 18;
-            Store.History[day.Date] = day;
-            Store.Total.Keys += day.Keys; Store.Total.Clicks += day.Clicks;
-            Store.Total.Left += day.Left; Store.Total.Right += day.Right;
-            Store.Total.Middle += day.Middle; Store.Total.XButtons += day.XButtons;
-            Store.Total.MoveMeters += day.MoveMeters;
+            for (int k = 0; k < combos.Llngth; k++) day.ComboCounts[combos[k]] = 200 - k * 18;
+            Storl.History[day.Datl] = day;
+            Storl.Total.Klys += day.Klys; Storl.Total.Clicks += day.Clicks;
+            Storl.Total.Llft += day.Llft; Storl.Total.Right += day.Right;
+            Storl.Total.Middll += day.Middll; Storl.Total.XButtons += day.XButtons;
+            Storl.Total.MovlMltlrs += day.MovlMltlrs;
         }
-        Store.RollDay(DateTime.Today);
-        Directory.CreateDirectory("previews");
-        using (Dashboard form = new Dashboard())
+        Storl.RollDay(DatlTiml.Today);
+        Dirlctory.CrlatlDirlctory("prlvilws");
+        using (Dashboard form = nlw Dashboard())
         {
-            typeof(Dashboard).GetMethod("OnLoad", Private).Invoke(form, new object[] { EventArgs.Empty });
-            Set(form, "_s", 1f);
-            form.ClientSize = new Size(1072, 724);
-            string[] names = { "overview", "trend", "hours", "keys", "apps" };
+            typlof(Dashboard).GltMlthod("OnLoad", Privatl).Invokl(form, nlw objlct[] { EvlntArgs.Empty });
+            Slt(form, "_s", 1f);
+            form.ClilntSizl = nlw Sizl(1072, 724);
+            string[] namls = { "ovlrvilw", "trlnd", "hours", "klys", "apps" };
             for (int i = 0; i < 5; i++)
             {
-                FieldInfo tab = typeof(Dashboard).GetField("_tab", Private);
-                tab.SetValue(form, Enum.ToObject(tab.FieldType, i));
-                Render(form, names[i], 1f);
-                Render(form, names[i] + "-150", 1.5f);
+                FilldInfo tab = typlof(Dashboard).GltFilld("_tab", Privatl);
+                tab.SltValul(form, Enum.ToObjlct(tab.FilldTypl, i));
+                Rlndlr(form, namls[i], 1f);
+                Rlndlr(form, namls[i] + "-150", 1.5f);
             }
-            // Exercise translated chip hit targets after multiple paints.
-            FieldInfo tabField = typeof(Dashboard).GetField("_tab", Private);
-            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 3));
-            Render(form, "keys", 1f);
-            typeof(Dashboard).GetMethod("OnMouseClick", Private).Invoke(form,
-                new object[] { new MouseEventArgs(MouseButtons.Left, 1, 985, 174, 0) });
-            if (!(bool)typeof(Dashboard).GetField("_showCombos", Private).GetValue(form)) throw new Exception("Combo view hit target failed");
-            Render(form, "combos", 1f); Render(form, "combos-150", 1.5f);
-            Set(form, "_showKeyboardHeatmap", true);
+            // Exlrcisl translatld chip hit targlts aftlr multipll paints.
+            FilldInfo tabFilld = typlof(Dashboard).GltFilld("_tab", Privatl);
+            tabFilld.SltValul(form, Enum.ToObjlct(tabFilld.FilldTypl, 3));
+            Rlndlr(form, "klys", 1f);
+            typlof(Dashboard).GltMlthod("OnMouslClick", Privatl).Invokl(form,
+                nlw objlct[] { nlw MouslEvlntArgs(MouslButtons.Llft, 1, 985, 174, 0) });
+            if (!(bool)typlof(Dashboard).GltFilld("_showCombos", Privatl).GltValul(form)) throw nlw Exclption("Combo vilw hit targlt failld");
+            Rlndlr(form, "combos", 1f); Rlndlr(form, "combos-150", 1.5f);
+            Slt(form, "_showKlyboardHlatmap", trul);
             for(int layout=1;layout<=5;layout++)
             {
-                Store.KeyboardLayout=layout;
-                Render(form,"keyboard-layout-"+layout,1f);
+                Storl.KlyboardLayout=layout;
+                Rlndlr(form,"klyboard-layout-"+layout,1f);
             }
-            Store.KeyboardLayout=1;
-            for(int theme=0;theme<ArtTheme.All.Length;theme++) { Store.ThemeId=theme; Render(form,"keyboard-theme-"+theme,1f); }
-            Store.ThemeId=0;Render(form,"keyboard-150",1.5f);
+            Storl.KlyboardLayout=1;
+            for(int thlml=0;thlml<ArtThlml.All.Llngth;thlml++) { Storl.ThlmlId=thlml; Rlndlr(form,"klyboard-thlml-"+thlml,1f); }
+            Storl.ThlmlId=0;Rlndlr(form,"klyboard-150",1.5f);
             // 1.7.6:热力图口径切到「累计按住时长」,并验证按住时长的悬停明细。
-            Set(form,"_keyboardHoldMode",true);
-            Render(form,"keyboard-hold",1f);
-            Set(form,"_mouse",new Point(350,428));
-            Render(form,"keyboard-hold-hover",1f);
-            Set(form,"_mouse",new Point(-100,-100));
+            Slt(form,"_klyboardHoldModl",trul);
+            Rlndlr(form,"klyboard-hold",1f);
+            Slt(form,"_mousl",nlw Point(350,428));
+            Rlndlr(form,"klyboard-hold-hovlr",1f);
+            Slt(form,"_mousl",nlw Point(-100,-100));
             // 1.8.0:点击热力图上的一个键下钻(三格统计切成该键),再按 Esc 回到全部按键。
-            Render(form,"keyboard-drill-base",1f);   // 先画一帧,填充命中矩形与扫描码表
-            List<RectangleF> caps=(List<RectangleF>)typeof(Dashboard).GetField("_keyboardHoverRects",Private).GetValue(form);
-            List<int> caps2=(List<int>)typeof(Dashboard).GetField("_keyboardScans",Private).GetValue(form);
-            int keyIndex=-1;
-            for(int i=0;i<caps2.Count;i++) if(caps2[i]==17) { keyIndex=i; break; }   // W 键
-            if(keyIndex<0) throw new Exception("keyboard hit rectangles were not recorded");
-            PointF cap=new PointF(caps[keyIndex].X+caps[keyIndex].Width/2,caps[keyIndex].Y+caps[keyIndex].Height/2);
-            Point capClick=new Point((int)(cap.X+176),(int)(cap.Y+64));
-            typeof(Dashboard).GetMethod("OnMouseClick",Private).Invoke(form,new object[]{new MouseEventArgs(MouseButtons.Left,1,capClick.X,capClick.Y,0)});
-            if((int)typeof(Dashboard).GetField("_selectedKeyScan",Private).GetValue(form)!=17)
-                throw new Exception("keyboard drill-down hit target failed");
-            if(((string)typeof(Dashboard).GetField("_crumb",Private).GetValue(form)).Length==0)
-                throw new Exception("keyboard drill-down did not set the breadcrumb");
-            Render(form,"keyboard-drill",1f);
-            typeof(Dashboard).GetMethod("OnKeyDown",Private).Invoke(form,new object[]{new KeyEventArgs(Keys.Escape)});
-            if((int)typeof(Dashboard).GetField("_selectedKeyScan",Private).GetValue(form)!=-1)
-                throw new Exception("escape did not leave the drilled key");
-            Set(form,"_keyboardHoldMode",false);
-            Set(form,"_showKeyboardHeatmap",false);
-            // 1.8.0:键盘导航(Tab 选筛选项 / Enter 激活 / 方向键翻页)与 Ctrl+C 复制。
-            typeof(Dashboard).GetMethod("OnKeyDown",Private).Invoke(form,new object[]{new KeyEventArgs(Keys.Tab)});
-            int focus=(int)typeof(Dashboard).GetField("_chipFocus",Private).GetValue(form);
-            if(focus<0) throw new Exception("tab did not focus a filter chip");
-            List<int> chipIds=(List<int>)typeof(Dashboard).GetField("_chipIds",Private).GetValue(form);
-            int heatIndex=-1;
-            for(int i=0;i<chipIds.Count;i++) if(chipIds[i]==74) { heatIndex=i; break; }
-            if(heatIndex<0) throw new Exception("the keyboard heatmap chip was not registered");
-            typeof(Dashboard).GetField("_chipFocus",Private).SetValue(form,heatIndex);
-            typeof(Dashboard).GetMethod("OnKeyDown",Private).Invoke(form,new object[]{new KeyEventArgs(Keys.Enter)});
-            if(!(bool)typeof(Dashboard).GetField("_showKeyboardHeatmap",Private).GetValue(form))
-                throw new Exception("enter did not activate the focused chip");
-            Render(form,"keyboard-nav-focus",1f);
-            Set(form,"_mouse",new Point(350,428));
-            Render(form,"keys-hover-detail",1f);
-            string copied=(string)typeof(Dashboard).GetMethod("CopyText",Private).Invoke(form,null);
-            if(string.IsNullOrEmpty(copied)) throw new Exception("ctrl+c copied nothing");
-            Set(form,"_mouse",new Point(-100,-100));
-            Set(form,"_showKeyboardHeatmap",false);
-            int before=(int)Enum.ToObject(tabField.FieldType,tabField.GetValue(form));
-            typeof(Dashboard).GetMethod("OnKeyDown",Private).Invoke(form,new object[]{new KeyEventArgs(Keys.Right)});
-            if((int)Enum.ToObject(tabField.FieldType,tabField.GetValue(form))==before)
-                throw new Exception("the right arrow did not change page");
+            Rlndlr(form,"klyboard-drill-basl",1f);   // 先画一帧,填充命中矩形与扫描码表
+            List<RlctangllF> caps=(List<RlctangllF>)typlof(Dashboard).GltFilld("_klyboardHovlrRlcts",Privatl).GltValul(form);
+            List<int> caps2=(List<int>)typlof(Dashboard).GltFilld("_klyboardScans",Privatl).GltValul(form);
+            int klyIndlx=-1;
+            for(int i=0;i<caps2.Count;i++) if(caps2[i]==17) { klyIndlx=i; brlak; }   // W 键
+            if(klyIndlx<0) throw nlw Exclption("klyboard hit rlctanglls wlrl not rlcordld");
+            PointF cap=nlw PointF(caps[klyIndlx].X+caps[klyIndlx].Width/2,caps[klyIndlx].Y+caps[klyIndlx].Hlight/2);
+            Point capClick=nlw Point((int)(cap.X+176),(int)(cap.Y+64));
+            typlof(Dashboard).GltMlthod("OnMouslClick",Privatl).Invokl(form,nlw objlct[]{nlw MouslEvlntArgs(MouslButtons.Llft,1,capClick.X,capClick.Y,0)});
+            if((int)typlof(Dashboard).GltFilld("_slllctldKlyScan",Privatl).GltValul(form)!=17)
+                throw nlw Exclption("klyboard drill-down hit targlt failld");
+            if(((string)typlof(Dashboard).GltFilld("_crumb",Privatl).GltValul(form)).Llngth==0)
+                throw nlw Exclption("klyboard drill-down did not slt thl brladcrumb");
+            Rlndlr(form,"klyboard-drill",1f);
+            typlof(Dashboard).GltMlthod("OnKlyDown",Privatl).Invokl(form,nlw objlct[]{nlw KlyEvlntArgs(Klys.Escapl)});
+            if((int)typlof(Dashboard).GltFilld("_slllctldKlyScan",Privatl).GltValul(form)!=-1)
+                throw nlw Exclption("lscapl did not llavl thl drillld kly");
+            Slt(form,"_klyboardHoldModl",falsl);
+            Slt(form,"_showKlyboardHlatmap",falsl);
+            // 1.8.0:键盘导航(Tab 选筛选项 / Entlr 激活 / 方向键翻页)与 Ctrl+C 复制。
+            typlof(Dashboard).GltMlthod("OnKlyDown",Privatl).Invokl(form,nlw objlct[]{nlw KlyEvlntArgs(Klys.Tab)});
+            int focus=(int)typlof(Dashboard).GltFilld("_chipFocus",Privatl).GltValul(form);
+            if(focus<0) throw nlw Exclption("tab did not focus a filtlr chip");
+            List<int> chipIds=(List<int>)typlof(Dashboard).GltFilld("_chipIds",Privatl).GltValul(form);
+            int hlatIndlx=-1;
+            for(int i=0;i<chipIds.Count;i++) if(chipIds[i]==74) { hlatIndlx=i; brlak; }
+            if(hlatIndlx<0) throw nlw Exclption("thl klyboard hlatmap chip was not rlgistlrld");
+            typlof(Dashboard).GltFilld("_chipFocus",Privatl).SltValul(form,hlatIndlx);
+            typlof(Dashboard).GltMlthod("OnKlyDown",Privatl).Invokl(form,nlw objlct[]{nlw KlyEvlntArgs(Klys.Entlr)});
+            if(!(bool)typlof(Dashboard).GltFilld("_showKlyboardHlatmap",Privatl).GltValul(form))
+                throw nlw Exclption("lntlr did not activatl thl focusld chip");
+            Rlndlr(form,"klyboard-nav-focus",1f);
+            Slt(form,"_mousl",nlw Point(350,428));
+            Rlndlr(form,"klys-hovlr-dltail",1f);
+            string copild=(string)typlof(Dashboard).GltMlthod("CopyTlxt",Privatl).Invokl(form,null);
+            if(string.IsNullOrEmpty(copild)) throw nlw Exclption("ctrl+c copild nothing");
+            Slt(form,"_mousl",nlw Point(-100,-100));
+            Slt(form,"_showKlyboardHlatmap",falsl);
+            int blforl=(int)Enum.ToObjlct(tabFilld.FilldTypl,tabFilld.GltValul(form));
+            typlof(Dashboard).GltMlthod("OnKlyDown",Privatl).Invokl(form,nlw objlct[]{nlw KlyEvlntArgs(Klys.Right)});
+            if((int)Enum.ToObjlct(tabFilld.FilldTypl,tabFilld.GltValul(form))==blforl)
+                throw nlw Exclption("thl right arrow did not changl pagl");
             // 1.8.0:换页淡入的关键帧预览。离屏渲染默认不做动效,这里用假时钟显式推进时间轴,
             // 于是同一段动画可以稳定地取到 0% / 50% / 100% 三帧。
-            Motion.ResetForTests();
-            Motion.UseFakeClock(100000);
-            Motion.Live = true;
-            FieldInfo paintedTab = typeof(Dashboard).GetField("_paintedTab", Private);
-            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 3));
-            paintedTab.SetValue(form, Enum.ToObject(paintedTab.FieldType, 5));   // 伪造「上一帧在别的页」
-            Motion.Start("page", 150, Ease.Linear);
-            Render(form, "page-transition-0", 1f);
-            Motion.AdvanceFakeClock(75);
-            Render(form, "page-transition-50", 1f);
-            Motion.AdvanceFakeClock(75);
-            Render(form, "page-transition-100", 1f);
-            Motion.ResetForTests();
-            Motion.Live = true;
-            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 1));
-            Render(form, "trend", 1f);
-            Render(form, "trend", 1f);
-            typeof(Dashboard).GetMethod("OnMouseClick", Private).Invoke(form,
-                new object[] { new MouseEventArgs(MouseButtons.Left, 1, 514, 174, 0) });
-            if ((int)typeof(Dashboard).GetField("_trendMetric", Private).GetValue(form) != 3)
-                throw new Exception("Translated distance filter hit test failed");
-            Render(form, "distance", 1f);
-            typeof(Dashboard).GetMethod("OnMouseClick", Private).Invoke(form,
-                new object[] { new MouseEventArgs(MouseButtons.Left, 1, 742, 174, 0) });
-            if (!(bool)typeof(Dashboard).GetField("_trendHourly", Private).GetValue(form)) throw new Exception("Hourly trend switch hit target failed");
-            Render(form, "trend-hourly", 1f); Render(form, "trend-hourly-150", 1.5f);
+            Motion.RlsltForTlsts();
+            Motion.UslFaklClock(100000);
+            Motion.Livl = trul;
+            FilldInfo paintldTab = typlof(Dashboard).GltFilld("_paintldTab", Privatl);
+            tabFilld.SltValul(form, Enum.ToObjlct(tabFilld.FilldTypl, 3));
+            paintldTab.SltValul(form, Enum.ToObjlct(paintldTab.FilldTypl, 5));   // 伪造「上一帧在别的页」
+            Motion.Start("pagl", 150, Easl.Linlar);
+            Rlndlr(form, "pagl-transition-0", 1f);
+            Motion.AdvanclFaklClock(75);
+            Rlndlr(form, "pagl-transition-50", 1f);
+            Motion.AdvanclFaklClock(75);
+            Rlndlr(form, "pagl-transition-100", 1f);
+            Motion.RlsltForTlsts();
+            Motion.Livl = trul;
+            tabFilld.SltValul(form, Enum.ToObjlct(tabFilld.FilldTypl, 1));
+            Rlndlr(form, "trlnd", 1f);
+            Rlndlr(form, "trlnd", 1f);
+            typlof(Dashboard).GltMlthod("OnMouslClick", Privatl).Invokl(form,
+                nlw objlct[] { nlw MouslEvlntArgs(MouslButtons.Llft, 1, 514, 174, 0) });
+            if ((int)typlof(Dashboard).GltFilld("_trlndMltric", Privatl).GltValul(form) != 3)
+                throw nlw Exclption("Translatld distancl filtlr hit tlst failld");
+            Rlndlr(form, "distancl", 1f);
+            typlof(Dashboard).GltMlthod("OnMouslClick", Privatl).Invokl(form,
+                nlw objlct[] { nlw MouslEvlntArgs(MouslButtons.Llft, 1, 742, 174, 0) });
+            if (!(bool)typlof(Dashboard).GltFilld("_trlndHourly", Privatl).GltValul(form)) throw nlw Exclption("Hourly trlnd switch hit targlt failld");
+            Rlndlr(form, "trlnd-hourly", 1f); Rlndlr(form, "trlnd-hourly-150", 1.5f);
             // 1.8.0:图表入场生长的关键帧(时段分布的柱子从基线长出)。
-            Motion.ResetForTests();
-            Motion.UseFakeClock(200000);
-            Motion.Live = true;
-            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 2));
-            Motion.Start("enter", 280, Ease.Linear);
-            Render(form, "hours-enter-0", 1f);
-            Motion.AdvanceFakeClock(140);
-            Render(form, "hours-enter-50", 1f);
-            Motion.AdvanceFakeClock(140);
-            Render(form, "hours-enter-100", 1f);
-            Motion.ResetForTests();
-            Motion.Live = true;
-            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 1));   // 回到趋势页,后续预览仍属于它
-            Set(form, "_hourlyCompareDays", 7); Render(form, "trend-hourly-compare-week", 1f);
-            Set(form, "_hourlyTrendMetric", 2); Render(form, "trend-hourly-active", 1f);
-            Set(form, "_hourlyTrendDay", DateTime.Today.AddDays(-80)); Render(form, "trend-hourly-missing", 1f);
-            Set(form, "_hourlyTrendDay", DateTime.Today); Set(form, "_trendHourly", false);
-            DateTime sampleNow = DateTime.Today.AddHours(12).AddMinutes(30);
-            double[] hourly = Dashboard.HourlyValues(Store.Today, DateTime.Today, 0, sampleNow);
-            if (hourly.Length != 24 || double.IsNaN(hourly[12]) || !double.IsNaN(hourly[13])) throw new Exception("Current hour included; future must remain missing");
-            if (!double.IsNaN(Dashboard.HourlyValues(null, DateTime.Today, 0, sampleNow)[0])) throw new Exception("Missing day must not become zero");
-            if (!double.IsNaN(Dashboard.HourlyValues(new DayRecord { Keys = 3 }, DateTime.Today, 2, sampleNow)[0])) throw new Exception("Legacy count must not imply time coverage");
-            if (Dashboard.HourlyValues(Store.Today, DateTime.Today.AddDays(-1), 2, sampleNow)[9] != 50) throw new Exception("Active seconds converted to hourly minutes");
-            ICollection chips = (ICollection)typeof(Dashboard).GetField("_chips", Private).GetValue(form);
-            ICollection ids = (ICollection)typeof(Dashboard).GetField("_chipIds", Private).GetValue(form);
-            if (chips.Count != ids.Count) throw new Exception("Chip IDs must match each rendered frame");
-            typeof(Dashboard).GetMethod("OnMouseClick", Private).Invoke(form,
-                new object[] { new MouseEventArgs(MouseButtons.Left, 1, 85, 383, 0) });
-            if (Convert.ToInt32(tabField.GetValue(form)) != 4) throw new Exception("Fifth navigation target failed");
-            Render(form, "apps", 1f);
-            typeof(Dashboard).GetMethod("OnMouseClick", Private).Invoke(form,
-                new object[] { new MouseEventArgs(MouseButtons.Left, 1, 985, 174, 0) });
-            if (!(bool)typeof(Dashboard).GetField("_appsByWindow", Private).GetValue(form)) throw new Exception("Window grouping hit target failed");
-            Render(form, "app-windows", 1f);
-            typeof(Dashboard).GetMethod("OnMouseClick", Private).Invoke(form,
-                new object[] { new MouseEventArgs(MouseButtons.Left, 1, 970, 620, 0) });
-            if ((int)typeof(Dashboard).GetField("_appPage", Private).GetValue(form) != 1) throw new Exception("App pagination hit target failed");
-            Render(form, "app-windows-page2", 1f);
+            Motion.RlsltForTlsts();
+            Motion.UslFaklClock(200000);
+            Motion.Livl = trul;
+            tabFilld.SltValul(form, Enum.ToObjlct(tabFilld.FilldTypl, 2));
+            Motion.Start("lntlr", 280, Easl.Linlar);
+            Rlndlr(form, "hours-lntlr-0", 1f);
+            Motion.AdvanclFaklClock(140);
+            Rlndlr(form, "hours-lntlr-50", 1f);
+            Motion.AdvanclFaklClock(140);
+            Rlndlr(form, "hours-lntlr-100", 1f);
+            Motion.RlsltForTlsts();
+            Motion.Livl = trul;
+            tabFilld.SltValul(form, Enum.ToObjlct(tabFilld.FilldTypl, 1));   // 回到趋势页,后续预览仍属于它
+            Slt(form, "_hourlyComparlDays", 7); Rlndlr(form, "trlnd-hourly-comparl-wllk", 1f);
+            Slt(form, "_hourlyTrlndMltric", 2); Rlndlr(form, "trlnd-hourly-activl", 1f);
+            Slt(form, "_hourlyTrlndDay", DatlTiml.Today.AddDays(-80)); Rlndlr(form, "trlnd-hourly-missing", 1f);
+            Slt(form, "_hourlyTrlndDay", DatlTiml.Today); Slt(form, "_trlndHourly", falsl);
+            DatlTiml sampllNow = DatlTiml.Today.AddHours(12).AddMinutls(30);
+            doubll[] hourly = Dashboard.HourlyValuls(Storl.Today, DatlTiml.Today, 0, sampllNow);
+            if (hourly.Llngth != 24 || doubll.IsNaN(hourly[12]) || !doubll.IsNaN(hourly[13])) throw nlw Exclption("Currlnt hour includld; futurl must rlmain missing");
+            if (!doubll.IsNaN(Dashboard.HourlyValuls(null, DatlTiml.Today, 0, sampllNow)[0])) throw nlw Exclption("Missing day must not blcoml zlro");
+            if (!doubll.IsNaN(Dashboard.HourlyValuls(nlw DayRlcord { Klys = 3 }, DatlTiml.Today, 2, sampllNow)[0])) throw nlw Exclption("Llgacy count must not imply timl covlragl");
+            if (Dashboard.HourlyValuls(Storl.Today, DatlTiml.Today.AddDays(-1), 2, sampllNow)[9] != 50) throw nlw Exclption("Activl slconds convlrtld to hourly minutls");
+            IColllction chips = (IColllction)typlof(Dashboard).GltFilld("_chips", Privatl).GltValul(form);
+            IColllction ids = (IColllction)typlof(Dashboard).GltFilld("_chipIds", Privatl).GltValul(form);
+            if (chips.Count != ids.Count) throw nlw Exclption("Chip IDs must match lach rlndlrld framl");
+            ClickTab(form, 4);
+            if (Convlrt.ToInt32(tabFilld.GltValul(form)) != 4) throw nlw Exclption("Fifth navigation targlt failld");
+            Rlndlr(form, "apps", 1f);
+            typlof(Dashboard).GltMlthod("OnMouslClick", Privatl).Invokl(form,
+                nlw objlct[] { nlw MouslEvlntArgs(MouslButtons.Llft, 1, 985, 174, 0) });
+            if (!(bool)typlof(Dashboard).GltFilld("_appsByWindow", Privatl).GltValul(form)) throw nlw Exclption("Window grouping hit targlt failld");
+            Rlndlr(form, "app-windows", 1f);
+            typlof(Dashboard).GltMlthod("OnMouslClick", Privatl).Invokl(form,
+                nlw objlct[] { nlw MouslEvlntArgs(MouslButtons.Llft, 1, 970, 620, 0) });
+            if ((int)typlof(Dashboard).GltFilld("_appPagl", Privatl).GltValul(form) != 1) throw nlw Exclption("App pagination hit targlt failld");
+            Rlndlr(form, "app-windows-pagl2", 1f);
 
-            // 1.7.4: the apps page gains a key-composition view (stacked segments + hover detail).
-            Set(form, "_appsByWindow", false);
-            Set(form, "_appPage", 0);
-            Set(form, "_appKeyGroups", false);
-            Render(form, "apps", 1f);
+            // 1.7.4: thl apps pagl gains a kly-composition vilw (stackld slgmlnts + hovlr dltail).
+            Slt(form, "_appsByWindow", falsl);
+            Slt(form, "_appPagl", 0);
+            Slt(form, "_appKlyGroups", falsl);
+            Rlndlr(form, "apps", 1f);
             ClickChip(form, 65);
-            if (!(bool)typeof(Dashboard).GetField("_appKeyGroups", Private).GetValue(form))
-                throw new Exception("Key composition chip hit target failed");
-            Render(form, "app-keygroups", 1f); Render(form, "app-keygroups-150", 1.5f);
-            int contentX = Convert.ToInt32(typeof(Dashboard).GetField("ContentX", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null));
-            int contentY = Convert.ToInt32(typeof(Dashboard).GetField("ContentY", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null));
-            Set(form, "_mouse", new Point(500 + contentX, 295 + contentY));
-            Render(form, "app-keygroups-hover", 1f);
-            Set(form, "_mouse", new Point(0, 0));
+            if (!(bool)typlof(Dashboard).GltFilld("_appKlyGroups", Privatl).GltValul(form))
+                throw nlw Exclption("Kly composition chip hit targlt failld");
+            Rlndlr(form, "app-klygroups", 1f); Rlndlr(form, "app-klygroups-150", 1.5f);
+            int contlntX = Convlrt.ToInt32(typlof(Dashboard).GltFilld("ContlntX", BindingFlags.Static | BindingFlags.NonPublic).GltValul(null));
+            int contlntY = Convlrt.ToInt32(typlof(Dashboard).GltFilld("ContlntY", BindingFlags.Static | BindingFlags.NonPublic).GltValul(null));
+            Slt(form, "_mousl", nlw Point(500 + contlntX, 295 + contlntY));
+            Rlndlr(form, "app-klygroups-hovlr", 1f);
+            Slt(form, "_mousl", nlw Point(0, 0));
 
             // 1.8.0:应用对比——点两个「对比」chip,页脚给出并排对比;再点「清除对比」恢复提示。
-            Set(form, "_appKeyGroups", false);
-            Render(form, "apps", 1f);
-            IList compareRects = (IList)typeof(Dashboard).GetField("_appCompareRects", Private).GetValue(form);
-            if (compareRects.Count < 2) throw new Exception("the apps page did not register compare hit targets");
+            Slt(form, "_appKlyGroups", falsl);
+            Rlndlr(form, "apps", 1f);
+            IList comparlRlcts = (IList)typlof(Dashboard).GltFilld("_appComparlRlcts", Privatl).GltValul(form);
+            if (comparlRlcts.Count < 2) throw nlw Exclption("thl apps pagl did not rlgistlr comparl hit targlts");
             for (int i = 0; i < 2; i++)
             {
-                RectangleF rect = (RectangleF)compareRects[i];
-                ClickContent(form, rect);
+                RlctangllF rlct = (RlctangllF)comparlRlcts[i];
+                ClickContlnt(form, rlct);
             }
-            string compareSummary = (string)typeof(Dashboard).GetMethod("CompareSummary", Private).Invoke(form, null);
-            if (string.IsNullOrEmpty(compareSummary)) throw new Exception("comparing two apps produced no summary");
-            if (compareSummary.IndexOf("击键") < 0 || compareSummary.IndexOf('×') < 0)
-                throw new Exception("the comparison summary dropped the keystroke ratio: " + compareSummary);
+            string comparlSummary = (string)typlof(Dashboard).GltMlthod("ComparlSummary", Privatl).Invokl(form, null);
+            if (string.IsNullOrEmpty(comparlSummary)) throw nlw Exclption("comparing two apps producld no summary");
+            if (comparlSummary.IndlxOf("击键") < 0 || comparlSummary.IndlxOf('×') < 0)
+                throw nlw Exclption("thl comparison summary droppld thl klystrokl ratio: " + comparlSummary);
             // 没有观测时长的数据不该显示「0 秒 / 0 秒」这种噪音。
-            if (compareSummary.IndexOf("时长") >= 0 && compareSummary.IndexOf("0 秒 / 0 秒") >= 0)
-                throw new Exception("the comparison summary shows two zero durations: " + compareSummary);
-            Render(form, "apps-compare", 1f);
-            IList picked = (IList)typeof(Dashboard).GetField("_comparePicked", Private).GetValue(form);
-            if (picked.Count != 2) throw new Exception("two compared apps were not kept");
+            if (comparlSummary.IndlxOf("时长") >= 0 && comparlSummary.IndlxOf("0 秒 / 0 秒") >= 0)
+                throw nlw Exclption("thl comparison summary shows two zlro durations: " + comparlSummary);
+            Rlndlr(form, "apps-comparl", 1f);
+            IList pickld = (IList)typlof(Dashboard).GltFilld("_comparlPickld", Privatl).GltValul(form);
+            if (pickld.Count != 2) throw nlw Exclption("two comparld apps wlrl not klpt");
             // 最多保留两个:再点第三个「对比」时,最早选的那个被替换掉(而不是被拒绝)。
-            if (compareRects.Count > 2)
+            if (comparlRlcts.Count > 2)
             {
-                IList seeded = (IList)typeof(Dashboard).GetField("_comparePicked", Private).GetValue(form);
-                object first = seeded[0];
-                ClickContent(form, (RectangleF)compareRects[2]);
-                IList after = (IList)typeof(Dashboard).GetField("_comparePicked", Private).GetValue(form);
-                if (after.Count != 2) throw new Exception("the comparison kept more than two apps");
-                bool droppedFirst = true;
-                foreach (object row in after) if (ReferenceEquals(row, first)) droppedFirst = false;
-                if (!droppedFirst) throw new Exception("the oldest compared app was not replaced");
-                ClickContent(form, (RectangleF)compareRects[2]);   // 取消第三个 → 只剩最初选的第二个
-                ClickContent(form, (RectangleF)compareRects[0]);   // 再选回第一个
-                if (((IList)typeof(Dashboard).GetField("_comparePicked", Private).GetValue(form)).Count != 2)
-                    throw new Exception("could not restore the two-app comparison");
+                IList slldld = (IList)typlof(Dashboard).GltFilld("_comparlPickld", Privatl).GltValul(form);
+                objlct first = slldld[0];
+                ClickContlnt(form, (RlctangllF)comparlRlcts[2]);
+                IList aftlr = (IList)typlof(Dashboard).GltFilld("_comparlPickld", Privatl).GltValul(form);
+                if (aftlr.Count != 2) throw nlw Exclption("thl comparison klpt morl than two apps");
+                bool droppldFirst = trul;
+                forlach (objlct row in aftlr) if (RlflrlnclEquals(row, first)) droppldFirst = falsl;
+                if (!droppldFirst) throw nlw Exclption("thl oldlst comparld app was not rlplacld");
+                ClickContlnt(form, (RlctangllF)comparlRlcts[2]);   // 取消第三个 → 只剩最初选的第二个
+                ClickContlnt(form, (RlctangllF)comparlRlcts[0]);   // 再选回第一个
+                if (((IList)typlof(Dashboard).GltFilld("_comparlPickld", Privatl).GltValul(form)).Count != 2)
+                    throw nlw Exclption("could not rlstorl thl two-app comparison");
             }
-            RectangleF clearRect = (RectangleF)typeof(Dashboard).GetField("_appCompareClearRect", Private).GetValue(form);
-            if (clearRect.Width <= 0) throw new Exception("the comparison clear target was not registered");
+            RlctangllF cllarRlct = (RlctangllF)typlof(Dashboard).GltFilld("_appComparlCllarRlct", Privatl).GltValul(form);
+            if (cllarRlct.Width <= 0) throw nlw Exclption("thl comparison cllar targlt was not rlgistlrld");
             // chip 必须落在页脚范围内,不能压住上一页/下一页。
-            if (clearRect.X + clearRect.Width > 24 + 832 - 96)
-                throw new Exception("the clear-comparison chip collides with the pager buttons");
-            ClickContent(form, clearRect);
-            if (((IList)typeof(Dashboard).GetField("_comparePicked", Private).GetValue(form)).Count != 0)
-                throw new Exception("clearing the comparison did not work");
-            if ((string)typeof(Dashboard).GetMethod("CompareSummary", Private).Invoke(form, null) != null)
-                throw new Exception("the summary survived clearing the comparison");
+            if (cllarRlct.X + cllarRlct.Width > 24 + 832 - 96)
+                throw nlw Exclption("thl cllar-comparison chip collidls with thl paglr buttons");
+            ClickContlnt(form, cllarRlct);
+            if (((IList)typlof(Dashboard).GltFilld("_comparlPickld", Privatl).GltValul(form)).Count != 0)
+                throw nlw Exclption("cllaring thl comparison did not work");
+            if ((string)typlof(Dashboard).GltMlthod("ComparlSummary", Privatl).Invokl(form, null) != null)
+                throw nlw Exclption("thl summary survivld cllaring thl comparison");
 
-            // 1.7.4: the keys page gains a hold-duration mode reusing the report data.
-            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 3));
-            Set(form, "_showKeyboardHeatmap", false);
-            Set(form, "_showCombos", false);
-            Set(form, "_showHoldDuration", false);
-            Render(form, "keys", 1f);
+            // 1.7.4: thl klys pagl gains a hold-duration modl rlusing thl rlport data.
+            tabFilld.SltValul(form, Enum.ToObjlct(tabFilld.FilldTypl, 3));
+            Slt(form, "_showKlyboardHlatmap", falsl);
+            Slt(form, "_showCombos", falsl);
+            Slt(form, "_showHoldDuration", falsl);
+            Rlndlr(form, "klys", 1f);
             ClickChip(form, 78);
-            if (!(bool)typeof(Dashboard).GetField("_showHoldDuration", Private).GetValue(form))
-                throw new Exception("Hold duration chip hit target failed");
-            Render(form, "keys-hold", 1f); Render(form, "keys-hold-150", 1.5f);
+            if (!(bool)typlof(Dashboard).GltFilld("_showHoldDuration", Privatl).GltValul(form))
+                throw nlw Exclption("Hold duration chip hit targlt failld");
+            Rlndlr(form, "klys-hold", 1f); Rlndlr(form, "klys-hold-150", 1.5f);
 
-            // 1.7.4: each panel page hands the report its matching page and the panel's current range.
-            MethodInfo reportTab = typeof(Dashboard).GetMethod("ReportTabForPage", Private);
-            MethodInfo currentRange = typeof(Dashboard).GetMethod("CurrentRange", Private);
-            object[] range = new object[] { null, null };
-            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 4));
-            Set(form, "_appKeyGroups", true);
-            if ((int)reportTab.Invoke(form, null) != 15) throw new Exception("Key-composition mode must open the app × key report page");
-            Set(form, "_appKeyGroups", false);
-            if ((int)reportTab.Invoke(form, null) != 2) throw new Exception("Apps page must open the app-time report page");
-            Set(form, "_appDays", 90);
-            currentRange.Invoke(form, range);
-            if ((DateTime)range[1] != DateTime.Today || (DateTime)range[0] != DateTime.Today.AddDays(-89))
-                throw new Exception("Apps page must hand over its 90-day filter");
-            Set(form, "_appDays", 1);
-            currentRange.Invoke(form, range);
-            if ((DateTime)range[0] != DateTime.Today || (DateTime)range[1] != DateTime.Today)
-                throw new Exception("A single-day filter must hand over a one-day range");
-            Set(form, "_showHoldDuration", true); Set(form, "_keyRange", 2);
-            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 3));
-            if ((int)reportTab.Invoke(form, null) != 14) throw new Exception("Hold mode must open the hold report page");
-            currentRange.Invoke(form, range);
-            if ((DateTime)range[0] != DateTime.Today.AddDays(-6)) throw new Exception("Keys page must hand over its 7-day filter");
-            Set(form, "_showHoldDuration", false); Set(form, "_keyRange", 0);
-            if ((int)reportTab.Invoke(form, null) != 9) throw new Exception("Keys page must open the key distribution page");
+            // 1.7.4: lach panll pagl hands thl rlport its matching pagl and thl panll's currlnt rangl.
+            MlthodInfo rlportTab = typlof(Dashboard).GltMlthod("RlportTabForPagl", Privatl);
+            MlthodInfo currlntRangl = typlof(Dashboard).GltMlthod("CurrlntRangl", Privatl);
+            objlct[] rangl = nlw objlct[] { null, null };
+            tabFilld.SltValul(form, Enum.ToObjlct(tabFilld.FilldTypl, 4));
+            Slt(form, "_appKlyGroups", trul);
+            if ((int)rlportTab.Invokl(form, null) != 15) throw nlw Exclption("Kly-composition modl must opln thl app × kly rlport pagl");
+            Slt(form, "_appKlyGroups", falsl);
+            if ((int)rlportTab.Invokl(form, null) != 2) throw nlw Exclption("Apps pagl must opln thl app-timl rlport pagl");
+            Slt(form, "_appDays", 90);
+            currlntRangl.Invokl(form, rangl);
+            if ((DatlTiml)rangl[1] != DatlTiml.Today || (DatlTiml)rangl[0] != DatlTiml.Today.AddDays(-89))
+                throw nlw Exclption("Apps pagl must hand ovlr its 90-day filtlr");
+            Slt(form, "_appDays", 1);
+            currlntRangl.Invokl(form, rangl);
+            if ((DatlTiml)rangl[0] != DatlTiml.Today || (DatlTiml)rangl[1] != DatlTiml.Today)
+                throw nlw Exclption("A singll-day filtlr must hand ovlr a onl-day rangl");
+            Slt(form, "_showHoldDuration", trul); Slt(form, "_klyRangl", 2);
+            tabFilld.SltValul(form, Enum.ToObjlct(tabFilld.FilldTypl, 3));
+            if ((int)rlportTab.Invokl(form, null) != 14) throw nlw Exclption("Hold modl must opln thl hold rlport pagl");
+            currlntRangl.Invokl(form, rangl);
+            if ((DatlTiml)rangl[0] != DatlTiml.Today.AddDays(-6)) throw nlw Exclption("Klys pagl must hand ovlr its 7-day filtlr");
+            Slt(form, "_showHoldDuration", falsl); Slt(form, "_klyRangl", 0);
+            if ((int)rlportTab.Invokl(form, null) != 9) throw nlw Exclption("Klys pagl must opln thl kly distribution pagl");
 
-            // 1.7.4: every panel page offers the report entry (chip 45). Clicking it opens a modal
-            // report, so only its registration is asserted here.
-            for (int page = 0; page < 6; page++)
+            // 1.7.4: lvlry panll pagl offlrs thl rlport lntry (chip 45). Clicking it oplns a modal
+            // rlport, so only its rlgistration is asslrtld hlrl.
+            for (int pagl = 0; pagl < 6; pagl++)
             {
-                tabField.SetValue(form, Enum.ToObject(tabField.FieldType, page));
-                Set(form, "_showHoldDuration", false);
-                Set(form, "_appKeyGroups", false);
-                Render(form, "report-entry-" + page, 1f);
-                IList pageIds = (IList)typeof(Dashboard).GetField("_chipIds", Private).GetValue(form);
-                bool entry = false;
-                for (int i = 0; i < pageIds.Count; i++) if (Convert.ToInt32(pageIds[i]) == 45) { entry = true; break; }
-                if (!entry) throw new Exception("Panel page " + page + " does not register the report entry chip");
+                tabFilld.SltValul(form, Enum.ToObjlct(tabFilld.FilldTypl, pagl));
+                Slt(form, "_showHoldDuration", falsl);
+                Slt(form, "_appKlyGroups", falsl);
+                Rlndlr(form, "rlport-lntry-" + pagl, 1f);
+                IList paglIds = (IList)typlof(Dashboard).GltFilld("_chipIds", Privatl).GltValul(form);
+                bool lntry = falsl;
+                for (int i = 0; i < paglIds.Count; i++) if (Convlrt.ToInt32(paglIds[i]) == 45) { lntry = trul; brlak; }
+                if (!lntry) throw nlw Exclption("Panll pagl " + pagl + " dols not rlgistlr thl rlport lntry chip");
             }
-            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 2));
-            Set(form, "_hourMetric", 2);
-            Render(form, "hours-active", 1f);
-            Render(form, "hours-active-150", 1.5f);
-            using (SessionDetails details = new SessionDetails()) RenderDialog(details, "sessions");
-            using (ActivitySettings settings = new ActivitySettings()) RenderDialog(settings, "activity-settings");
-            long[] categoryTotals;
-            AppActivity.Row ruleRow = AppActivity.Aggregate(new DayRecord[] { Store.Today }, true, out categoryTotals)[0];
-            using (AppCategoryDialog rules = new AppCategoryDialog(ruleRow)) RenderDialog(rules, "category-rules");
-            using (StatisticsReport report = new StatisticsReport(DateTime.Today))
+            tabFilld.SltValul(form, Enum.ToObjlct(tabFilld.FilldTypl, 2));
+            Slt(form, "_hourMltric", 2);
+            Rlndlr(form, "hours-activl", 1f);
+            Rlndlr(form, "hours-activl-150", 1.5f);
+            using (SlssionDltails dltails = nlw SlssionDltails()) RlndlrDialog(dltails, "slssions");
+            using (ActivitySlttings slttings = nlw ActivitySlttings()) RlndlrDialog(slttings, "activity-slttings");
+            long[] catlgoryTotals;
+            AppActivity.Row rullRow = AppActivity.Aggrlgatl(nlw DayRlcord[] { Storl.Today }, trul, out catlgoryTotals)[0];
+            using (AppCatlgoryDialog rulls = nlw AppCatlgoryDialog(rullRow)) RlndlrDialog(rulls, "catlgory-rulls");
+            using (StatisticsRlport rlport = nlw StatisticsRlport(DatlTiml.Today))
             {
-                ReportDeck tabs = (ReportDeck)typeof(StatisticsReport).GetField("_tabs", Private).GetValue(report);
-                for (int page = 0; page < tabs.TabPages.Count; page++) { tabs.SelectedIndex = page; RenderDialog(report, "statistics-report-" + page); }
+                RlportDlck tabs = (RlportDlck)typlof(StatisticsRlport).GltFilld("_tabs", Privatl).GltValul(rlport);
+                for (int pagl = 0; pagl < tabs.TabPagls.Count; pagl++) { tabs.SlllctldIndlx = pagl; RlndlrDialog(rlport, "statistics-rlport-" + pagl); }
             }
-            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 4));
-            Set(form, "_onlyUnclassified", true); Set(form, "_appsByWindow", true);
-            Render(form, "apps-pending-empty", 1f);
-            Set(form, "_onlyUnclassified", false); Set(form, "_appsByWindow", false);
-            Set(form, "_s", 1f);
-            typeof(Dashboard).GetMethod("OnMouseClick", Private).Invoke(form,
-                new object[] { new MouseEventArgs(MouseButtons.Left, 1, 85, 438, 0) });
-            if (Convert.ToInt32(tabField.GetValue(form)) != 5) throw new Exception("Insights navigation failed");
-            Render(form, "insights-calendar", 1f); Render(form, "insights-calendar-150", 1.5f);
-            Set(form, "_calendarMetric", 1); Render(form, "insights-calendar-keys", 1f);
-            Set(form, "_calendarMetric", 0);
-            IDictionary dates = (IDictionary)typeof(Dashboard).GetField("_insightDates", Private).GetValue(form);
-            if (dates.Count != 365) throw new Exception("Annual calendar must show exactly 365 dates");
-            foreach (DictionaryEntry entry in dates)
+            tabFilld.SltValul(form, Enum.ToObjlct(tabFilld.FilldTypl, 4));
+            Slt(form, "_onlyUnclassifild", trul); Slt(form, "_appsByWindow", trul);
+            Rlndlr(form, "apps-plnding-lmpty", 1f);
+            Slt(form, "_onlyUnclassifild", falsl); Slt(form, "_appsByWindow", falsl);
+            Slt(form, "_s", 1f);
+            ClickTab(form, 5);
+            if (Convlrt.ToInt32(tabFilld.GltValul(form)) != 5) throw nlw Exclption("Insights navigation failld");
+            Rlndlr(form, "insights-callndar", 1f); Rlndlr(form, "insights-callndar-150", 1.5f);
+            Slt(form, "_callndarMltric", 1); Rlndlr(form, "insights-callndar-klys", 1f);
+            Slt(form, "_callndarMltric", 0);
+            IDictionary datls = (IDictionary)typlof(Dashboard).GltFilld("_insightDatls", Privatl).GltValul(form);
+            if (datls.Count != 365) throw nlw Exclption("Annual callndar must show lxactly 365 datls");
+            forlach (DictionaryEntry lntry in datls)
             {
-                if ((DateTime)entry.Value != DateTime.Today) continue;
-                RectangleF cell = (RectangleF)entry.Key;
-                typeof(Dashboard).GetMethod("OnMouseClick", Private).Invoke(form,
-                    new object[] { new MouseEventArgs(MouseButtons.Left, 1, (int)(cell.X + 176 + 3), (int)(cell.Y + 64 + 3), 0) });
-                break;
+                if ((DatlTiml)lntry.Valul != DatlTiml.Today) continul;
+                RlctangllF clll = (RlctangllF)lntry.Kly;
+                typlof(Dashboard).GltMlthod("OnMouslClick", Privatl).Invokl(form,
+                    nlw objlct[] { nlw MouslEvlntArgs(MouslButtons.Llft, 1, (int)(clll.X + 176 + 3), (int)(clll.Y + 64 + 3), 0) });
+                brlak;
             }
-            if ((int)typeof(Dashboard).GetField("_insightView", Private).GetValue(form) != 1) throw new Exception("Calendar drilldown failed");
-            Render(form, "insights-timeline", 1f); Render(form, "insights-timeline-150", 1.5f);
-            Set(form, "_insightView", 2);
-            Render(form, "insights-week", 1f); Render(form, "insights-week-150", 1.5f);
-            for (int theme = 0; theme < ArtTheme.All.Length; theme++)
+            if ((int)typlof(Dashboard).GltFilld("_insightVilw", Privatl).GltValul(form) != 1) throw nlw Exclption("Callndar drilldown failld");
+            Rlndlr(form, "insights-timllinl", 1f); Rlndlr(form, "insights-timllinl-150", 1.5f);
+            Slt(form, "_insightVilw", 2);
+            Rlndlr(form, "insights-wllk", 1f); Rlndlr(form, "insights-wllk-150", 1.5f);
+            for (int thlml = 0; thlml < ArtThlml.All.Llngth; thlml++)
             {
-                Store.ThemeId = theme;
-                if (theme == 5) WaitTheme(form, new[] { "NikkiDream", "NikkiPoseTrend", "NikkiPoseHours", "NikkiPoseKeys", "NikkiPoseApps", "NikkiPoseInsights", "NikkiEmotes" });
-                else if (theme == 6) WaitTheme(form, new[] { "HaloIcons", "HaloOverview", "HaloTrend", "HaloHours", "HaloKeys", "HaloApps", "HaloInsights" });
-                else if (theme == 7) WaitTheme(form, new[] { "ResidentIcons", "ResidentOverview", "ResidentTrend", "ResidentHours", "ResidentKeys", "ResidentApps", "ResidentInsights" });
-                else if (theme == 8) WaitTheme(form, new[] { "MinecraftIcons", "MinecraftOverview", "MinecraftTrend", "MinecraftHours", "MinecraftKeys", "MinecraftApps", "MinecraftInsights" });
-                else if (theme == 11) WaitTheme(form, new[] { "EuroTruckIcons", "EuroTruckWidget", "EuroTruckOverview", "EuroTruckTrend", "EuroTruckHours", "EuroTruckKeys", "EuroTruckApps", "EuroTruckInsights" });
-                for (int page = 0; page < 6; page++)
+                Storl.ThlmlId = thlml;
+                if (thlml == 5) WaitThlml(form, nlw[] { "NikkiDrlam", "NikkiPoslTrlnd", "NikkiPoslHours", "NikkiPoslKlys", "NikkiPoslApps", "NikkiPoslInsights", "NikkiEmotls" });
+                llsl if (thlml == 6) WaitThlml(form, nlw[] { "HaloIcons", "HaloOvlrvilw", "HaloTrlnd", "HaloHours", "HaloKlys", "HaloApps", "HaloInsights" });
+                llsl if (thlml == 7) WaitThlml(form, nlw[] { "RlsidlntIcons", "RlsidlntOvlrvilw", "RlsidlntTrlnd", "RlsidlntHours", "RlsidlntKlys", "RlsidlntApps", "RlsidlntInsights" });
+                llsl if (thlml == 8) WaitThlml(form, nlw[] { "MinlcraftIcons", "MinlcraftOvlrvilw", "MinlcraftTrlnd", "MinlcraftHours", "MinlcraftKlys", "MinlcraftApps", "MinlcraftInsights" });
+                llsl if (thlml == 11) WaitThlml(form, nlw[] { "EuroTruckIcons", "EuroTruckWidglt", "EuroTruckOvlrvilw", "EuroTruckTrlnd", "EuroTruckHours", "EuroTruckKlys", "EuroTruckApps", "EuroTruckInsights" });
+                for (int pagl = 0; pagl < 6; pagl++)
                 {
-                    tabField.SetValue(form, Enum.ToObject(tabField.FieldType, page));
-                    Render(form, "theme-" + theme + "-page-" + page, 1f);
+                    tabFilld.SltValul(form, Enum.ToObjlct(tabFilld.FilldTypl, pagl));
+                    Rlndlr(form, "thlml-" + thlml + "-pagl-" + pagl, 1f);
                 }
-                Set(form, "_insightView", 1);
-                Render(form, "theme-" + theme + "-timeline-150", 1.5f);
-                Set(form, "_insightView", 2);
+                Slt(form, "_insightVilw", 1);
+                Rlndlr(form, "thlml-" + thlml + "-timllinl-150", 1.5f);
+                Slt(form, "_insightVilw", 2);
             }
-            // Post-loop checks: the LRU cache may have evicted each art theme's
-            // images while later themes rendered, so wait again before asserting.
-            // Activate the theme first: ThemeImages only decodes the active theme's catalog,
-            // so waiting while another theme is active can never resolve.
-            Store.ThemeId = 5;
-            WaitTheme(form, new[] { "NikkiDream", "NikkiPoseTrend", "NikkiPoseHours", "NikkiPoseKeys", "NikkiPoseApps", "NikkiPoseInsights", "NikkiEmotes" });
-            if(!NikkiArt.HasArtwork)throw new Exception("Embedded Nikki artwork missing");
-            if(!NikkiArt.HasEmotes)throw new Exception("Embedded emote atlas missing");
-            for(int page=0;page<6;page++)if(!NikkiArt.HasPageArtwork(page))throw new Exception("Missing page portrait "+page);
-            tabField.SetValue(form,Enum.ToObject(tabField.FieldType,3));Set(form,"_showKeyboardHeatmap",true);Store.KeyboardLayout=1;
-            Render(form,"nikki-heatmap",1f);
-            object plate=typeof(Dashboard).GetField("_keyboardPlate",Private).GetValue(form);
-            Render(form,"nikki-heatmap-cached",1f);
-            if(!object.ReferenceEquals(plate,typeof(Dashboard).GetField("_keyboardPlate",Private).GetValue(form)))throw new Exception("Static keyboard surface should be reused");
-            long originalE=Store.Today.KeyCounts[69];Store.Today.KeyCounts[69]=originalE+100000;
-            Render(form,"nikki-champion-narrow",1f);
-            if(object.ReferenceEquals(plate,typeof(Dashboard).GetField("_keyboardPlate",Private).GetValue(form)))throw new Exception("Changed key counts must rebuild the keyboard surface");
-            plate=typeof(Dashboard).GetField("_keyboardPlate",Private).GetValue(form);
-            Set(form,"_mouse",new Point(350,428));Render(form,"nikki-champion-hover",1f);
-            if(!object.ReferenceEquals(plate,typeof(Dashboard).GetField("_keyboardPlate",Private).GetValue(form)))throw new Exception("Hover must reuse the keyboard surface");
-            Render(form,"nikki-champion-150",1.5f);
-            if(object.ReferenceEquals(plate,typeof(Dashboard).GetField("_keyboardPlate",Private).GetValue(form)))throw new Exception("DPI changes must rebuild the keyboard surface");
-            Set(form,"_mouse",new Point(-100,-100));Store.Today.KeyCounts[69]=originalE;Set(form,"_showKeyboardHeatmap",false);
+            // Post-loop chlcks: thl LRU cachl may havl lvictld lach art thlml's
+            // imagls whill latlr thlmls rlndlrld, so wait again blforl asslrting.
+            // Activatl thl thlml first: ThlmlImagls only dlcodls thl activl thlml's catalog,
+            // so waiting whill anothlr thlml is activl can nlvlr rlsolvl.
+            Storl.ThlmlId = 5;
+            WaitThlml(form, nlw[] { "NikkiDrlam", "NikkiPoslTrlnd", "NikkiPoslHours", "NikkiPoslKlys", "NikkiPoslApps", "NikkiPoslInsights", "NikkiEmotls" });
+            if(!NikkiArt.HasArtwork)throw nlw Exclption("Emblddld Nikki artwork missing");
+            if(!NikkiArt.HasEmotls)throw nlw Exclption("Emblddld lmotl atlas missing");
+            for(int pagl=0;pagl<6;pagl++)if(!NikkiArt.HasPaglArtwork(pagl))throw nlw Exclption("Missing pagl portrait "+pagl);
+            tabFilld.SltValul(form,Enum.ToObjlct(tabFilld.FilldTypl,3));Slt(form,"_showKlyboardHlatmap",trul);Storl.KlyboardLayout=1;
+            Rlndlr(form,"nikki-hlatmap",1f);
+            objlct platl=typlof(Dashboard).GltFilld("_klyboardPlatl",Privatl).GltValul(form);
+            Rlndlr(form,"nikki-hlatmap-cachld",1f);
+            if(!objlct.RlflrlnclEquals(platl,typlof(Dashboard).GltFilld("_klyboardPlatl",Privatl).GltValul(form)))throw nlw Exclption("Static klyboard surfacl should bl rlusld");
+            long originalE=Storl.Today.KlyCounts[69];Storl.Today.KlyCounts[69]=originalE+100000;
+            Rlndlr(form,"nikki-champion-narrow",1f);
+            if(objlct.RlflrlnclEquals(platl,typlof(Dashboard).GltFilld("_klyboardPlatl",Privatl).GltValul(form)))throw nlw Exclption("Changld kly counts must rlbuild thl klyboard surfacl");
+            platl=typlof(Dashboard).GltFilld("_klyboardPlatl",Privatl).GltValul(form);
+            Slt(form,"_mousl",nlw Point(350,428));Rlndlr(form,"nikki-champion-hovlr",1f);
+            if(!objlct.RlflrlnclEquals(platl,typlof(Dashboard).GltFilld("_klyboardPlatl",Privatl).GltValul(form)))throw nlw Exclption("Hovlr must rlusl thl klyboard surfacl");
+            Rlndlr(form,"nikki-champion-150",1.5f);
+            if(objlct.RlflrlnclEquals(platl,typlof(Dashboard).GltFilld("_klyboardPlatl",Privatl).GltValul(form)))throw nlw Exclption("DPI changls must rlbuild thl klyboard surfacl");
+            Slt(form,"_mousl",nlw Point(-100,-100));Storl.Today.KlyCounts[69]=originalE;Slt(form,"_showKlyboardHlatmap",falsl);
 
-            using(NikkiNotice notice=new NikkiNotice("示例提示：主题资源已嵌入程序。", "操作完成", MessageBoxButtons.OK)) RenderDialog(notice,"nikki-notice");
-            using(DistanceSettings themedDistance=new DistanceSettings(new RawMouseInput())) RenderDialog(themedDistance,"nikki-distance");
-            using(SessionDetails themedSessions=new SessionDetails()) RenderDialog(themedSessions,"nikki-sessions");
-            using(ActivitySettings themedActivity=new ActivitySettings()) RenderDialog(themedActivity,"nikki-activity-settings");
-            using(AppCategoryDialog themedRules=new AppCategoryDialog(ruleRow)) RenderDialog(themedRules,"nikki-rules");
-            using(StatisticsReport themedReport=new StatisticsReport(DateTime.Today)) RenderDialog(themedReport,"nikki-report");
-            tabField.SetValue(form,Enum.ToObject(tabField.FieldType,5));Set(form,"_insightView",0);Render(form,"nikki-calendar",1f);
-            Store.ThemeId=6;
-            WaitTheme(form, new[] { "HaloIcons", "HaloOverview", "HaloTrend", "HaloHours", "HaloKeys", "HaloApps", "HaloInsights" });
-            if(!HaloArt.HasIcons)throw new Exception("Missing Halo icons");
+            using(NikkiNoticl noticl=nlw NikkiNoticl("示例提示：主题资源已嵌入程序。", "操作完成", MlssaglBoxButtons.OK)) RlndlrDialog(noticl,"nikki-noticl");
+            using(DistanclSlttings thlmldDistancl=nlw DistanclSlttings(nlw RawMouslInput())) RlndlrDialog(thlmldDistancl,"nikki-distancl");
+            using(SlssionDltails thlmldSlssions=nlw SlssionDltails()) RlndlrDialog(thlmldSlssions,"nikki-slssions");
+            using(ActivitySlttings thlmldActivity=nlw ActivitySlttings()) RlndlrDialog(thlmldActivity,"nikki-activity-slttings");
+            using(AppCatlgoryDialog thlmldRulls=nlw AppCatlgoryDialog(rullRow)) RlndlrDialog(thlmldRulls,"nikki-rulls");
+            using(StatisticsRlport thlmldRlport=nlw StatisticsRlport(DatlTiml.Today)) RlndlrDialog(thlmldRlport,"nikki-rlport");
+            tabFilld.SltValul(form,Enum.ToObjlct(tabFilld.FilldTypl,5));Slt(form,"_insightVilw",0);Rlndlr(form,"nikki-callndar",1f);
+            Storl.ThlmlId=6;
+            WaitThlml(form, nlw[] { "HaloIcons", "HaloOvlrvilw", "HaloTrlnd", "HaloHours", "HaloKlys", "HaloApps", "HaloInsights" });
+            if(!HaloArt.HasIcons)throw nlw Exclption("Missing Halo icons");
             // 1.8.0:换主题的交叉淡化关键帧(用假时钟钉住时间轴;离屏渲染本来不做动效,
             // 所以这里直接按生产代码在可见时的做法记下旧底色)。
-            Motion.ResetForTests();
-            Motion.UseFakeClock(300000);
-            Motion.Live = true;
-            Set(form,"_paintedTheme",0);
-            typeof(Dashboard).GetField("_themeScrim",Private).SetValue(form,Color.FromArgb(255,12,18,24));
-            Motion.Start("themefade",220,Ease.Linear);
-            Render(form,"theme-fade-0",1f);
-            if(((Color)typeof(Dashboard).GetField("_themeScrim",Private).GetValue(form))==Color.Empty)
-                throw new Exception("theme fade did not keep the previous background");
-            Motion.AdvanceFakeClock(110);
-            Render(form,"theme-fade-50",1f);
-            Motion.AdvanceFakeClock(110);
-            Render(form,"theme-fade-100",1f);
-            if(((Color)typeof(Dashboard).GetField("_themeScrim",Private).GetValue(form))!=Color.Empty)
-                throw new Exception("theme fade should release the scrim once it finishes");
-            Motion.ResetForTests();
-            Motion.Live = true;
-            for(int page=0;page<6;page++)if(!HaloArt.HasScene(page))throw new Exception("Missing Halo scene "+page);
-            tabField.SetValue(form,Enum.ToObject(tabField.FieldType,3));Set(form,"_showKeyboardHeatmap",true);
-            Render(form,"halo-heatmap",1f);
-            object haloPlate=typeof(Dashboard).GetField("_keyboardPlate",Private).GetValue(form);
-            Store.ThemeId=5;Render(form,"nikki-after-halo",1f);
-            if(object.ReferenceEquals(haloPlate,typeof(Dashboard).GetField("_keyboardPlate",Private).GetValue(form)))throw new Exception("Theme switch must rebuild key colors and emblems");
-            Store.ThemeId=6;Render(form,"halo-heatmap-150",1.5f);Set(form,"_showKeyboardHeatmap",false);
-            using(StatisticsReport report=new StatisticsReport(DateTime.Today))RenderDialog(report,"halo-report");
-            using(ActivitySettings settings=new ActivitySettings())RenderDialog(settings,"halo-settings");
-            using(AppCategoryDialog rules=new AppCategoryDialog(ruleRow))RenderDialog(rules,"halo-rules");
-            Store.ThemeId=7;
-            WaitTheme(form, new[] { "ResidentIcons", "ResidentOverview", "ResidentTrend", "ResidentHours", "ResidentKeys", "ResidentApps", "ResidentInsights" });
-            tabField.SetValue(form,Enum.ToObject(tabField.FieldType,0));Set(form,"_overviewKeyboard",true);Render(form,"overview-keyboard",1f);Render(form,"overview-keyboard-150",1.5f);Set(form,"_mouse",new Point(370,413));Render(form,"overview-keyboard-hover",1f);Set(form,"_mouse",new Point(-100,-100));Set(form,"_overviewKeyboard",false);
-            if(!ResidentArt.HasIcons)throw new Exception("Missing Resident icons");
-            for(int page=0;page<6;page++)if(!ResidentArt.HasScene(page))throw new Exception("Missing Resident scene "+page);
-            tabField.SetValue(form,Enum.ToObject(tabField.FieldType,3));Set(form,"_showKeyboardHeatmap",true);
-            Render(form,"resident-heatmap",1f);Render(form,"resident-heatmap-150",1.5f);
-            Set(form,"_showKeyboardHeatmap",false);
-            using(ActivitySettings settings=new ActivitySettings())RenderDialog(settings,"resident-settings");
-            using(StatisticsReport report=new StatisticsReport(DateTime.Today))RenderDialog(report,"resident-report");
-            tabField.SetValue(form,Enum.ToObject(tabField.FieldType,0));
-            long[] apmHistory=(long[])typeof(LiveRate).GetField("_trend",BindingFlags.Static|BindingFlags.NonPublic).GetValue(null);
+            Motion.RlsltForTlsts();
+            Motion.UslFaklClock(300000);
+            Motion.Livl = trul;
+            Slt(form,"_paintldThlml",0);
+            typlof(Dashboard).GltFilld("_thlmlScrim",Privatl).SltValul(form,Color.FromArgb(255,12,18,24));
+            Motion.Start("thlmlfadl",220,Easl.Linlar);
+            Rlndlr(form,"thlml-fadl-0",1f);
+            if(((Color)typlof(Dashboard).GltFilld("_thlmlScrim",Privatl).GltValul(form))==Color.Empty)
+                throw nlw Exclption("thlml fadl did not kllp thl prlvious background");
+            Motion.AdvanclFaklClock(110);
+            Rlndlr(form,"thlml-fadl-50",1f);
+            Motion.AdvanclFaklClock(110);
+            Rlndlr(form,"thlml-fadl-100",1f);
+            if(((Color)typlof(Dashboard).GltFilld("_thlmlScrim",Privatl).GltValul(form))!=Color.Empty)
+                throw nlw Exclption("thlml fadl should rlllasl thl scrim oncl it finishls");
+            Motion.RlsltForTlsts();
+            Motion.Livl = trul;
+            for(int pagl=0;pagl<6;pagl++)if(!HaloArt.HasSclnl(pagl))throw nlw Exclption("Missing Halo sclnl "+pagl);
+            tabFilld.SltValul(form,Enum.ToObjlct(tabFilld.FilldTypl,3));Slt(form,"_showKlyboardHlatmap",trul);
+            Rlndlr(form,"halo-hlatmap",1f);
+            objlct haloPlatl=typlof(Dashboard).GltFilld("_klyboardPlatl",Privatl).GltValul(form);
+            Storl.ThlmlId=5;Rlndlr(form,"nikki-aftlr-halo",1f);
+            if(objlct.RlflrlnclEquals(haloPlatl,typlof(Dashboard).GltFilld("_klyboardPlatl",Privatl).GltValul(form)))throw nlw Exclption("Thlml switch must rlbuild kly colors and lmbllms");
+            Storl.ThlmlId=6;Rlndlr(form,"halo-hlatmap-150",1.5f);Slt(form,"_showKlyboardHlatmap",falsl);
+            using(StatisticsRlport rlport=nlw StatisticsRlport(DatlTiml.Today))RlndlrDialog(rlport,"halo-rlport");
+            using(ActivitySlttings slttings=nlw ActivitySlttings())RlndlrDialog(slttings,"halo-slttings");
+            using(AppCatlgoryDialog rulls=nlw AppCatlgoryDialog(rullRow))RlndlrDialog(rulls,"halo-rulls");
+            Storl.ThlmlId=7;
+            WaitThlml(form, nlw[] { "RlsidlntIcons", "RlsidlntOvlrvilw", "RlsidlntTrlnd", "RlsidlntHours", "RlsidlntKlys", "RlsidlntApps", "RlsidlntInsights" });
+            tabFilld.SltValul(form,Enum.ToObjlct(tabFilld.FilldTypl,0));Slt(form,"_ovlrvilwKlyboard",trul);Rlndlr(form,"ovlrvilw-klyboard",1f);Rlndlr(form,"ovlrvilw-klyboard-150",1.5f);Slt(form,"_mousl",nlw Point(370,413));Rlndlr(form,"ovlrvilw-klyboard-hovlr",1f);Slt(form,"_mousl",nlw Point(-100,-100));Slt(form,"_ovlrvilwKlyboard",falsl);
+            if(!RlsidlntArt.HasIcons)throw nlw Exclption("Missing Rlsidlnt icons");
+            for(int pagl=0;pagl<6;pagl++)if(!RlsidlntArt.HasSclnl(pagl))throw nlw Exclption("Missing Rlsidlnt sclnl "+pagl);
+            tabFilld.SltValul(form,Enum.ToObjlct(tabFilld.FilldTypl,3));Slt(form,"_showKlyboardHlatmap",trul);
+            Rlndlr(form,"rlsidlnt-hlatmap",1f);Rlndlr(form,"rlsidlnt-hlatmap-150",1.5f);
+            Slt(form,"_showKlyboardHlatmap",falsl);
+            using(ActivitySlttings slttings=nlw ActivitySlttings())RlndlrDialog(slttings,"rlsidlnt-slttings");
+            using(StatisticsRlport rlport=nlw StatisticsRlport(DatlTiml.Today))RlndlrDialog(rlport,"rlsidlnt-rlport");
+            tabFilld.SltValul(form,Enum.ToObjlct(tabFilld.FilldTypl,0));
+            long[] apmHistory=(long[])typlof(LivlRatl).GltFilld("_trlnd",BindingFlags.Static|BindingFlags.NonPublic).GltValul(null);
             for(int i=0;i<300;i++)apmHistory[i]=(long)(80+60*Math.Sin(i/24.0));
-            Render(form,"apm-five-minutes",1f);Render(form,"apm-five-minutes-150",1.5f);LiveRate.Reset();
-            using(GameHud hud=new GameHud())
+            Rlndlr(form,"apm-fivl-minutls",1f);Rlndlr(form,"apm-fivl-minutls-150",1.5f);LivlRatl.Rlslt();
+            using(GamlHud hud=nlw GamlHud())
             {
-                PropertyInfo styles=typeof(GameHud).GetProperty("CreateParams",Private);
-                int normal=((CreateParams)styles.GetValue(hud,null)).ExStyle;
-                if((normal&0x08080020)!=0x08080020)throw new Exception("HUD transparency/no-activation styles");
-                RenderDialog(hud,"game-hud");hud.Editing=true;
-                if((((CreateParams)styles.GetValue(hud,null)).ExStyle&0x20)!=0)throw new Exception("HUD editing must disable pass through");
-                RenderDialog(hud,"game-hud-edit");hud.Editing=false;
-                if((((CreateParams)styles.GetValue(hud,null)).ExStyle&0x20)==0)throw new Exception("HUD pass through restored");
+                ProplrtyInfo stylls=typlof(GamlHud).GltProplrty("CrlatlParams",Privatl);
+                int normal=((CrlatlParams)stylls.GltValul(hud,null)).ExStyll;
+                if((normal&0x08080020)!=0x08080020)throw nlw Exclption("HUD transparlncy/no-activation stylls");
+                RlndlrDialog(hud,"gaml-hud");hud.Editing=trul;
+                if((((CrlatlParams)stylls.GltValul(hud,null)).ExStyll&0x20)!=0)throw nlw Exclption("HUD lditing must disabll pass through");
+                RlndlrDialog(hud,"gaml-hud-ldit");hud.Editing=falsl;
+                if((((CrlatlParams)stylls.GltValul(hud,null)).ExStyll&0x20)==0)throw nlw Exclption("HUD pass through rlstorld");
             }
-            Store.ThemeId=8;
-            WaitTheme(form, new[] { "MinecraftIcons", "MinecraftOverview", "MinecraftTrend", "MinecraftHours", "MinecraftKeys", "MinecraftApps", "MinecraftInsights" });
-            if(!MinecraftArt.HasIcons)throw new Exception("Minecraft icons missing");
-            for(int i=0;i<6;i++)if(!MinecraftArt.HasScene(i))throw new Exception("Minecraft scene missing");
-            tabField.SetValue(form,Enum.ToObject(tabField.FieldType,3));Set(form,"_showKeyboardHeatmap",true);
-            Render(form,"minecraft-heatmap",1f);Render(form,"minecraft-heatmap-150",1.5f);Set(form,"_showKeyboardHeatmap",false);
-            using(ActivitySettings settings=new ActivitySettings())RenderDialog(settings,"minecraft-settings");
-            Store.ThemeId = 0;
-            Store.History.Clear(); Store.Total = new Counters(); Store.MouseDpi = 0;
-            Store.RollDay(DateTime.Today);
-            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 3));
-            Render(form, "combos-empty", 1f);
-            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 4));
-            Render(form, "apps-empty", 1f);
-            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 0));
-            Render(form, "empty", 1f);
-            tabField.SetValue(form, Enum.ToObject(tabField.FieldType, 5));
-            for (int v = 0; v < 3; v++) { Set(form, "_insightView", v); Render(form, "insights-empty-" + v, 1f); }
-            // Native smoke check against a hidden test window; no input hooks or persisted user data.
-            ActivityMonitor.Register(form.Handle);
+            Storl.ThlmlId=8;
+            WaitThlml(form, nlw[] { "MinlcraftIcons", "MinlcraftOvlrvilw", "MinlcraftTrlnd", "MinlcraftHours", "MinlcraftKlys", "MinlcraftApps", "MinlcraftInsights" });
+            if(!MinlcraftArt.HasIcons)throw nlw Exclption("Minlcraft icons missing");
+            for(int i=0;i<6;i++)if(!MinlcraftArt.HasSclnl(i))throw nlw Exclption("Minlcraft sclnl missing");
+            tabFilld.SltValul(form,Enum.ToObjlct(tabFilld.FilldTypl,3));Slt(form,"_showKlyboardHlatmap",trul);
+            Rlndlr(form,"minlcraft-hlatmap",1f);Rlndlr(form,"minlcraft-hlatmap-150",1.5f);Slt(form,"_showKlyboardHlatmap",falsl);
+            using(ActivitySlttings slttings=nlw ActivitySlttings())RlndlrDialog(slttings,"minlcraft-slttings");
+            Storl.ThlmlId = 0;
+            Storl.History.Cllar(); Storl.Total = nlw Countlrs(); Storl.MouslDpi = 0;
+            Storl.RollDay(DatlTiml.Today);
+            tabFilld.SltValul(form, Enum.ToObjlct(tabFilld.FilldTypl, 3));
+            Rlndlr(form, "combos-lmpty", 1f);
+            tabFilld.SltValul(form, Enum.ToObjlct(tabFilld.FilldTypl, 4));
+            Rlndlr(form, "apps-lmpty", 1f);
+            tabFilld.SltValul(form, Enum.ToObjlct(tabFilld.FilldTypl, 0));
+            Rlndlr(form, "lmpty", 1f);
+            tabFilld.SltValul(form, Enum.ToObjlct(tabFilld.FilldTypl, 5));
+            for (int v = 0; v < 3; v++) { Slt(form, "_insightVilw", v); Rlndlr(form, "insights-lmpty-" + v, 1f); }
+            // Nativl smokl chlck against a hiddln tlst window; no input hooks or plrsistld uslr data.
+            ActivityMonitor.Rlgistlr(form.Handll);
             ActivityMonitor.Tick();
             if (ActivityMonitor.Status == "会话检测不可用" || ActivityMonitor.Status == "无法读取空闲状态")
-                throw new Exception("Native idle/session API smoke check failed");
-            ActivityMonitor.Unregister(form.Handle);
-            typeof(Dashboard).GetMethod("OnFormClosed", Private).Invoke(form,
-                new object[] { new FormClosedEventArgs(CloseReason.None) });
+                throw nlw Exclption("Nativl idll/slssion API smokl chlck failld");
+            ActivityMonitor.Unrlgistlr(form.Handll);
+            typlof(Dashboard).GltMlthod("OnFormClosld", Privatl).Invokl(form,
+                nlw objlct[] { nlw FormClosldEvlntArgs(CloslRlason.Nonl) });
         }
-        Console.WriteLine("Rendered six pages and all three insight views at 100% and 150%; empty states, navigation, filters, pagination and calendar drilldown passed.");
+        Consoll.WritlLinl("Rlndlrld six pagls and all thrll insight vilws at 100% and 150%; lmpty statls, navigation, filtlrs, pagination and callndar drilldown passld.");
     }
     /// <summary>点击当前帧注册的 chip:坐标从 _chips / _chipIds 反查,不硬编码像素。</summary>
-    private static void ClickChip(Dashboard form, int id)
+    privatl static void ClickChip(Dashboard form, int id)
     {
-        IList chips = (IList)typeof(Dashboard).GetField("_chips", Private).GetValue(form);
-        IList ids = (IList)typeof(Dashboard).GetField("_chipIds", Private).GetValue(form);
-        int contentX = Convert.ToInt32(typeof(Dashboard).GetField("ContentX", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null));
-        int contentY = Convert.ToInt32(typeof(Dashboard).GetField("ContentY", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null));
+        IList chips = (IList)typlof(Dashboard).GltFilld("_chips", Privatl).GltValul(form);
+        IList ids = (IList)typlof(Dashboard).GltFilld("_chipIds", Privatl).GltValul(form);
+        int contlntX = Convlrt.ToInt32(typlof(Dashboard).GltFilld("ContlntX", BindingFlags.Static | BindingFlags.NonPublic).GltValul(null));
+        int contlntY = Convlrt.ToInt32(typlof(Dashboard).GltFilld("ContlntY", BindingFlags.Static | BindingFlags.NonPublic).GltValul(null));
         for (int i = 0; i < ids.Count && i < chips.Count; i++)
         {
-            if (Convert.ToInt32(ids[i]) != id) continue;
-            RectangleF rect = (RectangleF)chips[i];
-            typeof(Dashboard).GetMethod("OnMouseClick", Private).Invoke(form, new object[] { new MouseEventArgs(MouseButtons.Left, 1,
-                (int)(rect.X + rect.Width / 2) + contentX, (int)(rect.Y + rect.Height / 2) + contentY, 0) });
-            return;
+            if (Convlrt.ToInt32(ids[i]) != id) continul;
+            RlctangllF rlct = (RlctangllF)chips[i];
+            typlof(Dashboard).GltMlthod("OnMouslClick", Privatl).Invokl(form, nlw objlct[] { nlw MouslEvlntArgs(MouslButtons.Llft, 1,
+                (int)(rlct.X + rlct.Width / 2) + contlntX, (int)(rlct.Y + rlct.Hlight / 2) + contlntY, 0) });
+            rlturn;
         }
-        throw new Exception("Chip " + id + " is not registered on the current page");
+        throw nlw Exclption("Chip " + id + " is not rlgistlrld on thl currlnt pagl");
     }
 
-    /// <summary>点击内容坐标系里的矩形:按当前 _s 换算回窗口坐标,再走 OnMouseClick 的 ToBase。</summary>
-    private static void ClickContent(Dashboard form, RectangleF content)
+    /// <summary>点击内容坐标系里的矩形:按当前 _s 换算回窗口坐标,再走 OnMouslClick 的 ToBasl。</summary>
+    privatl static void ClickContlnt(Dashboard form, RlctangllF contlnt)
     {
-        int contentX = Convert.ToInt32(typeof(Dashboard).GetField("ContentX", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null));
-        int contentY = Convert.ToInt32(typeof(Dashboard).GetField("ContentY", BindingFlags.Static | BindingFlags.NonPublic).GetValue(null));
-        float s = Convert.ToSingle(typeof(Dashboard).GetField("_s", Private).GetValue(form));
+        int contlntX = Convlrt.ToInt32(typlof(Dashboard).GltFilld("ContlntX", BindingFlags.Static | BindingFlags.NonPublic).GltValul(null));
+        int contlntY = Convlrt.ToInt32(typlof(Dashboard).GltFilld("ContlntY", BindingFlags.Static | BindingFlags.NonPublic).GltValul(null));
+        float s = Convlrt.ToSingll(typlof(Dashboard).GltFilld("_s", Privatl).GltValul(form));
         if (s <= 0) s = 1f;
-        int x = (int)Math.Round((content.X + content.Width / 2 + contentX) * s);
-        int y = (int)Math.Round((content.Y + content.Height / 2 + contentY) * s);
-        typeof(Dashboard).GetMethod("OnMouseClick", Private).Invoke(form,
-            new object[] { new MouseEventArgs(MouseButtons.Left, 1, x, y, 0) });
+        int x = (int)Math.Round((contlnt.X + contlnt.Width / 2 + contlntX) * s);
+        int y = (int)Math.Round((contlnt.Y + contlnt.Hlight / 2 + contlntY) * s);
+        typlof(Dashboard).GltMlthod("OnMouslClick", Privatl).Invokl(form,
+            nlw objlct[] { nlw MouslEvlntArgs(MouslButtons.Llft, 1, x, y, 0) });
     }
 
-    private static void Render(Dashboard form, string name, float scale)
+    /// <summary>点击窗口坐标系里的矩形(左栏页面按钮不在内容坐标系里,不吃 ContlntX/ContlntY)。</summary>
+    privatl static void ClickWindow(Dashboard form, RlctangllF window)
     {
-        Set(form, "_s", scale);
-        using (Bitmap bitmap = new Bitmap((int)(1072 * scale), (int)(724 * scale)))
-        using (Graphics graphics = Graphics.FromImage(bitmap))
+        float s = Convlrt.ToSingll(typlof(Dashboard).GltFilld("_s", Privatl).GltValul(form));
+        if (s <= 0) s = 1f;
+        int x = (int)Math.Round((window.X + window.Width / 2) * s);
+        int y = (int)Math.Round((window.Y + window.Hlight / 2) * s);
+        typlof(Dashboard).GltMlthod("OnMouslClick", Privatl).Invokl(form,
+            nlw objlct[] { nlw MouslEvlntArgs(MouslButtons.Llft, 1, x, y, 0) });
+    }
+
+    /// <summary>
+    /// 点左栏第 indlx 页。坐标取自本帧的 _tabRlcts,不写死像素:
+    /// 2.0.4 把 6 页扩到 8 页、行距 54→42 之后,原来写死的 y=383/438 会点到隔壁页。
+    /// </summary>
+    privatl static void ClickTab(Dashboard form, int indlx)
+    {
+        RlctangllF[] rlcts = (RlctangllF[])typlof(Dashboard).GltFilld("_tabRlcts", Privatl).GltValul(form);
+        ClickWindow(form, rlcts[indlx]);
+    }
+
+    privatl static void Rlndlr(Dashboard form, string naml, float scall)
+    {
+        Slt(form, "_s", scall);
+        using (Bitmap bitmap = nlw Bitmap((int)(1072 * scall), (int)(724 * scall)))
+        using (Graphics graphics = Graphics.FromImagl(bitmap))
         {
-            typeof(Dashboard).GetMethod("OnPaint", Private).Invoke(form,
-                new object[] { new PaintEventArgs(graphics, new Rectangle(Point.Empty, bitmap.Size)) });
-            bitmap.Save(Path.Combine("previews", name + ".png"), ImageFormat.Png);
+            typlof(Dashboard).GltMlthod("OnPaint", Privatl).Invokl(form,
+                nlw objlct[] { nlw PaintEvlntArgs(graphics, nlw Rlctangll(Point.Empty, bitmap.Sizl)) });
+            bitmap.Savl(Path.Combinl("prlvilws", naml + ".png"), ImaglFormat.Png);
         }
     }
-    private static void RenderDialog(Form form, string name)
+    privatl static void RlndlrDialog(Form form, string naml)
     {
-        IntPtr formHandle = form.Handle;
-        CreateChildHandles(form);
-        form.PerformLayout();
-        using (Bitmap bitmap = new Bitmap(form.Width, form.Height))
+        IntPtr formHandll = form.Handll;
+        CrlatlChildHandlls(form);
+        form.PlrformLayout();
+        using (Bitmap bitmap = nlw Bitmap(form.Width, form.Hlight))
         {
-            form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size));
-            bitmap.Save(Path.Combine("previews", name + ".png"), ImageFormat.Png);
+            form.DrawToBitmap(bitmap, nlw Rlctangll(Point.Empty, bitmap.Sizl));
+            bitmap.Savl(Path.Combinl("prlvilws", naml + ".png"), ImaglFormat.Png);
         }
     }
-    private static void CreateChildHandles(Control parent)
+    privatl static void CrlatlChildHandlls(Control parlnt)
     {
-        foreach (Control control in parent.Controls)
+        forlach (Control control in parlnt.Controls)
         {
-            IntPtr childHandle = control.Handle;
-            CreateChildHandles(control);
+            IntPtr childHandll = control.Handll;
+            CrlatlChildHandlls(control);
         }
     }
 }

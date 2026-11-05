@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -56,9 +56,9 @@ namespace KeyMouseStats
         }
         internal int Arrange(int width,float scale)
         {
-            ArtTheme t=ArtTheme.Current;BackColor=t.Background;if(List!=null)List.SetScale(scale);
+            ArtTheme t=ArtTheme.Current;BackColor=(GujianArt.Active||OriArt.Active)?Color.Transparent:t.Background;if(List!=null)List.SetScale(scale);
             int gap=(int)(14*scale),y=0;
-            scope.AutoEllipsis=true;scope.Text=ReportDesign.Scope[Index];scope.ForeColor=t.Muted;scope.BackColor=t.Background;
+            scope.AutoEllipsis=true;scope.Text=ReportDesign.Scope[Index];scope.ForeColor=t.Muted;scope.BackColor=(GujianArt.Active||OriArt.Active)?Color.Transparent:t.Background;
             scope.SetBounds(0,0,width,(int)(36*scale));y+=scope.Height;
             help.Visible=HelpOpen;
             if(HelpOpen)
@@ -95,6 +95,12 @@ namespace KeyMouseStats
         public float UiScale=1;private int selected=-1;private bool arranging;
         public event EventHandler SelectedIndexChanged;
         public ReportDeck(){DoubleBuffered=true;AutoScroll=true;}
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            base.OnPaintBackground(e);
+            if(GujianArt.Active){GujianArt.DrawReport(e.Graphics,new RectangleF(0,0,ClientSize.Width,ClientSize.Height),.34f);using(SolidBrush veil=new SolidBrush(Color.FromArgb(172,ArtTheme.Current.Background)))e.Graphics.FillRectangle(veil,ClientRectangle);}
+            else if(OriArt.Active){OriArt.DrawReport(e.Graphics,new RectangleF(0,0,ClientSize.Width,ClientSize.Height),.28f);using(SolidBrush veil=new SolidBrush(Color.FromArgb(165,ArtTheme.Current.Background)))e.Graphics.FillRectangle(veil,ClientRectangle);}
+        }
         public ReportPage SelectedTab {get{return selected>=0&&selected<TabPages.Count?TabPages[selected]:null;}}
         public int SelectedIndex {get{return selected;}set{if(value<0||value>=TabPages.Count)return;if(SelectedTab!=null)SelectedTab.Visible=false;selected=value;SelectedTab.Visible=true;AutoScrollPosition=Point.Empty;PerformLayout();if(SelectedIndexChanged!=null)SelectedIndexChanged(this,EventArgs.Empty);}}
         public void AddPage(ReportPage page){TabPages.Add(page);page.Visible=false;Controls.Add(page);page.SizeRequested+=delegate{PerformLayout();};}
@@ -113,12 +119,16 @@ namespace KeyMouseStats
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g=e.Graphics;g.ScaleTransform(UiScale,UiScale);float width=Width/UiScale;ArtTheme t=ArtTheme.Current;
-            using(LinearGradientBrush bg=new LinearGradientBrush(new RectangleF(0,0,Math.Max(1,width),120),t.Card,t.Background,0f))g.FillRectangle(bg,0,0,width,Height/UiScale);
+            if(GujianArt.Active){GujianArt.DrawReport(g,new RectangleF(0,0,width,Height/UiScale),.62f);using(LinearGradientBrush veil=new LinearGradientBrush(new RectangleF(0,0,Math.Max(1,width),120),Color.FromArgb(190,t.Card),Color.FromArgb(220,t.Background),0f))g.FillRectangle(veil,0,0,width,Height/UiScale);}
+            else if(OriArt.Active){OriArt.DrawReport(g,new RectangleF(0,0,width,Height/UiScale),.54f);using(LinearGradientBrush veil=new LinearGradientBrush(new RectangleF(0,0,Math.Max(1,width),120),Color.FromArgb(190,t.Card),Color.FromArgb(215,t.Background),0f))g.FillRectangle(veil,0,0,width,Height/UiScale);}
+            else using(LinearGradientBrush bg=new LinearGradientBrush(new RectangleF(0,0,Math.Max(1,width),120),t.Card,t.Background,0f))g.FillRectangle(bg,0,0,width,Height/UiScale);
             using(Font title=new Font("Microsoft YaHei UI",25,FontStyle.Bold,GraphicsUnit.Pixel))
             using(Font body=new Font("Microsoft YaHei UI",12,FontStyle.Regular,GraphicsUnit.Pixel))
             {
                 ReportDesign.Text(g,Heading,title,t.Text,new RectangleF(24,19,270,39));
-                if(EuroTruckArt.Active)EuroTruckArt.Symbol(g,6,new RectangleF(264,15,42,42));
+                if(GujianArt.Active)GujianArt.Symbol(g,14,new RectangleF(264,15,42,42));
+                else if(OriArt.Active)OriArt.Symbol(g,5,new RectangleF(264,15,42,42));
+                else if(EuroTruckArt.Active)EuroTruckArt.Symbol(g,6,new RectangleF(264,15,42,42));
                 else if(WuxiaArt.Active)WuxiaArt.Symbol(g,0,new RectangleF(264,15,42,42));
                 else if(BalatroArt.Active)BalatroArt.Symbol(g,8,new RectangleF(264,19,34,34));
                 ReportDesign.Text(g,Date+"   ·   "+Status,body,t.Muted,new RectangleF(24,64,width-48,23));
@@ -325,7 +335,7 @@ namespace KeyMouseStats
             for(int i=0;i<actions.Length;i++){int w=(int)(widths[i]*s);right-=w;actions[i].SetBounds(right,(int)(25*s),w,(int)(33*s));right-=(int)(8*s);actions[i].ForeColor=i==0?t.OnAccent:t.Text;actions[i].BackColor=i==0?t.Accent:t.Card;actions[i].FlatAppearance.BorderColor=t.Line;}
             _range.BackColor=t.Card;_range.ForeColor=t.Text;_range.SetBounds((int)(302*s),(int)(26*s),(int)(168*s),(int)(28*s));
             _compare.BackColor=t.Card;_compare.ForeColor=t.Text;_compare.SetBounds((int)(478*s),(int)(26*s),(int)(168*s),(int)(28*s));
-            _navigation.Visible=!compact;_navigation.BackColor=t.Background;int nav=compact?0:(int)(178*s);
+            _navigation.Visible=!compact;_navigation.BackColor=(GujianArt.Active||OriArt.Active)?ArtTheme.Mix(t.Background,t.Cyan,.04):t.Background;int nav=compact?0:(int)(178*s);
             _navigation.SetBounds((int)(20*s),header,Math.Max(1,nav-(int)(20*s)),ClientSize.Height-header-(int)(12*s));
             foreach(Control c in _navigation.Controls){c.Width=(int)(146*s);c.Height=(int)((c is Button?34:24)*s);if(c is Label){c.ForeColor=t.Muted;c.BackColor=t.Background;}}
             _compact.BringToFront();_compact.Visible=compact;_compact.SetBounds((int)(24*s),(int)(99*s),(int)(190*s),(int)(30*s));_compact.BackColor=t.Card;_compact.ForeColor=t.Text;_compact.FlatAppearance.BorderColor=t.Line;

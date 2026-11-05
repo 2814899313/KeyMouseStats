@@ -8,6 +8,49 @@ using System.Windows.Forms;
 
 namespace KeyMouseStats
 {
+    /// <summary>
+    /// 小时趋势的纵轴。活跃时长是「每个小时里活跃了多少分钟」,物理上限就是 60:
+    /// 不能再按「最大值 × 1.15」放大到 70,也不必给顶端留余量。刻度固定 0/15/30/45/60。
+    /// 其他指标继续走 AxisScale 的整值步长。
+    /// </summary>
+    internal static class HourlyAxis
+    {
+        public const double MaxActiveMinutes = 60;
+
+        public static void Compute(int metric, double axisMax, out double top, out double step)
+        {
+            if (metric == 2)
+            {
+                top = MaxActiveMinutes;
+                step = MaxActiveMinutes / 4;
+                return;
+            }
+            // metric 3/4 都是「每分钟」的速率,允许小数步长;其余是次数,用整数步长。
+            AxisScale.Nice(axisMax, 4, metric < 3, out top, out step);
+        }
+
+        public static string Label(int metric, double value)
+        {
+            if (metric == 2) return value.ToString("0", CultureInfo.InvariantCulture);
+            if (metric >= 3) return value.ToString("0.##", CultureInfo.InvariantCulture);
+            return AxisScale.Label(value);
+        }
+
+        /// <summary>指标单位。击键/点击速率统一按分钟,不再一个按秒、一个按分。</summary>
+        public static string Unit(int metric)
+        {
+            if (metric == 2) return " 分钟";
+            if (metric >= 3) return " 次/分";
+            return " 次";
+        }
+
+        /// <summary>绘制时把活跃分钟数夹到 60,避免历史异常值把折线画到封顶线上方。</summary>
+        public static double Clamp(int metric, double value, double top)
+        {
+            return metric == 2 ? Math.Min(value, top) : value;
+        }
+    }
+
     internal sealed partial class Dashboard
     {
         private bool _trendHourly;
@@ -71,7 +114,7 @@ namespace KeyMouseStats
             for (int h = 0; h < 24; h++)
                 values[h] = !available || date.Date > now.Date || date.Date == now.Date && h > now.Hour ? double.NaN
                     : metric == 0 ? day.HourKeys[h] : metric == 1 ? day.HourClicks[h] : metric == 2 ? day.ActiveHours[h] / 60
-                    : PersonalStats.Ratio(metric == 3 ? day.HourKeys[h] : day.HourClicks[h] * 60.0, day.ActiveHours[h]);
+                    : PersonalStats.Ratio((metric == 3 ? day.HourKeys[h] : day.HourClicks[h]) * 60.0, day.ActiveHours[h]);
             return values;
         }
 
@@ -139,12 +182,16 @@ namespace KeyMouseStats
             return baseline;
         }
         private string HourlyValue(double value)
-        { return double.IsNaN(value) ? "无记录" : _hourlyTrendMetric >= 3 ? value.ToString("0.##") + (_hourlyTrendMetric == 3 ? " 次/秒" : " 次/分") : _hourlyTrendMetric == 2 ? value.ToString("0.#") + " 分钟"
-            : (value == Math.Floor(value) ? Analysis.FmtCount((long)value) : value.ToString("0.#")) + " 次"; }
+        {
+            if (double.IsNaN(value)) return "无记录";
+            if (_hourlyTrendMetric == 2) return value.ToString("0.#") + HourlyAxis.Unit(2);
+            if (_hourlyTrendMetric >= 3) return value.ToString("0.##") + HourlyAxis.Unit(_hourlyTrendMetric);
+            return (value == Math.Floor(value) ? Analysis.FmtCount((long)value) : value.ToString("0.#")) + HourlyAxis.Unit(_hourlyTrendMetric);
+        }
 
         private void PaintHourlyTrend(Graphics g)
         {
-            string[] names = { "击键", "点击", "活跃时长", "击键/秒", "点击/分" };
+            string[] names = { "击键", "点击", "活跃时长", "击键/分", "点击/分" };
             for (int i = 0; i < names.Length; i++) AppChip(g, 310 + i, Cx + i * 78, 98, 70, names[i], _hourlyTrendMetric == i);
             string compareButton = _hourlyCompareMode == 0 ? "曲线：仅所选日" : _hourlyCompareMode == 1 ? "曲线：昨天" :
                 _hourlyCompareMode == 2 ? "曲线：上周同日" : _hourlyCompareMode == 4 ? "曲线：本周 7 天" : "曲线：近" + _hourlyCompareDays + "天";
@@ -154,8 +201,8 @@ namespace KeyMouseStats
             AppChip(g, 323, Cx + 16, 160, 170, _hourlyTrendDay.ToString("yyyy-MM-dd ddd"), false);
             AppChip(g, 320, Cx + Cw - 180, 160, 76, "前一天", false);
             AppChip(g, 321, Cx + Cw - 94, 160, 76, "后一天", false);
-            AppText(g, "每小时" + names[_hourlyTrendMetric] + (_hourlyTrendMetric >= 3 ? " · 按活跃时间归一化" : _hourlyTrendMetric == 2 ? " · 单位：分钟" : " · 单位：次"),
-                _fH2, Ctext, new RectangleF(Cx + 208, 160, 300, 30), false);
+            AppText(g, "每小时" + names[_hourlyTrendMetric] + (_hourlyTrendMetric >= 3 ? " · 按活跃分钟归一化" : _hourlyTrendMetric == 2 ? " · 单位：分钟（纵轴 0–60）" : " · 单位：次"),
+                _fH2, Ctext, new RectangleF(Cx + 208, 160, 340, 30), false);
 
             DateTime now = DateTime.Now;
             Color selectedColor = _hourlyTrendMetric == 2 ? Cpurple : _hourlyTrendMetric == 1 ? Cgreen : Cblue;
@@ -173,15 +220,18 @@ namespace KeyMouseStats
                 if (_hourlyTrendDay < now.Date || h < now.Hour) { completeSum += values[h]; completeCount++; }
                 if (values[h] > selectedMax) { selectedMax = values[h]; peak = h; }
             }
-            double ceiling = Math.Max(1, Math.Ceiling(axisMax * 1.15));
+            double ceiling, axisStep;
+            HourlyAxis.Compute(_hourlyTrendMetric, axisMax, out ceiling, out axisStep);
             float left = Cx + 56, right = Cx + Cw - 28, top = 222, bottom = 451;
             Func<int, float> px = delegate(int h) { return left + (right - left) * h / 23; };
-            Func<double, float> py = delegate(double v) { return bottom - (float)(v / ceiling) * (bottom - top); };
+            Func<double, float> py = delegate(double v) { return bottom - (float)(HourlyAxis.Clamp(_hourlyTrendMetric, v, ceiling) / ceiling) * (bottom - top); };
             for (int i = 0; i <= 4; i++)
             {
                 float y = bottom - (bottom - top) * i / 4;
-                using (Pen p = new Pen(Cline)) g.DrawLine(p, left, y, right, y);
-                AppText(g, Analysis.FmtAxis(ceiling * i / 4), _fAxis, Csub, new RectangleF(Cx + 4, y - 10, 46, 20), true);
+                using (Pen p = new Pen(i == 4 && _hourlyTrendMetric == 2 ? Color.FromArgb(60, Ctext) : Cline))
+                    g.DrawLine(p, left, y, right, y);
+                AppText(g, HourlyAxis.Label(_hourlyTrendMetric, axisStep * i), _fAxis, Csub,
+                    new RectangleF(Cx + 4, y - 10, 46, 20), true);
             }
             for (int h = 0; h < 24; h++) if (h % 3 == 0 || h == 23)
                 AppText(g, h.ToString("00") + ":00", _fAxis, Csub, new RectangleF(px(h) - 17, bottom + 6, 45, 20), false);
@@ -287,7 +337,7 @@ namespace KeyMouseStats
                 DateTime now = DateTime.Now;
                 Color selectedColor = _hourlyTrendMetric == 2 ? Cpurple : _hourlyTrendMetric == 1 ? Cgreen : Cblue;
                 List<HourlyLine> lines = BuildHourlyLines(now, selectedColor);
-                string name = _hourlyTrendMetric == 3 ? "每活跃秒击键" : _hourlyTrendMetric == 4 ? "每活跃分钟点击" :
+                string name = _hourlyTrendMetric == 3 ? "每活跃分钟击键" : _hourlyTrendMetric == 4 ? "每活跃分钟点击" :
                     _hourlyTrendMetric == 2 ? "活跃分钟" : _hourlyTrendMetric == 1 ? "点击次数" : "击键次数";
                 StringBuilder csv = new StringBuilder("小时");
                 for (int i = 0; i < lines.Count; i++) csv.Append(',').Append(lines[i].Day.ToString("yyyy-MM-dd")).Append(name);

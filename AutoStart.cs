@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using Microsoft.Win32;
@@ -48,14 +49,14 @@ namespace KeyMouseStats
         internal static bool IsEnabled()
         {
             object service = ConnectService();
-            if (service == null) return false;
+            if (service == null) return QueryScheduledTask();
             try
             {
                 object folder = GetRootFolder(service);
-                if (folder == null) return false;
+                if (folder == null) return QueryScheduledTask();
                 return GetTask(folder) != null;
             }
-            catch (Exception) { return false; }
+            catch (Exception) { return QueryScheduledTask(); }
             finally { Release(service); }
         }
 
@@ -95,9 +96,13 @@ namespace KeyMouseStats
             }
 
             object service = ConnectService();
+            string exe = NormalizePath(exePath);
+            string folderPath = Path.GetDirectoryName(exe);
             if (service == null)
             {
-                error = "任务计划程序服务不可用(Schedule.Service)。";
+                string cliError;
+                if (CreateWithSchtasks(exe, out cliError)) { DeleteLegacyRunValue(); return true; }
+                error = "任务计划程序服务不可用(Schedule.Service)。" + Environment.NewLine + cliError;
                 return false;
             }
             try
@@ -105,16 +110,29 @@ namespace KeyMouseStats
                 object folder = GetRootFolder(service);
                 if (folder == null)
                 {
-                    error = "打不开任务计划程序的根目录。";
+                    string cliError;
+                    if (CreateWithSchtasks(exe, out cliError)) { DeleteLegacyRunValue(); return true; }
+                    error = "打不开任务计划程序的根目录。" + Environment.NewLine + cliError;
                     return false;
                 }
 
-                string exe = NormalizePath(exePath);
-                string folderPath = Path.GetDirectoryName(exe);
                 // 先试「开机 + 登录」两路触发器;个别策略不允许非管理员建开机任务,退化成登录触发。
+                // COM 迟绑定在少数系统上会报 DISP_E_UNKNOWNNAME(按名字找不到成员),
+                // 此时退回 schtasks.exe 命令行,保证「打开自启」这个动作仍然能成功。
                 if (!Register(folder, exe, folderPath, true, ref error))
                 {
-                    if (!Register(folder, exe, folderPath, false, ref error)) return false;
+                    if (!Register(folder, exe, folderPath, false, ref error))
+                    {
+                        string comError = error;
+                        string cliError;
+                        if (!CreateWithSchtasks(exe, out cliError))
+                        {
+                            error = comError + Environment.NewLine + "命令行方式也失败：" + cliError;
+                            return false;
+                        }
+                        Log("COM 注册失败，已改用 schtasks 创建：" + comError);
+                        error = "";
+                    }
                 }
 
                 DeleteLegacyRunValue();
@@ -135,7 +153,9 @@ namespace KeyMouseStats
             object service = ConnectService();
             if (service == null)
             {
-                error = "任务计划程序服务不可用(Schedule.Service)。";
+                string cliError;
+                if (DeleteWithSchtasks(out cliError)) { DeleteLegacyRunValue(); return true; }
+                error = "任务计划程序服务不可用(Schedule.Service)。" + Environment.NewLine + cliError;
                 return false;
             }
             try
@@ -145,6 +165,11 @@ namespace KeyMouseStats
                 {
                     try { Invoke(folder, "DeleteTask", new object[] { TaskName, 0 }); }
                     catch (Exception) { /* 本来就没有这个任务 */ }
+                }
+                else
+                {
+                    string cliError;
+                    if (!DeleteWithSchtasks(out cliError)) { error = cliError; return false; }
                 }
                 DeleteLegacyRunValue();
                 return true;
@@ -240,36 +265,41 @@ namespace KeyMouseStats
 
         private static bool Register(object folder, string exe, string workingDirectory, bool withBootTrigger, ref string error)
         {
+            string step = "创建任务定义";
             try
             {
                 object definition = Invoke(folder, "NewTask", new object[] { 0 });
                 if (definition == null) { error = "创建任务定义失败。"; return false; }
 
+                step = "读取 RegistrationInfo";
                 object info = GetProperty(definition, "RegistrationInfo");
                 if (info != null)
                 {
-                    SetProperty(info, "Description", "键鼠统计:登录后自动启动(可在托盘菜单关闭)");
-                    SetProperty(info, "Author", "KeyMouseStats");
+                    TrySet(info, "Description", "键鼠统计:登录后自动启动(可在托盘菜单关闭)");
+                    TrySet(info, "Author", "KeyMouseStats");
                 }
 
+                step = "读取 Settings";
                 object settings = GetProperty(definition, "Settings");
                 if (settings != null)
                 {
                     // 关键:错过开机那一刻(还没有交互会话)时,等用户一登录就补跑。
-                    SetProperty(settings, "StartWhenAvailable", true);
-                    SetProperty(settings, "DisallowStartIfOnBatteries", false);
-                    SetProperty(settings, "StopIfGoingOnBatteries", false);
-                    SetProperty(settings, "MultipleInstances", InstancesIgnoreNew);
-                    SetProperty(settings, "ExecutionTimeLimit", "PT0S");
+                    TrySet(settings, "StartWhenAvailable", true);
+                    TrySet(settings, "DisallowStartIfOnBatteries", false);
+                    TrySet(settings, "StopIfGoingOnBatteries", false);
+                    TrySet(settings, "MultipleInstances", InstancesIgnoreNew);
+                    TrySet(settings, "ExecutionTimeLimit", "PT0S");
                 }
 
+                step = "读取 Principal";
                 object principal = GetProperty(definition, "Principal");
                 if (principal != null)
                 {
-                    SetProperty(principal, "LogonType", LogonInteractiveToken);
-                    SetProperty(principal, "RunLevel", 0);   // 最低权限,不弹 UAC
+                    TrySet(principal, "LogonType", LogonInteractiveToken);
+                    TrySet(principal, "RunLevel", 0);   // 最低权限,不弹 UAC
                 }
 
+                step = "创建触发器";
                 object triggers = GetProperty(definition, "Triggers");
                 if (triggers == null) { error = "无法创建触发器。"; return false; }
                 if (withBootTrigger)
@@ -280,22 +310,83 @@ namespace KeyMouseStats
                 object logon = Invoke(triggers, "Create", new object[] { TriggerLogon });
                 if (logon == null) { error = "无法创建登录触发器。"; return false; }
 
+                step = "创建启动动作";
                 object actions = GetProperty(definition, "Actions");
                 if (actions == null) { error = "无法创建动作。"; return false; }
                 object action = Invoke(actions, "Create", new object[] { ActionExec });
                 if (action == null) { error = "无法创建启动动作。"; return false; }
-                SetProperty(action, "Path", exe);
-                if (!string.IsNullOrEmpty(workingDirectory)) SetProperty(action, "WorkingDirectory", workingDirectory);
+                TrySet(action, "Path", exe);
+                if (!string.IsNullOrEmpty(workingDirectory)) TrySet(action, "WorkingDirectory", workingDirectory);
 
+                step = "RegisterTaskDefinition";
                 Invoke(folder, "RegisterTaskDefinition",
                     new object[] { TaskName, definition, TaskCreateOrUpdate, null, null, LogonInteractiveToken });
                 return true;
             }
             catch (Exception ex)
             {
-                error = Describe(ex);
+                error = "步骤「" + step + "」失败：" + Describe(ex);
                 return false;
             }
+        }
+
+        /// <summary>个别属性/版本差异不该拖垮整个注册:失败就交给后续步骤或命令行兜底。</summary>
+        private static void TrySet(object target, string name, object value)
+        {
+            try { SetProperty(target, name, value); }
+            catch (Exception) { }
+        }
+
+        // ---------------------------------------------------------------- schtasks 兜底
+
+        private static bool RunSchtasks(string arguments, out string output)
+        {
+            output = "";
+            try
+            {
+                ProcessStartInfo info = new ProcessStartInfo("schtasks.exe", arguments);
+                info.CreateNoWindow = true;
+                info.UseShellExecute = false;
+                info.RedirectStandardOutput = true;
+                info.RedirectStandardError = true;
+                using (Process process = Process.Start(info))
+                {
+                    string stdout = process.StandardOutput.ReadToEnd();
+                    string stderr = process.StandardError.ReadToEnd();
+                    process.WaitForExit(15000);
+                    output = (stdout + " " + stderr).Trim();
+                    return process.ExitCode == 0;
+                }
+            }
+            catch (Exception ex)
+            {
+                output = ex.Message;
+                return false;
+            }
+        }
+
+        /// <summary>COM 不可用时的登录触发兜底;不需要管理员,不会弹 UAC。</summary>
+        private static bool CreateWithSchtasks(string exe, out string error)
+        {
+            string args = "/Create /TN \"" + TaskName + "\" /TR \\\"" + exe + "\\\" /SC ONLOGON /RL LIMITED /F";
+            bool ok = RunSchtasks(args, out error);
+            if (!ok && string.IsNullOrEmpty(error)) error = "schtasks 创建任务失败。";
+            return ok;
+        }
+
+        /// <summary>查询任务是否存在;COM 故障时仍能反映真实状态。</summary>
+        private static bool QueryScheduledTask()
+        {
+            string output;
+            return RunSchtasks("/Query /TN \"" + TaskName + "\"", out output);
+        }
+
+        private static bool DeleteWithSchtasks(out string error)
+        {
+            if (!QueryScheduledTask()) { error = ""; return true; }
+            bool ok = RunSchtasks("/Delete /TN \"" + TaskName + "\" /F", out error);
+            if (!ok && string.IsNullOrEmpty(error)) error = "schtasks 删除任务失败。";
+            return ok;
         }
 
         private static object ConnectService()

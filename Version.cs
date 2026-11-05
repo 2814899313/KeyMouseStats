@@ -15,9 +15,9 @@ namespace KeyMouseStats
 {
     internal static class BuildInfo
     {
-        /// <summary>产品版本,例如 2.0.4。</summary>
-        public const string Version = "2.0.4";
-        /// <summary>程序集 / 文件版本,例如 2.0.4.0。</summary>
-        public const string FileVersion = "2.0.4.0";
+        /// <summary>产品版本,例如 2.1.0。</summary>
+        public const string Version = "2.1.0";
+        /// <summary>程序集 / 文件版本,例如 2.1.0.0。</summary>
+        public const string FileVersion = "2.1.0.0";
     }
 }

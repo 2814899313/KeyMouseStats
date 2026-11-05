@@ -10,8 +10,8 @@ namespace KeyMouseStats
         internal static void Draw(Graphics g,RectangleF rect,Font font,string text)
         {
             ArtTheme theme=ArtTheme.Current;
-            int id=Store.ThemeId;
-            Color accent=id==5?theme.Purple:id==6?theme.Cyan:id==7?theme.Red:id==8?theme.Green:id==10?theme.Orange:theme.Accent;
+            int id=ArtTheme.Validate(Store.ThemeId);
+            Color accent=id==12?theme.Cyan:id==5?theme.Purple:id==6?theme.Cyan:id==7?theme.Red:id==8?theme.Green:id==10?theme.Orange:theme.Accent;
             // Quiet status, not another outlined action button. Keep its footprint fixed across themes.
             using(GraphicsPath shape=new GraphicsPath())
             {
@@ -23,6 +23,10 @@ namespace KeyMouseStats
             }
             float x=rect.X+13,y=rect.Y+rect.Height/2;
             if(id==5)NikkiArt.Star(g,x,y,4,accent);
+            else if(id==12)
+            { GujianArt.Ornament(g,1,new RectangleF(x-6,y-6,12,12),1f); }
+            else if(id==2)
+            { OriArt.Ornament(g,10,new RectangleF(x-5,y-5,10,10),1f); }
             else if(id==6)
             {
                 using(Pen pen=new Pen(accent,1.3f)){g.DrawArc(pen,x-4,y-4,8,8,35,280);g.DrawLine(pen,x,y,x+3,y-3);}
@@ -54,9 +58,13 @@ namespace KeyMouseStats
         private static readonly Color[] DreamStops = {Color.FromArgb(80,112,190),Color.FromArgb(83,166,189),Color.FromArgb(225,196,115),Color.FromArgb(219,133,116),Color.FromArgb(186,57,101)};
         private static readonly Color[] BalatroStops={Color.FromArgb(54,88,191),Color.FromArgb(77,189,211),Color.FromArgb(228,201,105),Color.FromArgb(233,132,91),Color.FromArgb(219,71,79)};
         private static readonly Color[] WuxiaStops={Color.FromArgb(24,67,91),Color.FromArgb(36,132,132),Color.FromArgb(213,190,107),Color.FromArgb(191,91,54),Color.FromArgb(143,35,43)};
+        private static readonly Color[] OriStops={Color.FromArgb(22,52,104),Color.FromArgb(29,168,190),Color.FromArgb(210,248,255),Color.FromArgb(161,111,218),Color.FromArgb(244,190,91)};
+        private static readonly Color[] GujianStops={Color.FromArgb(16,48,76),Color.FromArgb(34,151,151),Color.FromArgb(222,236,205),Color.FromArgb(213,157,78),Color.FromArgb(174,56,48)};
         private static readonly Color[] HaloStops = {Color.FromArgb(47,96,181),Color.FromArgb(57,163,201),Color.FromArgb(219,216,143),Color.FromArgb(218,153,67),Color.FromArgb(205,75,54)};
         public static Color At(double fraction)
         {
+            if(GujianArt.Active){Color[] stops=GujianStops;double p=Math.Max(0,Math.Min(1,fraction))*4;int i=Math.Min(3,(int)p);return ArtTheme.Mix(stops[i],stops[i+1],p-i);}
+            if(OriArt.Active){Color[] stops=OriStops;double p=Math.Max(0,Math.Min(1,fraction))*4;int i=Math.Min(3,(int)p);return ArtTheme.Mix(stops[i],stops[i+1],p-i);}
             if(WuxiaArt.Active){Color[] stops=WuxiaStops;double p=Math.Max(0,Math.Min(1,fraction))*4;int i=Math.Min(3,(int)p);return ArtTheme.Mix(stops[i],stops[i+1],p-i);}
             if(BalatroArt.Active){Color[] stops=BalatroStops;double p=Math.Max(0,Math.Min(1,fraction))*4;int i=Math.Min(3,(int)p);return ArtTheme.Mix(stops[i],stops[i+1],p-i);}
             if(HaloArt.Active)
@@ -91,7 +99,7 @@ namespace KeyMouseStats
         public static readonly ArtTheme[] All = {
             Create("午夜蓝", 13, "0F141E", "18202E", "1D2737", "303F54", "E9EDF6", "A0ABBC", "729BFF", "4BD2A8", "F1BB6F", "B19DF8", "FF6B81", "4CC9F0", "0C111A", "101622"),
             Create("奶油手账", 4, "F1EBDD", "FFFCF5", "FFFCF5", "CEC1AB", "382F27", "746452", "9C4A30", "357258", "93651B", "805C82", "B73943", "336E80", "E8DECB", "FFFFFF"),
-            Create("苔原森林", 22, "101E1B", "1A2E28", "223C31", "3A5849", "E4EEE2", "A2B8A6", "AFCE88", "71CDB0", "E3B574", "C0B2D5", "ED9391", "85C6CF", "0B1714", "142319"),
+            Create("奥日 · 灵光森林", 13, "050D20", "0B1D34", "102B43", "2B6078", "F0FCFF", "9ABCCB", "54D7F0", "65D6B4", "F2C66D", "A783E8", "D75B9C", "6DEAFF", "050B19", "07111D"),
             Create("霓虹夜航", 5, "130E25", "201536", "2C1B49", "604579", "F5ECFF", "C0AED7", "E68EFF", "63E3BC", "FFCB7A", "B49BFF", "FF83B4", "62DCEE", "0D091C", "200E30"),
             Create("蓝图工坊", 0, "EAF0F7", "FFFFFF", "FFFFFF", "9BB2CD", "142C4D", "4F6581", "235DB4", "237654", "976016", "7655A7", "B73353", "176C8E", "DDE7F3", "FFFFFF"),
             Create("暖暖 · 星愿织梦", 18, "F8F4FC", "FFFCFF", "F4ECF8", "DACBE3", "473B59", "796884", "9263AA", "548F8D", "B78945", "AE75A2", "BF537B", "578BAD", "F0E8F6", "FFFFFF"),
@@ -100,7 +108,8 @@ namespace KeyMouseStats
             Create("我的世界 · 方块", 2, "101D18", "1B2C23", "293E2D", "617458", "EDF0DB", "B5C6A5", "9BCB70", "75BDA0", "DEB26B", "B6A2D6", "DF8573", "70C9CF", "0B1711", "16220F"),
             Create("小丑牌 · 幻彩牌桌", 7, "101F23", "193037", "25424A", "507178", "F5E9CB", "ADC5C5", "F08075", "87C3A2", "E6B964", "BB99D6", "ED6F68", "6AD3DD", "0B181C", "271316"),
             Create("大侠立志传 · 碧血丹心", 5, "091318", "122226", "1C3031", "6B6048", "F2E7CA", "BDB49D", "B7453F", "54A194", "C8A55E", "8872A4", "B74449", "62B5B3", "071014", "FFF1D2"),
-            Create("欧洲卡车 · 长途之路", 7, "07111E", "0E1C2B", "14283B", "31506A", "EDF4F8", "93A9B7", "E7A23B", "58BCA5", "F0A840", "8D86C9", "E46E5C", "3CCBE7", "08131F", "16130D")
+            Create("欧洲卡车 · 长途之路", 7, "07111E", "0E1C2B", "14283B", "31506A", "EDF4F8", "93A9B7", "E7A23B", "58BCA5", "F0A840", "8D86C9", "E46E5C", "3CCBE7", "08131F", "16130D"),
+            Create("古剑奇谭 · 琴心剑魄", 7, "07121B", "10232D", "17343D", "557070", "F1E8D3", "A8B7B3", "49BFC3", "68A98D", "D5AA58", "8F78B6", "B74E46", "62E0DD", "061018", "081416")
         };
         private static Color Hex(string value) { return Color.FromArgb(255, Color.FromArgb(Convert.ToInt32(value, 16))); }
         private static ArtTheme Create(string name, int radius, params string[] c)
@@ -136,21 +145,31 @@ namespace KeyMouseStats
             return;
 #else
             PointF mouse = ToBase(_mouse);
-            string name = EuroTruckArt.Active ? "长途之路" : WuxiaArt.Active ? "碧血丹心" : ArtTheme.Current.Name;
+            string name = GujianArt.Active ? "琴心剑魄" : EuroTruckArt.Active ? "长途之路" : WuxiaArt.Active ? "碧血丹心" : ThemeShortName(ArtTheme.Validate(Store.ThemeId));
             for (int i = 0; i < ArtTheme.All.Length; i++)
             {
-                RectangleF r = new RectangleF(26 + i % 6 * 22, 522 + i / 6 * 24, 14, 14);
-                _themeRects[i] = new RectangleF(r.X-3,r.Y-3,20,20);
+                RectangleF r = new RectangleF(24 + i % 7 * 19, 522 + i / 7 * 24, 14, 14);
+                _themeRects[i] = new RectangleF(r.X-2,r.Y-3,18,20);
                 ArtTheme theme = ArtTheme.All[i];
                 bool selected=Store.ThemeId==i;
                 using (SolidBrush b = new SolidBrush(theme.Accent)) g.FillEllipse(b, r);
                 if (selected || _themeRects[i].Contains(mouse))
                     using (Pen p = new Pen(selected ? Ctext : Csub, 1.5f))
                         g.DrawEllipse(p, r.X - 3, r.Y - 3, r.Width + 6, r.Height + 6);
-                if (_themeRects[i].Contains(mouse)) name = i==11 ? "长途之路" : i==10 ? "碧血丹心" : theme.Name;
+                if (_themeRects[i].Contains(mouse)) name = ThemeShortName(i);
             }
             AppText(g, "外观 · " + name, _fSmall, Csub, new RectangleF(24, 490, 132, 24), false);
 #endif
+        }
+        /// <summary>侧栏主题名要放进 132 px,长名字用简称。</summary>
+        private static string ThemeShortName(int id)
+        {
+            if (id == 11) return "长途之路";
+            if (id == 10) return "碧血丹心";
+            if (id == 12) return "琴心剑魄";
+            if (id == 2) return "灵光森林";
+            ArtTheme theme = ArtTheme.All[ArtTheme.Validate(id)];
+            return theme == null ? "" : theme.Name;
         }
         private bool HandleThemeClick(PointF point)
         {
@@ -174,6 +193,8 @@ namespace KeyMouseStats
         }
         private void PaintThemeTexture(Graphics g)
         {
+            if(GujianArt.Active)GujianArt.DrawPage(g,(int)_tab,new RectangleF(0,0,BW,BH));
+            if(OriArt.Active)OriArt.DrawPage(g,(int)_tab,new RectangleF(0,0,BW,BH));
             if(EuroTruckArt.Active)EuroTruckArt.DrawPage(g,(int)_tab,new RectangleF(0,0,BW,BH));
             if(WuxiaArt.Active)WuxiaArt.DrawPage(g,(int)_tab,new RectangleF(0,0,BW,BH));
             if(BalatroArt.Active)BalatroArt.DrawPage(g,(int)_tab,new RectangleF(0,0,BW,BH));

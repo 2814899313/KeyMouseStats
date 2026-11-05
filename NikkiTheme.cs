@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -13,13 +13,15 @@ namespace KeyMouseStats
     internal static class ThemeAssets
     {
         private static readonly Dictionary<int,string[]> Catalog=new Dictionary<int,string[]>{
-            {5,new[]{"NikkiEmotes","NikkiDream","NikkiPoseTrend","NikkiPoseHours","NikkiPoseKeys","NikkiPoseApps","NikkiPoseInsights"}},
-            {6,new[]{"HaloIcons","HaloOverview","HaloTrend","HaloHours","HaloKeys","HaloApps","HaloInsights"}},
-            {7,new[]{"ResidentIcons","ResidentOverview","ResidentTrend","ResidentHours","ResidentKeys","ResidentApps","ResidentInsights"}},
-            {8,new[]{"MinecraftIcons","MinecraftOverview","MinecraftTrend","MinecraftHours","MinecraftKeys","MinecraftApps","MinecraftInsights"}},
-            {9,new[]{"BalatroIcons","BalatroBackgrounds"}},
-            {10,new[]{"WuxiaUi","WuxiaWidget","WuxiaBackgrounds"}},
-            {11,new[]{"EuroTruckIcons","EuroTruckWidget","EuroTruckOverview","EuroTruckTrend","EuroTruckHours","EuroTruckKeys","EuroTruckApps","EuroTruckInsights"}}
+            {5,new[]{"NikkiEmotes","NikkiDream","NikkiPoseTrend","NikkiPoseHours","NikkiPoseKeys","NikkiPoseApps","NikkiPoseInsights","NikkiText","NikkiDay","NikkiHeat"}},
+            {6,new[]{"HaloIcons","HaloOverview","HaloTrend","HaloHours","HaloKeys","HaloApps","HaloInsights","HaloText","HaloDay","HaloHeat"}},
+            {7,new[]{"ResidentIcons","ResidentOverview","ResidentTrend","ResidentHours","ResidentKeys","ResidentApps","ResidentInsights","ResidentText","ResidentDay","ResidentHeat"}},
+            {8,new[]{"MinecraftIcons","MinecraftOverview","MinecraftTrend","MinecraftHours","MinecraftKeys","MinecraftApps","MinecraftInsights","MinecraftText","MinecraftDay","MinecraftHeat"}},
+            {9,new[]{"BalatroIcons","BalatroBackgrounds","BalatroText","BalatroDay","BalatroHeat"}},
+            {10,new[]{"WuxiaUi","WuxiaWidget","WuxiaBackgrounds","WuxiaText","WuxiaDay","WuxiaHeat"}},
+            {11,new[]{"EuroTruckIcons","EuroTruckWidget","EuroTruckOverview","EuroTruckTrend","EuroTruckHours","EuroTruckKeys","EuroTruckApps","EuroTruckInsights","EuroTruckText","EuroTruckDay","EuroTruckHeat"}},
+            {2,new[]{"OriIcons","OriKeyOrnaments","OriWidget","OriReport","OriOverview","OriTrend","OriHours","OriKeys","OriApps","OriInsights","OriText","OriDay","OriHeat"}},
+            {12,new[]{"GujianIcons","GujianKeyOrnaments","GujianWidget","GujianReport","GujianOverview","GujianTrend","GujianHours","GujianKeys","GujianApps","GujianInsights","GujianText","GujianDay","GujianHeat"}}
         };
         internal static string[] ForTheme(int id){string[] names;return Catalog.TryGetValue(id,out names)?(string[])names.Clone():new string[0];}
     }
@@ -96,7 +98,7 @@ namespace KeyMouseStats
         public static bool Active { get { return Store.ThemeId == 5; } }
         private static Image Artwork { get { return Load("NikkiDream"); } }
         private static Image Emotes { get { return Load("NikkiEmotes"); } }
-        private static readonly string[] PageResources = { "NikkiDream", "NikkiPoseTrend", "NikkiPoseHours", "NikkiPoseKeys", "NikkiPoseApps", "NikkiPoseInsights" };
+        private static readonly string[] PageResources = { "NikkiDream", "NikkiPoseTrend", "NikkiPoseHours", "NikkiPoseKeys", "NikkiPoseApps", "NikkiPoseInsights", "NikkiText", "NikkiDay", "NikkiHeat" };
         public static bool HasPageArtwork(int page)
         {
             if(page<0 || page>=PageResources.Length)return false;
@@ -109,7 +111,7 @@ namespace KeyMouseStats
             if(page==0){Draw(g,bounds,.65f);return;}
             if(!HasPageArtwork(page))return;
             Image art=Load(PageResources[page]);
-            DrawCached(g,art,new Rectangle(0,0,art.Width,art.Height),bounds,.92f,"page-background-"+page);
+            DrawCached(g,art,WuxiaArt.Cover(new Rectangle(0,0,art.Width,art.Height),bounds),bounds,.92f,"page-background-"+page);
         }
         private static readonly Dictionary<string,Bitmap> Cache=new Dictionary<string,Bitmap>();
         private static readonly Queue<string> CacheOrder=new Queue<string>();
@@ -268,10 +270,10 @@ namespace KeyMouseStats
             Button button=control as Button;
             if(button!=null)
             {
-                button.FlatStyle=FlatStyle.Flat;button.FlatAppearance.BorderColor=WuxiaArt.Active?theme.Orange:theme.Line;
+                button.FlatStyle=FlatStyle.Flat;button.FlatAppearance.BorderColor=GujianArt.Active?theme.Orange:OriArt.Active?theme.Cyan:WuxiaArt.Active?theme.Orange:theme.Line;
                 button.FlatAppearance.BorderSize=WuxiaArt.Active?1:1;
-                button.FlatAppearance.MouseOverBackColor=ArtTheme.Mix(theme.Card,WuxiaArt.Active?theme.Green:theme.Accent,.18);
-                button.FlatAppearance.MouseDownBackColor=ArtTheme.Mix(theme.Card,WuxiaArt.Active?theme.Red:theme.Accent,.30);
+                button.FlatAppearance.MouseOverBackColor=ArtTheme.Mix(theme.Card,GujianArt.Active?theme.Cyan:OriArt.Active?theme.Cyan:WuxiaArt.Active?theme.Green:theme.Accent,.18);
+                button.FlatAppearance.MouseDownBackColor=ArtTheme.Mix(theme.Card,GujianArt.Active?theme.Orange:OriArt.Active?theme.Purple:WuxiaArt.Active?theme.Red:theme.Accent,.30);
                 button.BackColor=theme.Raised;button.UseVisualStyleBackColor=false;
             }
             ComboBox combo=control as ComboBox;if(combo!=null)combo.FlatStyle=FlatStyle.Flat;

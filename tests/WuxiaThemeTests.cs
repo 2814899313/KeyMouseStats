@@ -17,7 +17,7 @@ internal static class WuxiaThemeTests
         for(int h=7;h<23;h++){Store.Today.HourKeys[h]=100+h*23;Store.Today.HourClicks[h]=30+h*5;Store.Today.ActiveHours[h]=600+h*30;}
         Store.Today.Keys=18000;Store.Today.Clicks=3500;Store.Today.Wheel=1200;Store.Today.ActiveSeconds=9600;
         for(int key=32;key<123;key++)Store.Today.KeyCounts[key]=100+(key*97)%1800;
-        Wait("WuxiaUi");Wait("WuxiaWidget");Wait("WuxiaBackgrounds");
+        Wait("WuxiaUi");Wait("WuxiaWidget");Wait("WuxiaBackgrounds");Wait("WuxiaText");Wait("WuxiaDay");Wait("WuxiaHeat");
         if(!WuxiaArt.HasUi||!WuxiaArt.HasWidget||!WuxiaArt.HasBackgrounds)throw new Exception("wuxia assets unavailable");
         if(WuxiaArt.KeyOrnament(new HeatKey("A",1,65,0,0,1,1))!=18||WuxiaArt.KeyOrnament(new HeatKey("7",1,55,0,0,1,1))!=19||WuxiaArt.KeyOrnament(new HeatKey("F5",1,116,0,0,1,1))!=20||WuxiaArt.KeyOrnament(new HeatKey("Ctrl",1,162,0,0,1,1))!=21||WuxiaArt.KeyOrnament(new HeatKey("↑",1,38,0,0,1,1))!=22||WuxiaArt.KeyOrnament(new HeatKey("Space",1,32,0,0,1,1))!=23)throw new Exception("key material mapping");
         Rectangle wide=WuxiaArt.Cover(new Rectangle(0,0,900,400),new RectangleF(0,0,600,400));if(wide.Width!=600||wide.Height!=400||wide.X!=150)throw new Exception("wide cover crop");
@@ -27,11 +27,11 @@ internal static class WuxiaThemeTests
         {
             typeof(Dashboard).GetMethod("OnLoad",Flags).Invoke(form,new object[]{EventArgs.Empty});typeof(Dashboard).GetField("_s",Flags).SetValue(form,1f);
             FieldInfo tab=typeof(Dashboard).GetField("_tab",Flags);MethodInfo paint=typeof(Dashboard).GetMethod("OnPaint",Flags);
-            for(int page=0;page<6;page++){tab.SetValue(form,Enum.ToObject(tab.FieldType,page));typeof(Dashboard).GetField("_showKeyboardHeatmap",Flags).SetValue(form,page==3);graphics.ResetTransform();paint.Invoke(form,new object[]{new PaintEventArgs(graphics,new Rectangle(Point.Empty,bitmap.Size))});bitmap.Save("previews/wuxia-page-"+page+".png",ImageFormat.Png);}
+            for(int page=0;page<9;page++){tab.SetValue(form,Enum.ToObject(tab.FieldType,page));typeof(Dashboard).GetField("_keyView",Flags).SetValue(form,page==3?2:0);graphics.ResetTransform();paint.Invoke(form,new object[]{new PaintEventArgs(graphics,new Rectangle(Point.Empty,bitmap.Size))});bitmap.Save("previews/wuxia-page-"+page+".png",ImageFormat.Png);}
             using(Bitmap widget=new Bitmap(496,416))using(Graphics wg=Graphics.FromImage(widget)){WuxiaArt.DrawWidget(wg,new RectangleF(0,0,496,416));widget.Save("previews/wuxia-widget-background.png",ImageFormat.Png);}
             typeof(Dashboard).GetMethod("OnFormClosed",Flags).Invoke(form,new object[]{new FormClosedEventArgs(CloseReason.None)});
         }
         if(ThemeImages.AllocatedBytes>ThemeImages.Budget||NikkiArt.ScaledBytes>40L*1024*1024)throw new Exception("theme cache budget");
-        Console.WriteLine("PASS: six wuxia pages, aspect-safe cover, key materials, widget artwork and cache bounds");
+        Console.WriteLine("PASS: nine wuxia pages, aspect-safe cover, key materials, widget artwork and cache bounds");
     }
 }

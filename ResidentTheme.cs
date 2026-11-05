@@ -7,19 +7,19 @@ namespace KeyMouseStats
     internal static class ResidentArt
     {
         public static bool Active { get { return Store.ThemeId==7; } }
-        private static readonly string[] Resources={"ResidentOverview","ResidentTrend","ResidentHours","ResidentKeys","ResidentApps","ResidentInsights"};
+        private static readonly string[] Resources={"ResidentOverview","ResidentTrend","ResidentHours","ResidentKeys","ResidentApps","ResidentInsights","ResidentText","ResidentDay","ResidentHeat"};
         
         public static bool HasScene(int page)
         {
-            if(page<0||page>=6)return false;
+            if(page<0||page>=Resources.Length)return false;
             return NikkiArt.Load(Resources[page])!=null;
         }
         public static void DrawPage(Graphics g,int page,RectangleF bounds)
         {
             if(!Active||!HasScene(page))return;
-            Image image=NikkiArt.Load(Resources[page]);NikkiArt.DrawCached(g,image,new Rectangle(0,0,image.Width,image.Height),bounds,.82f,"resident-page-"+page);
+            Image image=NikkiArt.Load(Resources[page]);NikkiArt.DrawCached(g,image,WuxiaArt.Cover(new Rectangle(0,0,image.Width,image.Height),bounds),bounds,.82f,"resident-page-"+page);
         }
-        public static readonly string[] PageLabels={"LEON / KENNEDY","JILL / VALENTINE","CHRIS / REDFIELD","CLAIRE / REDFIELD","ADA / WONG","REBECCA / CHAMBERS","FILE / TRANSCRIPT"};
+        public static readonly string[] PageLabels={"LEON / KENNEDY","JILL / VALENTINE","CHRIS / REDFIELD","CLAIRE / REDFIELD","ADA / WONG","REBECCA / CHAMBERS","FILE / TRANSCRIPT","SURVIVAL / REPORT","INCIDENT / HEAT"};
         private static Image Icons { get { return NikkiArt.Load("ResidentIcons"); } }
         public static bool HasIcons { get { return Icons!=null; } }
         public static void Symbol(Graphics g,int kind,RectangleF bounds)

@@ -147,6 +147,8 @@ namespace KeyMouseStats
         public double MoveMeters;
         public long[] HourKeys = new long[24];
         public long[] HourClicks = new long[24];
+        /// <summary>2.0.7:屏幕点击热区的采样格(key = ClickHeat.CellKey)与次数。只保留最近 30 天。</summary>
+        public Dictionary<int, long> ClickCells = new Dictionary<int, long>();
         public Dictionary<int, long> KeyCounts = new Dictionary<int, long>();
         public Dictionary<int, long> PhysicalKeys = new Dictionary<int, long>();
         public Dictionary<int, long> PhysicalVks = new Dictionary<int, long>();
@@ -191,6 +193,11 @@ namespace KeyMouseStats
             AddCounts(KeyCounts, other.KeyCounts);
             AddCounts(PhysicalKeys, other.PhysicalKeys);
             AddCounts(PhysicalVks, other.PhysicalVks);
+            foreach (KeyValuePair<int, long> cell in other.ClickCells)
+            {
+                long value; ClickCells.TryGetValue(cell.Key, out value);
+                ClickCells[cell.Key] = value + cell.Value;
+            }
             foreach (KeyValuePair<string, long> combo in other.ComboCounts)
             {
                 long value; ComboCounts.TryGetValue(combo.Key, out value);
@@ -325,7 +332,7 @@ namespace KeyMouseStats
         public static int DetectedFormat = 10;
         /// <summary>文件由更新版本写入时为 true,此时只提示不阻止。</summary>
         public static bool FileFromNewerVersion;
-        public const int FormatVersion = 11;
+        public const int FormatVersion = 12;
         /// <summary>按月归档(保留期之外的数据)。</summary>
         public static readonly Dictionary<string, MonthArchive> Archives = new Dictionary<string, MonthArchive>(StringComparer.Ordinal);
         private static string Dir = DefaultDirectory();
@@ -483,6 +490,7 @@ namespace KeyMouseStats
                         case "move_m": cur.MoveMeters = NonNegative(ParseD(val)); break;
                         case "hk": ParseHourBuckets(val, cur.HourKeys); break;
                         case "hc": ParseHourBuckets(val, cur.HourClicks); break;
+                        case "ch": ClickHeat.Decode(val, cur.ClickCells); break;
                         case "kk": ParseKeyCounts(val, cur.KeyCounts); break;
                         case "physical_keys": ParseKeyCounts(val, cur.PhysicalKeys, 768); break;
                         case "physical_vks": ParseKeyCounts(val, cur.PhysicalVks); break;
@@ -720,6 +728,8 @@ namespace KeyMouseStats
 
         private static void Prune()
         {
+            // 完整计数按 KeepDays 保留,点击位置明细只留最近 30 天(见 ClickHeat.KeepDays)。
+            ClickHeat.Prune(History);
             if (KeepDays <= 0) return;   // 永久保留,不归档也不移除
             DateTime oldest = DateTime.Today.AddDays(-(KeepDays - 1));
             List<DateTime> remove = new List<DateTime>();
@@ -844,8 +854,8 @@ namespace KeyMouseStats
         private static string Serialize()
         {
             StringBuilder sb = new StringBuilder();
-                sb.AppendLine("# 键鼠统计数据文件 v11 / 正式版 " + BuildInfo.Version);
-                sb.AppendLine("format=11");
+                sb.AppendLine("# 键鼠统计数据文件 v12 / 正式版 " + BuildInfo.Version);
+                sb.AppendLine("format=12");
                 sb.AppendLine("shortcut_model_v1="+ShortcutSavings.EncodeModel());
                 sb.AppendLine("idle_threshold=" + IdleThresholdSeconds.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("backup_keep=" + BackupKeep.ToString(CultureInfo.InvariantCulture));
@@ -885,6 +895,7 @@ namespace KeyMouseStats
                     sb.AppendLine("move_m=" + r.MoveMeters.ToString("R", CultureInfo.InvariantCulture));
                     sb.AppendLine("hk=" + EncodeHourBuckets(r.HourKeys));
                     sb.AppendLine("hc=" + EncodeHourBuckets(r.HourClicks));
+                    if (r.ClickCells.Count > 0) sb.AppendLine("ch=" + ClickHeat.Encode(r.ClickCells));
                     sb.AppendLine("kk=" + EncodeKeyCounts(r.KeyCounts));
                     sb.AppendLine("physical_keys=" + EncodeKeyCounts(r.PhysicalKeys));
                     sb.AppendLine("physical_vks=" + EncodeKeyCounts(r.PhysicalVks));
@@ -995,6 +1006,8 @@ namespace KeyMouseStats
         public const int WM_SYSKEYUP = 0x0105;
         [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
         public static bool IsKeyDown(int key) { return GetAsyncKeyState(key) < 0; }
+        /// <summary>光标位置。原始输入的点击包没有绝对坐标,只能在这里读当前光标。</summary>
+        [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT point);
         public const int WM_MOUSEMOVE = 0x0200;
         public const int WM_LBUTTONDOWN = 0x0201;
         public const int WM_RBUTTONDOWN = 0x0204;
@@ -1078,7 +1091,9 @@ namespace KeyMouseStats
         private bool _hookWarningShown;
 
         private float _s = 1f;
-        private int _mode;   // 0 今日 / 1 目标 / 2 累计
+        private int _mode;   // 0 今日 / 1 目标 / 2 累计 / 3 存储
+        private StorageUsage _storage;
+        private DateTime _storageAt = DateTime.MinValue;
         private bool _clickThrough = false;
         private bool _initialized = false;
         private Dashboard _dash;
@@ -1144,7 +1159,7 @@ namespace KeyMouseStats
             _rightAlign.LineAlignment = StringAlignment.Near;
 
             _tip = new ToolTip();
-            _tip.SetToolTip(this, "键鼠统计小组件\r\n单击:切换 今日 / 累计\r\n双击:详细统计面板\r\n拖动:移动位置\r\n右键:菜单");
+            _tip.SetToolTip(this, "键鼠统计小组件\r\n单击:切换 今日 / 目标 / 累计 / 存储\r\n双击:详细统计面板\r\n拖动:移动位置\r\n右键:菜单");
         }
 
         public void ListenForDashboard(EventWaitHandle ev)
@@ -1505,6 +1520,12 @@ namespace KeyMouseStats
                     DayRecord t = Store.Today;
                     Counters g = Store.Total;
                     int button=msg==0x0201||msg==0x0202?1:msg==0x0204||msg==0x0205?2:msg==0x0207||msg==0x0208?3:msg==0x020B||msg==0x020C?4+(int)((info.mouseData>>16)&0xffff):0;
+                    // 2.0.7:钩子拿到的是精确屏幕坐标,点击热区优先在这里记录;原始输入那条路
+                    // 用 GetCursorPos 兜底(两条路看到的是同一次按下,ClickHeat 内部 30 ms 去重)。
+                    // 钩子的侧键编号是 4 + XButton 序号(5/6),原始输入是 4/5,这里先统一成 4/5,
+                    // 否则同一次侧键点击会被两条通路各记一次。
+                    int heatButton = button > 3 ? button - 1 : button;
+                    if (isClick && heatButton != 0) ClickHeat.Record(t, info.pt.X, info.pt.Y, heatButton);
                     // 按下事件由原始输入计数(见 DispatchRawButtons),这里只处理「抬起」和兜底,
                     // 免得同一次点击被两条路径各记一遍。
                     if(button!=0&&(!isClick||(countHere&&_rawMouse.RelativeSeen&&!(_distanceSettings!=null&&_distanceSettings.Collect(0)))))_mouseVectors.Button(t,VectorNow(),button,isClick);
@@ -1593,6 +1614,9 @@ namespace KeyMouseStats
             }
             if (_rawMouse.RelativeSeen && (_distanceSettings == null || !_distanceSettings.Collect(0)))
                 _mouseVectors.Button(t, VectorNow(), button, true);
+            // 2.0.7:钩子被系统摘掉时点击仍由原始输入计数,位置用当前光标补上。
+            Native.POINT cursor;
+            if (Native.GetCursorPos(out cursor)) ClickHeat.Record(t, cursor.X, cursor.Y, button);
             LiveRate.AddClick();
             MarkDirty();
         }
@@ -1634,7 +1658,9 @@ namespace KeyMouseStats
             using (GraphicsPath path = RoundedPath(new Rectangle(Point.Empty, ClientSize), (int)Math.Round(16 * s)))
             {
                 using (SolidBrush bg = new SolidBrush(ArtTheme.Current.Card)) g.FillPath(bg, path);
-                if(EuroTruckArt.Active){GraphicsState artState=g.Save();g.SetClip(path);EuroTruckArt.DrawWidget(g,new RectangleF(0,0,ClientSize.Width,ClientSize.Height));g.Restore(artState);}
+                if(GujianArt.Active){GraphicsState artState=g.Save();g.SetClip(path);GujianArt.DrawWidget(g,new RectangleF(0,0,ClientSize.Width,ClientSize.Height));g.Restore(artState);}
+                else if(OriArt.Active){GraphicsState artState=g.Save();g.SetClip(path);OriArt.DrawWidget(g,new RectangleF(0,0,ClientSize.Width,ClientSize.Height));g.Restore(artState);}
+                else if(EuroTruckArt.Active){GraphicsState artState=g.Save();g.SetClip(path);EuroTruckArt.DrawWidget(g,new RectangleF(0,0,ClientSize.Width,ClientSize.Height));g.Restore(artState);}
                 else if(WuxiaArt.Active){GraphicsState artState=g.Save();g.SetClip(path);WuxiaArt.DrawWidget(g,new RectangleF(0,0,ClientSize.Width,ClientSize.Height));g.Restore(artState);}
                 if(ThemeArt.Active)
                 {
@@ -1644,12 +1670,12 @@ namespace KeyMouseStats
             }
 
             using (SolidBrush b = new SolidBrush(ArtTheme.Current.Text))
-                g.DrawString("键鼠统计", _fTitle, b, 16 * s, 9 * s);
+                g.DrawString(BuildFlavor.ProductName, _fTitle, b, 16 * s, 9 * s);
             // 1.8.0:目标达成的庆祝(一次性,播完自动停表;按住键/锁屏时由 Motion.Paused 停住)。
             PaintCelebration(g, s);
 
-            string modeName = _mode == 2 ? "累计" : _mode == 1 ? "目标" : "今日";
-            string modeText = string.Format("{0} · {1:MM-dd}", modeName, Store.Day);
+            string modeName = _mode == 2 ? "累计" : _mode == 1 ? "目标" : _mode == 3 ? "存储" : "今日";
+            string modeText = _mode == 3 ? "存储 · 占用" : string.Format("{0} · {1:MM-dd}", modeName, Store.Day);
             RectangleF modeRect = new RectangleF(0, 13 * s, ClientSize.Width - 16 * s, 20 * s);
             using (SolidBrush b = new SolidBrush(ArtTheme.Current.Muted))
                 g.DrawString(modeText, _fMode, b, modeRect, _rightAlign);
@@ -1658,6 +1684,7 @@ namespace KeyMouseStats
                 g.DrawLine(pen, 14 * s, 36 * s, ClientSize.Width - 14 * s, 36 * s);
 
             if (_mode == 1) { PaintGoal(g); return; }
+            if (_mode == 3) { PaintStorage(g); return; }
             DayRecord c = _mode == 2 ? ToDayRecord(Store.Total) : Store.Today;
             float col2 = ClientSize.Width / 2f + 6;
 
@@ -1693,7 +1720,23 @@ namespace KeyMouseStats
         private void DrawCard(Graphics g, float x, float y, Color dot, string label, string value)
         {
             float s = _s;
-            if(WuxiaArt.Active)
+            if(GujianArt.Active)
+            {
+                RectangleF panel=new RectangleF(x-5*s,y-3*s,ClientSize.Width/2f-17*s,42*s);
+                using(GraphicsPath root=RoundedPath(Rectangle.Round(panel),(int)Math.Round(7*s)))
+                using(SolidBrush shade=new SolidBrush(Color.FromArgb(112,ArtTheme.Current.Sidebar)))
+                using(Pen edge=new Pen(Color.FromArgb(120,ArtTheme.Current.Orange),.8f)){g.FillPath(shade,root);g.DrawPath(edge,root);}
+                using(SolidBrush jade=new SolidBrush(Color.FromArgb(205,ArtTheme.Current.Cyan)))g.FillEllipse(jade,panel.Right-8*s,panel.Y+4*s,3*s,3*s);
+            }
+            else if(OriArt.Active)
+            {
+                RectangleF panel=new RectangleF(x-5*s,y-3*s,ClientSize.Width/2f-17*s,42*s);
+                using(GraphicsPath root=RoundedPath(Rectangle.Round(panel),(int)Math.Round(10*s)))
+                using(SolidBrush shade=new SolidBrush(Color.FromArgb(102,ArtTheme.Current.Sidebar)))
+                using(Pen edge=new Pen(Color.FromArgb(100,ArtTheme.Current.Cyan),.8f)){g.FillPath(shade,root);g.DrawPath(edge,root);}
+                using(SolidBrush mote=new SolidBrush(Color.FromArgb(190,ArtTheme.Current.Cyan)))g.FillEllipse(mote,panel.Right-8*s,panel.Y+4*s,3*s,3*s);
+            }
+            else if(WuxiaArt.Active)
             {
                 RectangleF panel=new RectangleF(x-5*s,y-3*s,ClientSize.Width/2f-17*s,42*s);
                 using(SolidBrush shade=new SolidBrush(Color.FromArgb(116,ArtTheme.Current.Sidebar)))g.FillRectangle(shade,panel);
@@ -1751,6 +1794,96 @@ namespace KeyMouseStats
                 g.DrawString("目标：" + WellbeingSettings.GoalName + " · 右键修改", _fMode, text,
                     new RectangleF(12 * s, 182 * s, ClientSize.Width - 24 * s, 20 * s), center);
             }
+        }
+
+        /// <summary>
+        /// 存储页:本程序共占用 + 四块明细 + 外部字符日志。只读,不改任何数据。
+        /// 大小按 30 秒缓存;进入本页时强制重算一次。
+        /// </summary>
+        private void PaintStorage(Graphics g)
+        {
+            float s = _s;
+            ArtTheme theme = ArtTheme.Current;
+            if (_storage == null || (DateTime.Now - _storageAt).TotalSeconds > 30)
+            {
+                _storage = StorageUsage.Measure();
+                _storageAt = DateTime.Now;
+            }
+            StorageUsage usage = _storage;
+            long total = usage.ProgramTotal;
+            float right = ClientSize.Width - 16 * s;
+
+            using (SolidBrush muted = new SolidBrush(theme.Muted))
+                g.DrawString("本程序共占用", _fLabel, muted, 16 * s, 42 * s);
+            using (SolidBrush text = new SolidBrush(theme.Text))
+                g.DrawString(StorageUsage.FormatSize(total), _fValue, text, 16 * s, 55 * s);
+            using (SolidBrush muted = new SolidBrush(theme.Muted))
+            using (StringFormat far = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Near })
+                g.DrawString("4 项本地数据", _fLabel, muted, new RectangleF(16 * s, 60 * s, ClientSize.Width - 32 * s, 14 * s), far);
+
+            string[] names = { "程序本体", "历史备份", "核心统计", "日报归档" };
+            long[] values = { usage.ProgramBytes, usage.BackupBytes, usage.CoreBytes, usage.ReportBytes };
+            Color[] colors = { theme.Accent, theme.Orange, theme.Green, theme.Purple };
+
+            // 堆叠条:按占比铺色,裁剪到圆角轨道内。
+            RectangleF bar = new RectangleF(16 * s, 88 * s, ClientSize.Width - 32 * s, 10 * s);
+            using (GraphicsPath track = RoundedPath(new Rectangle((int)bar.X, (int)bar.Y, (int)bar.Width, (int)bar.Height), (int)Math.Round(4 * s)))
+            {
+                using (SolidBrush bg = new SolidBrush(Color.FromArgb(46, theme.Line))) g.FillPath(bg, track);
+                if (total > 0)
+                {
+                    int[] order = { 0, 1, 2, 3 };
+                    Array.Sort(order, delegate(int a, int b) { return values[b].CompareTo(values[a]); });
+                    GraphicsState state = g.Save();
+                    g.SetClip(track);
+                    float x = bar.X;
+                    for (int i = 0; i < order.Length; i++)
+                    {
+                        long value = values[order[i]];
+                        if (value <= 0) continue;
+                        float width = (float)(bar.Width * (double)value / total);
+                        if (width < 1f) width = 1f;
+                        using (SolidBrush segment = new SolidBrush(colors[order[i]]))
+                            g.FillRectangle(segment, x, bar.Y, width, bar.Height);
+                        x += width;
+                    }
+                    g.Restore(state);
+                }
+                using (Pen edge = new Pen(Color.FromArgb(55, theme.Line))) g.DrawPath(edge, track);
+            }
+
+            // 明细按大小降序排列,右侧浮百分比。
+            float rowY = 106 * s;
+            float rowStep = 17 * s;
+            int[] rows = { 0, 1, 2, 3 };
+            Array.Sort(rows, delegate(int a, int b) { return values[b].CompareTo(values[a]); });
+            using (StringFormat far = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Near })
+            {
+                for (int i = 0; i < rows.Length; i++)
+                {
+                    int index = rows[i];
+                    using (SolidBrush dot = new SolidBrush(colors[index]))
+                        g.FillEllipse(dot, 18 * s, rowY + 3 * s, 4 * s, 4 * s);
+                    using (SolidBrush muted = new SolidBrush(theme.Muted))
+                        g.DrawString(names[index], _fLabel, muted, 28 * s, rowY);
+                    using (SolidBrush text = new SolidBrush(theme.Text))
+                        g.DrawString(StorageUsage.FormatSize(values[index]), _fLabel, text,
+                            new RectangleF(84 * s, rowY, ClientSize.Width - 84 * s - 58 * s, 14 * s), far);
+                    using (SolidBrush muted = new SolidBrush(theme.Muted))
+                        g.DrawString(StorageUsage.PercentText(values[index], total), _fLabel, muted,
+                            new RectangleF(right - 44 * s, rowY, 44 * s, 14 * s), far);
+                    rowY += rowStep;
+                }
+            }
+
+            using (Pen line = new Pen(Color.FromArgb(70, theme.Line))) g.DrawLine(line, 16 * s, 172 * s, right, 172 * s);
+            string footnote = usage.CharacterExists
+                ? "* 字符日志 " + StorageUsage.FormatSizePrecise(usage.CharacterBytes) + " 外部只读，未计入"
+                : "* 字符日志未启用 · 外部只读";
+            using (Font foot = new Font("Microsoft YaHei UI", 9f * s, GraphicsUnit.Pixel))
+            using (SolidBrush muted = new SolidBrush(theme.Muted))
+            using (StringFormat trim = new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap })
+                g.DrawString(footnote, foot, muted, new RectangleF(16 * s, 176 * s, ClientSize.Width - 32 * s, 14 * s), trim);
         }
 
         /// <summary>目标达成、连续使用与每日摘要的提示。三者都默认关闭。</summary>
@@ -1882,7 +2015,8 @@ namespace KeyMouseStats
                 }
                 else
                 {
-                    _mode = (_mode + 1) % 3;
+                    _mode = (_mode + 1) % 4;
+                    if (_mode == 3) _storage = null;   // 进入存储页时重算,不在后台常驻扫描
                     _dirtyUI = true;
                 }
             }
@@ -2038,7 +2172,7 @@ namespace KeyMouseStats
         {
             _tray = new NotifyIcon();
             _tray.Icon = MakeIcon();
-            _tray.Text = "键鼠统计 " + BuildInfo.Version + " 正式版";
+            _tray.Text = BuildFlavor.ProductName + " " + BuildInfo.Version;
             _tray.Visible = true;
             _tray.ContextMenuStrip = _menu;
             _tray.MouseDoubleClick += delegate { ToggleVisible(); };
@@ -2073,7 +2207,30 @@ namespace KeyMouseStats
             if(_tip!=null) { _tip.BackColor=ArtTheme.Current.Card;_tip.ForeColor=ArtTheme.Current.Text; }
             Invalidate();
         }
+        private static Icon _brandIcon;
+        /// <summary>2.0.6:程序图标改为内嵌的 32 位多尺寸 ICO(奥日定制版同款 K 标)。
+        /// 正式版嵌入 AppIcon 资源;清爽版没有资源,回退到 exe 自身的文件图标,最后才是旧的手绘图标。</summary>
         internal static Icon MakeIcon()
+        {
+            try
+            {
+                if (_brandIcon == null)
+                {
+                    using (Stream stream = typeof(StatsWidget).Assembly.GetManifestResourceStream("AppIcon"))
+                        if (stream != null) _brandIcon = new Icon(stream, SystemInformation.SmallIconSize);
+                }
+                if (_brandIcon != null) return (Icon)_brandIcon.Clone();
+            }
+            catch { }
+            try
+            {
+                Icon associated = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                if (associated != null) return associated;
+            }
+            catch { }
+            return DrawnIcon();
+        }
+        private static Icon DrawnIcon()
         {
             try
             {

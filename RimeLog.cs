@@ -72,6 +72,9 @@ namespace KeyMouseStats
             catch (ArgumentOutOfRangeException) { return "?"; }
         }
 
+        /// <summary>「标点」这一类在 Classify / RimeSlice.Composition 里的下标。符号(IsSymbol)也算这一类。</summary>
+        public const int PunctuationClass = 1;
+
         /// <summary>字符构成分类。顺序要紧:先认 CJK,再看标点,最后才是字母数字。</summary>
         public static int Classify(int codePoint)
         {
@@ -115,10 +118,16 @@ namespace KeyMouseStats
     internal sealed class RimeSlice
     {
         public DateTime From, To;
+        /// <summary>区间内的上屏字数与上屏次数(原口径:含标点,换行不计)。</summary>
         public long Chars;
         public long Commits;
+        /// <summary>不含标点的字数,与「含文字的上屏次数」配套,只服务于「平均每次字数」这张卡。</summary>
+        public long TextChars;
+        public long TextCommits;
         public int ActiveDays;
         public readonly Dictionary<int, long> CharCounts = new Dictionary<int, long>();
+        /// <summary>连续汉字串里切出的 2–4 字词组,用于「高频词组」页签。</summary>
+        public readonly Dictionary<string, long> PhraseCounts = new Dictionary<string, long>(StringComparer.Ordinal);
         public readonly long[] HourChars = new long[24];
         public readonly long[] HourCommits = new long[24];
         /// <summary>词长分布:下标 1..7 是真实长度,下标 8 表示「8 个及以上」;下标 0 未用。</summary>
@@ -178,6 +187,16 @@ namespace KeyMouseStats
             get { return Commits > 0 ? Chars / (double)Commits : 0; }
         }
 
+        /// <summary>
+        /// 平均每次上屏的字数,**不含标点**:标点不计入字数,一次只上屏标点的提交也不计入次数。
+        /// 中文输入法里「，」「。」通常单独提交一次,把它们算进次数会把平均值系统性拉低。
+        /// 空区间(或区间内只有标点)返回 0,调用方自己决定显示 "--"。
+        /// </summary>
+        public double AverageTextChars
+        {
+            get { return TextCommits > 0 ? TextChars / (double)TextCommits : 0; }
+        }
+
         /// <summary>有数据的天数的日均字数(不是自然日均,没打字的日子不该拉低它)。</summary>
         public double AverageCharsPerActiveDay
         {
@@ -210,6 +229,47 @@ namespace KeyMouseStats
             if (limit > 0 && list.Count > limit) list.RemoveRange(limit, list.Count - limit);
             return list;
         }
+
+        /// <summary>高频词组:从每次上屏的连续汉字串里取 2–4 字滑窗,按出现次数排序。</summary>
+        public List<KeyValuePair<string, long>> TopPhrases(int limit)
+        {
+            List<KeyValuePair<string, long>> list = new List<KeyValuePair<string, long>>(PhraseCounts);
+            list.Sort(delegate(KeyValuePair<string, long> a, KeyValuePair<string, long> b)
+            {
+                int byCount = b.Value.CompareTo(a.Value);
+                return byCount != 0 ? byCount : string.CompareOrdinal(a.Key, b.Key);
+            });
+            if (limit > 0 && list.Count > limit) list.RemoveRange(limit, list.Count - limit);
+            return list;
+        }
+
+        /// <summary>把一次上屏文本切成 2–4 字词组;只取连续汉字段,标点/字母处断开。</summary>
+        public static void AddPhrases(string text, RimeSlice slice)
+        {
+            if (string.IsNullOrEmpty(text) || slice == null) return;
+            List<int> points = RimeText.CodePoints(text);
+            List<int> run = new List<int>();
+            for (int i = 0; i <= points.Count; i++)
+            {
+                bool cjk = i < points.Count && RimeText.IsCjk(points[i]);
+                if (cjk) { run.Add(points[i]); continue; }
+                if (run.Count >= 2)
+                {
+                    for (int length = 2; length <= 4 && length <= run.Count; length++)
+                        for (int start = 0; start + length <= run.Count; start++)
+                        {
+                            StringBuilder phrase = new StringBuilder(length * 2);
+                            for (int k = 0; k < length; k++) phrase.Append(char.ConvertFromUtf32(run[start + k]));
+                            string key = phrase.ToString();
+                            long value;
+                            slice.PhraseCounts.TryGetValue(key, out value);
+                            slice.PhraseCounts[key] = value + 1;
+                        }
+                }
+                run.Clear();
+            }
+        }
+
     }
 
     /// <summary>
@@ -270,11 +330,15 @@ namespace KeyMouseStats
 
         public bool HasData { get { return TotalCommits > 0; } }
 
+        /// <summary>测试/预览用:非空时覆盖默认日志路径,不读写用户真实日志。</summary>
+        internal static string PathOverride { get; set; }
+
         /// <summary>Rime 的默认日志位置(%APPDATA%\Rime\commit_log.csv)。</summary>
         public static string DefaultPath
         {
             get
             {
+                if (!string.IsNullOrEmpty(PathOverride)) return PathOverride;
                 string roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
                 if (string.IsNullOrEmpty(roaming)) return "";
                 return Path.Combine(Path.Combine(roaming, "Rime"), "commit_log.csv");
@@ -539,14 +603,21 @@ namespace KeyMouseStats
                 activeDays[day] = true;
 
                 List<int> points = RimeText.CodePoints(commit.Text);
+                int textCount = 0;
                 for (int k = 0; k < points.Count; k++)
                 {
                     long value;
                     if (!slice.CharCounts.TryGetValue(points[k], out value) && RimeText.IsCjk(points[k]))
                         slice.DistinctHan++;
                     slice.CharCounts[points[k]] = value + 1;
-                    slice.Composition[RimeText.Classify(points[k])]++;
+                    int kind = RimeText.Classify(points[k]);
+                    slice.Composition[kind]++;
+                    // 「平均每次字数」只数非标点字符:标点不算字,只上屏标点的那一次也不算次数。
+                    if (kind != RimeText.PunctuationClass) textCount++;
                 }
+                slice.TextChars += textCount;
+                if (textCount > 0) slice.TextCommits++;
+                RimeSlice.AddPhrases(commit.Text, slice);
 
                 int length = points.Count;
                 if (length > 0)

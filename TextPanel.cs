@@ -26,6 +26,11 @@ namespace KeyMouseStats
         private int _textChart;
         /// <summary>右卡模式:0 词长 / 1 字符构成 / 2 输入节奏。</summary>
         private int _textWordMode;
+        /// <summary>高频字符卡:0 单字 / 1 词组;0 仅汉字 / 1 含标点;最近上屏是否模糊。</summary>
+        private int _textWordTab, _textCharFilter;
+        private bool _textBlurRecent;
+        private readonly List<string> _textTopLabels = new List<string>();
+        private readonly List<long> _textTopValues = new List<long>();
         /// <summary>上一个等长区间的聚合,用于「较上期 ±%」。</summary>
         private RimeSlice _textPrev;
         /// <summary>当前帧登记的可悬停矩形与它们的编码(kind*1000+index)。</summary>
@@ -113,7 +118,11 @@ namespace KeyMouseStats
         {
             if (id >= 400 && id <= 403)
             {
+                int previous = _textRange;
                 _textRange = id - 400;
+                // 今日只有一根柱子,自动切到「时段」;回到多日区间时恢复「每日」。
+                if (_textRange == 0) _textChart = 1;
+                else if (previous == 0) _textChart = 0;
                 _rimeSlice = null;
                 Motion.Start(EnterMotionKey, 280, Ease.OutCubic);
                 return;
@@ -142,6 +151,9 @@ namespace KeyMouseStats
                 Motion.Start(EnterMotionKey, 280, Ease.OutCubic);
                 return;
             }
+            if (id == 408) { _textBlurRecent = !_textBlurRecent; return; }
+            if (id == 413 || id == 414) { _textCharFilter = id - 413; return; }
+            if (id == 415 || id == 416) { _textWordTab = id - 415; return; }
         }
 
         /// <summary>刷新频率菜单:dirty 后就地重读,不需要重启面板。</summary>
@@ -249,8 +261,25 @@ namespace KeyMouseStats
             PaintTextMetric(g, Cx + (tileW + gap), Cy + 8, tileW, "上屏次数", Analysis.FmtCount(slice.Commits), Cgreen,
                 DeltaText(_textPrev, slice.Commits, true));
             PaintTextMetric(g, Cx + 2 * (tileW + gap), Cy + 8, tileW, "平均每次字数",
-                slice.Commits > 0 ? slice.AverageChars.ToString("0.00", CultureInfo.InvariantCulture) : "--", Cblue, "字 / 次上屏");
-            PaintTextMetric(g, Cx + 3 * (tileW + gap), Cy + 8, tileW, "今日字数", Analysis.FmtCount(todayChars), Cblue, DateTime.Today.ToString("MM 月 dd 日"));
+                slice.TextCommits > 0 ? slice.AverageTextChars.ToString("0.00", CultureInfo.InvariantCulture) : "--", Cblue,
+                "字 / 次 · 不含标点");
+            // 第 4 张卡跟随区间:今日看「每分钟上屏」,多日看「日均上屏」,不再重复展示今日字数。
+            string fourthLabel, fourthValue, fourthNote;
+            if (_textRange == 0)
+            {
+                fourthLabel = "每分钟上屏";
+                fourthValue = slice.HasData ? slice.CharsPerActiveMinute.ToString("0.#", CultureInfo.InvariantCulture) : "--";
+                fourthNote = "字 / 活跃分钟 · 今日";
+            }
+            else
+            {
+                int calendarDays = TextRangeDays[_textRange];
+                int denom = slice.ActiveDays > 0 ? slice.ActiveDays : Math.Max(1, calendarDays);
+                fourthLabel = "日均上屏字数";
+                fourthValue = slice.HasData ? Analysis.FmtCount((long)Math.Round(slice.Chars / (double)denom)) : "--";
+                fourthNote = "按有上屏 " + denom + " 天";
+            }
+            PaintTextMetric(g, Cx + 3 * (tileW + gap), Cy + 8, tileW, fourthLabel, fourthValue, Cblue, fourthNote);
             PaintTextMetric(g, Cx + 4 * (tileW + gap), Cy + 8, tileW, "不同字符",
                 Analysis.FmtCount(slice.DistinctChars), Cpurple,
                 slice.DistinctChars > 0 ? "汉字 " + Analysis.FmtCount(slice.DistinctHan) + " 种" : "没有上屏");
@@ -270,12 +299,23 @@ namespace KeyMouseStats
             else if (_textWordMode == 2) PaintTextRhythm(g, bx, by, bw, bh, slice);
             else PaintTextWordLength(g, bx, by, bw, bh, slice);
 
-            // ---- 左下:高频字符 Top 20 ----
-            PaintCard(g, Cx, Cy + 320, 520, 168, "高频字符 · TOP 20");
+            // ---- 左下:高频字符 / 高频词组 Top 20 ----
+            PaintCard(g, Cx, Cy + 320, 520, 168, _textWordTab == 0 ? "高频字符 · TOP 20" : "高频词组 · TOP 20");
+            PaintTextControl(g, new RectangleF(Cx + 300, Cy + 329, 48, 24), "汉字", _textCharFilter == 0 && _textWordTab == 0);
+            _chips.Add(new RectangleF(Cx + 300, Cy + 329, 48, 24)); _chipIds.Add(413);
+            PaintTextControl(g, new RectangleF(Cx + 352, Cy + 329, 48, 24), "标点", _textCharFilter == 1 && _textWordTab == 0);
+            _chips.Add(new RectangleF(Cx + 352, Cy + 329, 48, 24)); _chipIds.Add(414);
+            PaintTextControl(g, new RectangleF(Cx + 408, Cy + 329, 46, 24), "单字", _textWordTab == 0);
+            _chips.Add(new RectangleF(Cx + 408, Cy + 329, 46, 24)); _chipIds.Add(415);
+            PaintTextControl(g, new RectangleF(Cx + 458, Cy + 329, 46, 24), "词组", _textWordTab == 1);
+            _chips.Add(new RectangleF(Cx + 458, Cy + 329, 46, 24)); _chipIds.Add(416);
             PaintTextTopChars(g, Cx + 18, Cy + 320 + 40, 520 - 36, 168 - 50, slice);
 
             // ---- 右下:最近上屏 ----
             PaintCard(g, Cx + 537, Cy + 320, 295, 168, "最近上屏");
+            RectangleF blurRect = new RectangleF(Cx + Cw - 16 - 172, Cy + 320 + 9, 56, 24);
+            _chips.Add(blurRect); _chipIds.Add(408);
+            PaintTextControl(g, blurRect, _textBlurRecent ? "明文" : "模糊", _textBlurRecent);
             _textRefreshRect = new RectangleF(Cx + Cw - 16 - 108, Cy + 320 + 9, 108, 24);
             _chips.Add(_textRefreshRect);
             _chipIds.Add(405);
@@ -597,64 +637,90 @@ namespace KeyMouseStats
         /// </summary>
         private void PaintTextTopChars(Graphics g, float x, float y, float w, float h, RimeSlice slice)
         {
-            List<KeyValuePair<int, long>> rows = slice.TopChars(20);
-            if (rows.Count == 0)
+            _textTopLabels.Clear();
+            _textTopValues.Clear();
+            if (_textWordTab == 1)
             {
-                AppText(g, "本区间没有上屏记录", _fSmall, Csub, new RectangleF(x, y + h / 2 - 10, w, 20), false);
+                foreach (KeyValuePair<string, long> row in slice.TopPhrases(20))
+                {
+                    _textTopLabels.Add(row.Key);
+                    _textTopValues.Add(row.Value);
+                }
+            }
+            else
+            {
+                List<KeyValuePair<int, long>> chars = slice.TopChars(240);
+                foreach (KeyValuePair<int, long> row in chars)
+                {
+                    if (_textCharFilter == 0 && !RimeText.IsCjk(row.Key)) continue;
+                    _textTopLabels.Add(RimeText.DisplayName(row.Key));
+                    _textTopValues.Add(row.Value);
+                    if (_textTopLabels.Count >= 20) break;
+                }
+            }
+            if (_textTopLabels.Count == 0)
+            {
+                AppText(g, _textWordTab == 1 ? "本区间没有可切分的词组" : "本区间没有符合筛选的字符", _fSmall, Csub, new RectangleF(x, y + h / 2 - 10, w, 20), false);
                 return;
             }
 
             long sum = 0;
-            foreach (KeyValuePair<int, long> row in rows) sum += row.Value;
+            foreach (long value in _textTopValues) sum += value;
 
-            // 两行字符卡片，从左到右按频次排序。字符、次数与相对频次分层展示。
             Font glyphFont = TextCharFont();
             const int columns = 10;
             const float gap = 6;
             float cellW = (w - (columns - 1) * gap) / columns;
             float cellH = (h - 20 - gap) / 2;
-            long highest = Math.Max(1, rows[0].Value);
+            long highest = Math.Max(1, _textTopValues[0]);
             PointF mouse = ToBase(_mouse);
             mouse = new PointF(mouse.X - ContentX, mouse.Y - ContentY);
 
-            for (int i = 0; i < rows.Count; i++)
+            for (int i = 0; i < _textTopLabels.Count; i++)
             {
                 float cx = x + (i % columns) * (cellW + gap);
                 float cy = y + (i / columns) * (cellH + gap);
                 RectangleF cell = new RectangleF(cx, cy, cellW, cellH);
                 AddTextHit(cell, 4, i);
                 bool hover = cell.Contains(mouse);
+                float fraction = _textTopValues[i] / (float)highest;
+                // 平滑热力:低频深蓝、中频蓝紫、高频亮紫,不再只有前三名有颜色。
+                Color tint = ArtTheme.Mix(Ccard, Cblue, 0.04f + 0.16f * fraction + (hover ? 0.12f : 0f));
+                Color ink = ArtTheme.Mix(Csub, Cblue, 0.45f + 0.5f * fraction);
+                if (fraction > 0.75f) ink = ArtTheme.Mix(Cblue, Cpurple, (fraction - 0.75f) / 0.25f);
                 using (GraphicsPath card = RoundedRect(cx, cy, cellW, cellH, 6))
                 {
-                    using (SolidBrush fill = new SolidBrush(ArtTheme.Mix(Ccard, Cblue, hover ? 0.22 : i < 3 ? 0.10 : 0.035)))
-                        g.FillPath(fill, card);
+                    using (SolidBrush fill = new SolidBrush(tint)) g.FillPath(fill, card);
                     if (hover)
                         using (Pen outline = new Pen(Color.FromArgb(140, Cblue))) g.DrawPath(outline, card);
                 }
-                string name = RimeText.DisplayName(rows[i].Key);
-                Font nameFont = RimeText.CountCodePoints(name) == 1 ? glyphFont : _fSmall;
                 using (StringFormat center = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap })
                 {
-                    using (SolidBrush glyph = new SolidBrush(i < 3 ? Cblue : Ctext))
-                        g.DrawString(name, nameFont, glyph, new RectangleF(cx + 2, cy + 2, cellW - 4, 24), center);
+                    bool single = _textWordTab == 0 && RimeText.CountCodePoints(_textTopLabels[i]) == 1;
+                    using (SolidBrush glyph = new SolidBrush(ink))
+                        g.DrawString(_textTopLabels[i], single ? glyphFont : _fSmall, glyph, new RectangleF(cx + 2, cy + 2, cellW - 4, 24), center);
                     using (SolidBrush count = new SolidBrush(Csub))
-                        g.DrawString(Analysis.FmtCount(rows[i].Value) + " 次", _fAxis, count,
+                        g.DrawString(Analysis.FmtCount(_textTopValues[i]) + " 次", _fAxis, count,
                             new RectangleF(cx + 2, cy + 25, cellW - 4, 14), center);
                 }
                 float trackW = cellW - 14;
                 using (SolidBrush track = new SolidBrush(Color.FromArgb(18, Csub)))
                     g.FillRectangle(track, cx + 7, cy + cellH - 4, trackW, 2);
-                using (SolidBrush frequency = new SolidBrush(Color.FromArgb(i < 3 ? 180 : 85, Cblue)))
+                using (SolidBrush frequency = new SolidBrush(Color.FromArgb(90 + (int)(140 * fraction), Cblue)))
                     g.FillRectangle(frequency, cx + 7, cy + cellH - 4,
-                        Math.Max(1f, trackW * rows[i].Value / highest), 2);
+                        Math.Max(1f, trackW * _textTopValues[i] / highest), 2);
             }
 
-            AppText(g, "按频次排序 · 前 " + rows.Count + " 个字符占总字数 "
-                + (sum > 0 && slice.Chars > 0 ? (sum * 100.0 / slice.Chars).ToString("0", CultureInfo.InvariantCulture) : "0") + "%",
-                _fAxis, Csub, new RectangleF(x, y + h - 12, w, 12), false);
+            string footer;
+            if (_textWordTab == 1)
+                footer = "按出现次数排序 · 前 " + _textTopLabels.Count + " 个词组共出现 " + Analysis.FmtCount(sum) + " 次";
+            else
+                footer = "按频次排序 · 前 " + _textTopLabels.Count + " 个字符占总字数 "
+                    + (sum > 0 && slice.Chars > 0 ? (sum * 100.0 / slice.Chars).ToString("0", CultureInfo.InvariantCulture) : "0") + "%";
+            AppText(g, footer, _fAxis, Csub, new RectangleF(x, y + h - 12, w, 12), false);
         }
 
-        /// <summary>最近上屏:时间 + 文本 + 字数。</summary>
+        /// <summary>最近上屏:时间 + 文本 + 字数;可切换隐私模糊,悬停显示明文。</summary>
         private void PaintTextRecent(Graphics g, float x, float y, float w, float h, RimeSlice slice)
         {
             if (slice.Recent.Count == 0)
@@ -662,22 +728,43 @@ namespace KeyMouseStats
                 AppText(g, "本区间没有上屏记录", _fSmall, Csub, new RectangleF(x, y + h / 2 - 10, w, 20), false);
                 return;
             }
-            int rows = Math.Min(6, slice.Recent.Count);
-            float rowHeight = Math.Min(20f, h / rows);
+            int rows = Math.Min(5, slice.Recent.Count);
+            float rowHeight = 22;
+            PointF mouse = ToBase(_mouse);
+            mouse = new PointF(mouse.X - ContentX, mouse.Y - ContentY);
             for (int i = 0; i < rows; i++)
             {
                 RimeCommit commit = slice.Recent[i];
                 float ry = y + i * rowHeight;
                 AddTextHit(new RectangleF(x, ry, w, rowHeight), 6, i);
+                bool hover = new RectangleF(x, ry, w, rowHeight).Contains(mouse);
                 if (i % 2 == 0)
                     using (SolidBrush rowFill = new SolidBrush(Color.FromArgb(9, Csub)))
                         g.FillRectangle(rowFill, x - 5, ry, w + 10, rowHeight);
                 AppText(g, commit.Time.ToString(commit.Time.Date == DateTime.Today ? "HH:mm" : "MM/dd HH:mm", CultureInfo.InvariantCulture), _fAxis, Csub,
                     new RectangleF(x, ry, 74, rowHeight), false);
-                AppText(g, commit.Text, _fBody, Ctext,
-                    new RectangleF(x + 80, ry, w - 80 - 46, rowHeight), false);
+                if (_textBlurRecent && !hover)
+                {
+                    // 隐私模糊:按字符数铺等比小方块,只在悬停该行时显示明文。
+                    int blocks = Math.Max(3, Math.Min(9, commit.Chars));
+                    float blockW = Math.Min(18, (w - 80 - 48) / (float)blocks - 2);
+                    for (int b = 0; b < blocks; b++)
+                    {
+                        RectangleF block = new RectangleF(x + 80 + b * (blockW + 3), ry + 5, blockW, rowHeight - 10);
+                        using (GraphicsPath path = RoundedRect(block.X, block.Y, block.Width, block.Height, 3))
+                        using (SolidBrush ink = new SolidBrush(Color.FromArgb(110, Csub))) g.FillPath(ink, path);
+                    }
+                }
+                else
+                {
+                    AppText(g, commit.Text, _fBody, Ctext,
+                        new RectangleF(x + 80, ry, w - 80 - 48, rowHeight), false);
+                }
+                RectangleF pill = new RectangleF(x + w - 44, ry + 3, 44, 16);
+                using (GraphicsPath path = RoundedRect(pill.X, pill.Y, pill.Width, pill.Height, 8))
+                using (SolidBrush fill = new SolidBrush(Color.FromArgb(24, Ctext))) g.FillPath(fill, path);
                 AppText(g, commit.Chars.ToString(CultureInfo.InvariantCulture) + " 字", _fAxis, Csub,
-                    new RectangleF(x + w - 42, ry, 42, rowHeight), true);
+                    new RectangleF(pill.X + 4, pill.Y, pill.Width - 8, pill.Height), true);
             }
         }
 
@@ -856,11 +943,10 @@ namespace KeyMouseStats
                         + " (" + (slice.CompositionShare(index) * 100).ToString("0.#", CultureInfo.InvariantCulture) + "%)";
                 case 4:
                 {
-                    List<KeyValuePair<int, long>> chars = slice.TopChars(20);
-                    if (index >= chars.Count) return "";
-                    double share = slice.Chars > 0 ? chars[index].Value * 100.0 / slice.Chars : 0;
-                    return RimeText.DisplayName(chars[index].Key) + " · " + Analysis.FmtCount(chars[index].Value)
-                        + " 次 (" + share.ToString("0.#", CultureInfo.InvariantCulture) + "%)";
+                    if (index >= _textTopLabels.Count) return "";
+                    double share = slice.Chars > 0 ? _textTopValues[index] * 100.0 / slice.Chars : 0;
+                    return _textTopLabels[index] + " · " + Analysis.FmtCount(_textTopValues[index])
+                        + " 次" + (_textWordTab == 0 ? " (" + share.ToString("0.#", CultureInfo.InvariantCulture) + "%)" : "");
                 }
                 default:
                 {

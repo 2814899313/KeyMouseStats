@@ -258,8 +258,6 @@ namespace KeyMouseStats
         /// <summary>1.8.0:上一张键位板,用于换口径/换区间时的交叉淡入。</summary>
         private Bitmap _keyboardPlatePrev;
         private string _keyboardPlateStamp;
-        private bool _showKeyboardHeatmap;
-        private bool _keyboardHoldMode;   // 1.7.6:热力图口径——false 击键次数 / true 累计按住时长
         private bool _keyboardDevicesRead;
         /// <summary>1.8.0:与 _keyboardHoverRects 同序的扫描码,供点击下钻使用。</summary>
         private readonly List<int> _keyboardScans = new List<int>();
@@ -341,13 +339,11 @@ namespace KeyMouseStats
         {
             if(!_keyboardDevicesRead) { KeyboardDevices.Refresh(); _keyboardDevicesRead=true; }
             int layout=Store.KeyboardLayout==0?KeyboardDevices.Suggested:Store.KeyboardLayout;
-            bool holdMode=_keyboardHoldMode;
+            bool holdMode=_keyMetric == 1;
             PaintCard(g,Cx,138,Cw,438,null);
             using(Font title=new Font("Microsoft YaHei UI",17,FontStyle.Bold,GraphicsUnit.Pixel))
                 AppText(g,holdMode?"你的键盘，按住的痕迹":"你的键盘，使用的痕迹",title,Ctext,new RectangleF(Cx+22,153,400,30),false);
-            RectangleF metric=new RectangleF(Cx+Cw-352,152,104,30);
-            _chips.Add(metric);_chipIds.Add(79);
-            PaintChip(g,metric,holdMode?"按住时长":"击键次数",holdMode,null);
+            // 口径切换已上移到页面顶部的二级筛选栏,卡片里只保留配列选择,避免同一个「按住时长」出现两次。
             RectangleF selector=new RectangleF(Cx+Cw-236,152,214,30);
             _chips.Add(selector);_chipIds.Add(75);
             PaintChip(g,selector,KeyboardHeat.Names[layout]+" ▾",false,null);
@@ -454,7 +450,9 @@ namespace KeyMouseStats
                 using(SolidBrush brush=new SolidBrush(fill))
                 using(Pen border=new Pen(champion?Corange:hovered?Cblue:ArtTheme.Mix(fill,Ctext,0.12),champion?2f:hovered?1.6f:0.65f))
                 { keyGraphics.FillPath(brush,path);keyGraphics.DrawPath(border,path); }
-                if(EuroTruckArt.Active)EuroTruckArt.KeyCap(keyGraphics,key,rect,champion);
+                if(GujianArt.Active)GujianArt.KeyCap(keyGraphics,key,rect,champion);
+                else if(OriArt.Active)OriArt.KeyCap(keyGraphics,key,rect,champion);
+                else if(EuroTruckArt.Active)EuroTruckArt.KeyCap(keyGraphics,key,rect,champion);
                 else if(WuxiaArt.Active)WuxiaArt.KeyCap(keyGraphics,key,rect,champion);
                 RectangleF labelRect=rect;
                 if(champion)
@@ -512,7 +510,7 @@ namespace KeyMouseStats
             using(GraphicsPath path=RoundedRect(badge.X,badge.Y,badge.Width,badge.Height,7))
             using(SolidBrush b=new SolidBrush(ArtTheme.Mix(Ccard,Cblue,0.12))) g.FillPath(b,path);
             using(StringFormat center=new StringFormat {Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center})
-            using(SolidBrush b=new SolidBrush(Ctext)) g.DrawString(ThemeArt.Active && hover==null?(EuroTruckArt.Active?"黄金方向盘":WuxiaArt.Active?"武林盟主":BalatroArt.Active?"王牌加冕":MinecraftArt.Active?"钻石成就":ResidentArt.Active?"幸存者徽章":HaloArt.Active?"斯巴达勋章":"大喵加冕"):keyLabel,_fBody,b,badge,center);
+            using(SolidBrush b=new SolidBrush(Ctext)) g.DrawString(ThemeArt.Active && hover==null?(GujianArt.Active?"剑魄共鸣":OriArt.Active?"灵光之键":EuroTruckArt.Active?"黄金方向盘":WuxiaArt.Active?"武林盟主":BalatroArt.Active?"王牌加冕":MinecraftArt.Active?"钻石成就":ResidentArt.Active?"幸存者徽章":HaloArt.Active?"斯巴达勋章":"大喵加冕"):keyLabel,_fBody,b,badge,center);
             string detail;
             if(hover==null) detail=holdMode?"蓝色低频 → 红色高频(按累计按住时长) · 灰色没有样本 · 悬停查看数值":"蓝色低频 → 红色高频 · 灰色为零次 · 悬停查看数值";
             else if(hover.Scan==0) detail="Fn 由硬件处理，无法统计";
@@ -520,6 +518,8 @@ namespace KeyMouseStats
             else detail=Analysis.FmtCount(hoverCount)+" 次击键    /    占全部 "+(total>0?(100.0*hoverCount/total).ToString("0.0",CultureInfo.InvariantCulture):"0.0")+"%";
             if(ThemeArt.Active && hover==null && !holdMode)detail=max>0?favorite+" 是本场最爱 · "+Analysis.FmtCount(max)+" 次 · 金边键帽获得大喵徽章":"还没有击键记录，大喵等你点亮第一颗键。";
             if(ThemeArt.Dark && hover==null && !holdMode)detail=max>0?favorite+" 为核心按键 · "+Analysis.FmtCount(max)+" 次 · 金边标识当前最高频键":"终端待命 · 等待第一条击键记录。";
+            if(GujianArt.Active && hover==null && !holdMode)detail=max>0?favorite+" 引动最强剑魄 · "+Analysis.FmtCount(max)+" 次 · 琴心金纹为其共鸣":"琴弦未动 · 静候第一式落键。";
+            if(OriArt.Active && hover==null && !holdMode)detail=max>0?favorite+" 汇聚最多灵光 · "+Analysis.FmtCount(max)+" 次 · 点亮祖灵叶片":"森林静候第一束按键灵光。";
             if(EuroTruckArt.Active && hover==null && !holdMode)detail=max>0?favorite+" 驶上热键榜首 · "+Analysis.FmtCount(max)+" 次 · 获得黄金方向盘":"车队待命 · 等待第一条击键记录。";
             if(WuxiaArt.Active && hover==null && !holdMode)detail=max>0?favorite+" 登临键谱榜首 · "+Analysis.FmtCount(max)+" 次 · 朱砂金边封为盟主键":"江湖谱尚空 · 等待第一式落键。";
             AppText(g,detail,_fBody,Ctext,new RectangleF(Cx+114,519,445,24),false);

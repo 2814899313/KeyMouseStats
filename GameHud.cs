@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -47,6 +47,8 @@ namespace KeyMouseStats
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g=e.Graphics;g.SmoothingMode=SmoothingMode.AntiAlias;
+            if(GujianArt.Active)GujianArt.DrawHud(g,ClientRectangle,_editing);
+            else if(OriArt.Active)OriArt.DrawHud(g,ClientRectangle,_editing);
             Color accent=ArtTheme.Current.Cyan;
             using(Pen edge=new Pen(_editing?Color.Gold:accent))g.DrawRectangle(edge,0,0,Width-1,Height-1);
             ActiveSession session=ActivityMonitor.CurrentSession;

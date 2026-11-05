@@ -7,9 +7,10 @@ namespace KeyMouseStats
     internal static class WuxiaArt
     {
         internal static bool Active { get { return Store.ThemeId == 10; } }
-        internal static readonly int[] NavSymbols = { 0, 1, 2, 3, 4, 5, 6 };
+        internal static readonly int[] NavSymbols = { 0, 1, 2, 3, 4, 5, 6, 13, 22 };
         internal static readonly int[] MetricSymbols = { 6, 7, 8, 9, 10, 11, 12, 13 };
-        internal static readonly string[] PageLabels = { "神捕 · 江湖录", "本草 · 行迹图", "红玉 · 十二时辰", "紫烟 · 百键谱", "倾城 · 万象册", "彩蝶 · 悟心鉴", "墨痕 · 千字文" };
+        internal static readonly string[] PageLabels = { "神捕 · 江湖录", "本草 · 行迹图", "红玉 · 十二时辰", "紫烟 · 百键谱", "倾城 · 万象册", "彩蝶 · 悟心鉴", "墨痕 · 千字文", "归途 · 日暮卷", "阵图 · 落指处" };
+        private static readonly string[] ExtraPages = { "WuxiaText", "WuxiaDay", "WuxiaHeat" };
 
         private static Image Backgrounds { get { return NikkiArt.Load("WuxiaBackgrounds"); } }
         private static Image Ui { get { return NikkiArt.Load("WuxiaUi"); } }
@@ -20,7 +21,9 @@ namespace KeyMouseStats
 
         internal static void DrawPage(Graphics g, int page, RectangleF bounds)
         {
-            Image atlas = Backgrounds; if (!Active || atlas == null || page < 0 || page >= 6) return;
+            if (!Active || page < 0 || page >= 9) return;
+            if(page>=6){Image image=NikkiArt.Load(ExtraPages[page-6]);if(image!=null)NikkiArt.DrawCached(g,image,Cover(new Rectangle(0,0,image.Width,image.Height),bounds),bounds,.92f,"wuxia-page-"+page);return;}
+            Image atlas = Backgrounds; if (atlas == null) return;
             int col = page % 2, row = page / 2;
             Rectangle source = Rectangle.FromLTRB(col * atlas.Width / 2, row * atlas.Height / 3, (col + 1) * atlas.Width / 2, (row + 1) * atlas.Height / 3);
             source = Cover(source, bounds);

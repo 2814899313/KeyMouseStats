@@ -105,7 +105,10 @@ namespace KeyMouseStats
             if (WellbeingSettings.GoalEnabled)
             {
                 int met, observedDays, streak, previousMet, previousObserved, previousStreak;
-                Wellbeing.GoalStats(now.Start, now.End, out met, out observedDays, out streak);
+                // 空区间的 RangeMetrics.Start/End 仍是结构体默认值(0001-01-01),不能当日期传下去;
+                // 上下两期都只在本期真有完整日时才统计,与 before 侧同一口径。
+                if (now.Days > 0) Wellbeing.GoalStats(now.Start, now.End, out met, out observedDays, out streak);
+                else { met = 0; observedDays = 0; streak = 0; }
                 if (before.Days > 0) Wellbeing.GoalStats(before.Start, before.End, out previousMet, out previousObserved, out previousStreak);
                 else { previousMet = 0; previousObserved = 0; previousStreak = 0; }
                 double currentRate = observedDays > 0 ? (double)met / observedDays : double.NaN;

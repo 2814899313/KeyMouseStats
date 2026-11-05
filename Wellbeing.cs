@@ -207,6 +207,8 @@ namespace KeyMouseStats
         {
             met = 0; observed = 0; streak = 0;
             if (!WellbeingSettings.GoalEnabled) return;
+            // 未设置的区间(如空 RangeMetrics 的默认值)不是日期区间:0001-01-01 往前走一天就越界,Days=0 也不该数。
+            if (start == DateTime.MinValue || end == DateTime.MinValue) return;
             DateTime from, to;
             if (!RangeRules.TryNormalize(start, end, out from, out to)) return;
             bool counting = true;

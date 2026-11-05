@@ -7,19 +7,19 @@ namespace KeyMouseStats
     internal static class MinecraftArt
     {
         public static bool Active { get { return Store.ThemeId==8; } }
-        private static readonly string[] Resources={"MinecraftOverview","MinecraftTrend","MinecraftHours","MinecraftKeys","MinecraftApps","MinecraftInsights"};
+        private static readonly string[] Resources={"MinecraftOverview","MinecraftTrend","MinecraftHours","MinecraftKeys","MinecraftApps","MinecraftInsights","MinecraftText","MinecraftDay","MinecraftHeat"};
         
         public static bool HasScene(int page)
         {
-            if(page<0||page>=6)return false;
+            if(page<0||page>=Resources.Length)return false;
             return NikkiArt.Load(Resources[page])!=null;
         }
         public static void DrawPage(Graphics g,int page,RectangleF bounds)
         {
             if(!Active||!HasScene(page))return;
-            Image image=NikkiArt.Load(Resources[page]);NikkiArt.DrawCached(g,image,new Rectangle(0,0,image.Width,image.Height),bounds,.82f,"minecraft-page-"+page);
+            Image image=NikkiArt.Load(Resources[page]);NikkiArt.DrawCached(g,image,WuxiaArt.Cover(new Rectangle(0,0,image.Width,image.Height),bounds),bounds,.82f,"minecraft-page-"+page);
         }
-        public static readonly string[] PageLabels={"OVERWORLD","MINECART / TRAIL","AMETHYST / CAVE","CRAFTING / TABLE","VILLAGE / TRADE","ENCHANTING / BOOK","BOOK / QUILL"};
+        public static readonly string[] PageLabels={"OVERWORLD","MINECART / TRAIL","AMETHYST / CAVE","CRAFTING / TABLE","VILLAGE / TRADE","ENCHANTING / BOOK","BOOK / QUILL","SUNSET / JOURNAL","REDSTONE / HEAT"};
         private static Image Icons { get { return NikkiArt.Load("MinecraftIcons"); } }
         public static bool HasIcons { get { return Icons!=null; } }
         public static void Symbol(Graphics g,int kind,RectangleF bounds)
@@ -38,12 +38,14 @@ namespace KeyMouseStats
     internal static class BalatroArt
     {
         internal static bool Active{get{return Store.ThemeId==9;}}
-        internal static readonly int[] NavSymbols={8,7,4,0,5,11,9};
-        internal static readonly string[] PageLabels={"JOKER / ANTE","ORBIT / STREAK","SUN / MOON","DECK / HAND","TABLE / CAST","ARCANA / SCORE","SCRIBE / TALLY"};
+        internal static readonly int[] NavSymbols={8,7,4,0,5,11,9,10,6};
+        internal static readonly string[] PageLabels={"JOKER / ANTE","ORBIT / STREAK","SUN / MOON","DECK / HAND","TABLE / CAST","ARCANA / SCORE","SCRIBE / TALLY","RUN / LEDGER","SUIT / HEAT"};
+        private static readonly string[] ExtraPages={"BalatroText","BalatroDay","BalatroHeat"};
         internal static void DrawPage(Graphics g,int page,RectangleF bounds)
         {
-            if(!Active||page<0||page>=6)return;Image atlas=NikkiArt.Load("BalatroBackgrounds");if(atlas==null)return;
-            int col=page%2,row=page/2;Rectangle source=Rectangle.FromLTRB(col*atlas.Width/2,row*atlas.Height/3,(col+1)*atlas.Width/2,(row+1)*atlas.Height/3);
+            if(!Active||page<0||page>=9)return;
+            if(page>=6){Image image=NikkiArt.Load(ExtraPages[page-6]);if(image!=null)NikkiArt.DrawCached(g,image,WuxiaArt.Cover(new Rectangle(0,0,image.Width,image.Height),bounds),bounds,.88f,"balatro-page-"+page);return;}
+            Image atlas=NikkiArt.Load("BalatroBackgrounds");if(atlas==null)return;int col=page%2,row=page/2;Rectangle source=Rectangle.FromLTRB(col*atlas.Width/2,row*atlas.Height/3,(col+1)*atlas.Width/2,(row+1)*atlas.Height/3);
             NikkiArt.DrawCached(g,atlas,source,bounds,.86f,"balatro-page-"+page);
         }
         internal static void Symbol(Graphics g,int kind,RectangleF bounds)

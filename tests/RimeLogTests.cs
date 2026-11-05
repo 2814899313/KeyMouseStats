@@ -41,6 +41,7 @@ internal static class RimeLogTests
         RecordJoining();
         RecentWindow();
         CompositionAndRhythm();
+        PunctuationExcludedAverage();
         RefreshSetting();
         Console.WriteLine("RimeLogTests: " + checks + " checks passed");
     }
@@ -112,6 +113,42 @@ internal static class RimeLogTests
             // 10:00:00 与 10:00:30 相隔 30 秒算同一段;10:05 相隔 270 秒另起一段。
             Check(slice.LongestBurstMinutes == 1, "the longest burst is one minute long");
             Check(slice.LongestBurstChars == 8, "the longest burst holds eight characters");
+        }
+        finally { TryDelete(path); }
+    }
+
+    // ---------------------------------------------------------------- 平均每次字数:不含标点
+
+    /// <summary>
+    /// 「平均每次字数」只数非标点字符:标点不算字,只上屏标点的那一次也不算次数。
+    /// 中文输入法里「，」「。」通常单独提交一次,把它们算进次数会把平均值系统性拉低。
+    /// </summary>
+    private static void PunctuationExcludedAverage()
+    {
+        StringBuilder csv = new StringBuilder();
+        csv.AppendLine("2026-10-30 09:00:00,3,你好，");
+        csv.AppendLine("2026-10-30 09:00:05,1,，");
+        csv.AppendLine("2026-10-30 09:00:10,2,世界");
+        csv.AppendLine("2026-10-30 09:00:15,1,。");
+        csv.AppendLine("2026-10-31 10:00:00,1,。");
+        string path = WriteTemp("rime-tests-punctuation.csv", csv.ToString());
+        try
+        {
+            RimeTextStats stats = RimeTextStats.Load(path);
+            RimeSlice slice = stats.Slice(new DateTime(2026, 10, 30), new DateTime(2026, 10, 30));
+            // 原口径不变:纯标点仍然算上屏次数与字数,卡片 1/2 与图表继续用它。
+            Check(slice.Commits == 4, "punctuation commits still count as commits");
+            Check(slice.Chars == 7, "punctuation still counts toward the declared total");
+            Check(Math.Abs(slice.AverageChars - 1.75) < 0.0001, "the old average still includes punctuation");
+            // 新口径:4 个非标点字(你好世界)、2 次含文字的上屏,平均 2.00 而不是 1.75。
+            Check(slice.TextChars == 4, "only non-punctuation characters reach the new total");
+            Check(slice.TextCommits == 2, "a punctuation-only commit is not a text commit");
+            Check(Math.Abs(slice.AverageTextChars - 2.0) < 0.0001, "the new average ignores punctuation");
+            // 当天只有标点:次数仍记,但没有可平均的东西,返回 0 由调用方显示 "--"。
+            RimeSlice onlyPunctuation = stats.Slice(new DateTime(2026, 10, 31), new DateTime(2026, 10, 31));
+            Check(onlyPunctuation.Commits == 1 && onlyPunctuation.TextCommits == 0 && onlyPunctuation.TextChars == 0,
+                "a punctuation-only day has no text characters");
+            Check(onlyPunctuation.AverageTextChars == 0, "a punctuation-only day has no text average");
         }
         finally { TryDelete(path); }
     }
