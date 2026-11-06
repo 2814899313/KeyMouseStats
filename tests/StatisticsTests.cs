@@ -11,6 +11,11 @@ internal static class StatisticsTests
     private static void Near(double a, double b, string name) { Check(Math.Abs(a - b) < .00001, name); }
     private static void Main()
     {
+        Environment.ExitCode = KeyMouseStats.Tests.TestDiagnostics.Run("StatisticsTests", Run);
+    }
+
+    private static void Run()
+    {
         List<double> values = new List<double> { 5, 1, 3, 2, 4 };
         Near(PersonalStats.Quantile(values, .5), 3, "median"); Near(PersonalStats.Quantile(values, .9), 4.6, "interpolated P90");
         Near(PersonalStats.Mean(values), 3, "mean"); Near(PersonalStats.Sd(values), Math.Sqrt(2.5), "sample sd");
@@ -29,7 +34,9 @@ internal static class StatisticsTests
         Check(double.IsNaN(PersonalStats.MovingAverage(DateTime.Today.AddDays(-1), 0)), "missing day breaks moving mean");
         Check(PersonalStats.History(DateTime.Today.AddDays(-1), 7, delegate(DayRecord d) { return d.Keys; }).Count == 6, "coverage excludes missing days");
         day.ActiveHours[12] = 60; day.HourKeys[12] = 120; day.HourClicks[12] = 10;
-        Near(Dashboard.HourlyValues(day, DateTime.Today, 3, DateTime.Today.AddHours(13))[12], 2, "hourly key intensity");
+        Near(Dashboard.HourlyValues(day, DateTime.Today, 2, DateTime.Today.AddHours(13))[12], 1, "hourly active minutes");
+        Near(Dashboard.HourlyValues(day, DateTime.Today, 3, DateTime.Today.AddHours(13))[12], 120, "hourly key intensity per active minute");
+        Near(Dashboard.HourlyValues(day, DateTime.Today, 4, DateTime.Today.AddHours(13))[12], 10, "hourly click intensity per active minute");
         Check(double.IsNaN(Dashboard.HourlyValues(day, DateTime.Today, 3, DateTime.Today.AddHours(13))[11]), "no active seconds no intensity");
 
         AppTelemetry.Reset(); DateTime t = DateTime.Today.AddHours(10);
