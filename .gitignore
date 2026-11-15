@@ -28,7 +28,32 @@ tests/*.png
 # Experimental utilities that are not part of the product build
 text-input-demo/
 
+# 本地数据恢复留档与一次性调试产物(不进仓库)
+/_recovery/
+/.tmp-*/
+/_head_*.cs
+/_fixed_*.cs
+/_fix_tests.py
+/_apply_subdir.ps1
+/_unzstd.js
+/_dev.bat
+/_sess_*.jsonl
+/_err.txt
+/_run.txt
+/_s.txt
+/_p.txt
+/_r.txt
+/_l.txt
+/_st.txt
+
+# 根目录设计过程截图(文档用图放在 docs/screenshots)
+/*.png
+
+# 本地内部研究、计划与真实输出样本，不随仓库发布
+/docs/internal/
+
 # OS files
 Thumbs.db
 Desktop.ini
 .DS_Store
+
