@@ -1,8 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
 
@@ -10,8 +12,8 @@ namespace KeyMouseStats
 {
     internal static class ReportDesign
     {
-        public static readonly string[] Names={"输入习惯","每日趋势","应用时间","使用节奏","实时状态","应用时段","应用操作","会话应用","鼠标动作","键位分布","快捷键节省","区间回顾","星期节律","分布","按键时长","应用键位","按住时长趋势"};
-        public static readonly string[] Scope={"操作强度描述使用方式，不代表工作效率。","今日只展示已累计部分；缺失日期不补零。","按活跃观测归因，无法识别的时间单独保留。","连续使用段包含空闲阈值内的短暂停顿。","APM = 最近 60 秒击键与点击；下图观察最近 5 分钟。","只展示实际观测到的应用时间，不从旧汇总反推。","比较各应用的输入构成，不将滚轮次数视为距离。","每一段独立分析，不按全天占比分摊应用时间。","方向和快速移动是行为描述，不推断左右手或操作效果。","按默认键位分组，不代表这些按键用于游戏。","情景估算，不是实际测得的省时；点击「模型」调整假设。","当前区间对比紧随其前的等长区间，今日未结束不参与。","按星期聚合，样本天数决定结果可信度。","用箱线图与直方图看分布，不只比均值。","按住时长不是按压力度；丢抬起是常态，看覆盖率。","按键归因到当时的前台进程，只描述构成，不推断用途。","累计按住按逐键求和；有键按下是墙钟并集，不重复计时。"};
+        public static readonly string[] Names={"输入习惯","实时状态","鼠标动作","分布","按住时长趋势"};
+        public static readonly string[] Scope={"操作强度描述使用方式，不代表工作效率。","","方向和快速移动是行为描述，不推断左右手或操作效果。","用箱线图与直方图看分布，不只比均值。","累计按住按逐键求和；有键按下是墙钟并集，不重复计时。"};
         public static readonly string[] Metrics={"每次点击的击键数","每秒活跃击键","每分钟活跃点击","每次操作移动","每分钟滚轮事件","组合键使用占比"};
         public static readonly string[] Units={"次击键 / 点击","次 / 活跃秒","次 / 活跃分钟","厘米 / 操作","次 / 活跃分钟","%"};
         public static readonly string[] Definitions={
@@ -42,15 +44,15 @@ namespace KeyMouseStats
     }
     internal sealed class ReportPage : Panel
     {
-        internal Control Chart;internal ReportList List;internal int Index;
-        internal string Note;internal bool DetailsOpen,HelpOpen;
-        private readonly Label scope=new Label(),help=new Label();
+        internal Control Chart;internal ReportList List;internal int Index;internal int Kind;
+        internal string Note;internal bool DetailsOpen;
+        private readonly Label scope=new Label();
         private readonly Button details=new Button();
         internal event EventHandler SizeRequested;
         public ReportPage()
         {
             DoubleBuffered=true;
-            Controls.Add(scope);Controls.Add(help);Controls.Add(details);
+            Controls.Add(scope);Controls.Add(details);
             details.FlatStyle=FlatStyle.Flat;details.TextAlign=ContentAlignment.MiddleLeft;
             details.Click+=delegate{DetailsOpen=!DetailsOpen;if(SizeRequested!=null)SizeRequested(this,EventArgs.Empty);};
         }
@@ -58,15 +60,8 @@ namespace KeyMouseStats
         {
             ArtTheme t=ArtTheme.Current;BackColor=(GujianArt.Active||OriArt.Active)?Color.Transparent:t.Background;if(List!=null)List.SetScale(scale);
             int gap=(int)(14*scale),y=0;
-            scope.AutoEllipsis=true;scope.Text=ReportDesign.Scope[Index];scope.ForeColor=t.Muted;scope.BackColor=(GujianArt.Active||OriArt.Active)?Color.Transparent:t.Background;
-            scope.SetBounds(0,0,width,(int)(36*scale));y+=scope.Height;
-            help.Visible=HelpOpen;
-            if(HelpOpen)
-            {
-                help.Text=Note;help.Padding=new Padding((int)(14*scale));help.BackColor=t.Raised;help.ForeColor=t.Text;
-                int h=TextRenderer.MeasureText(Note,Font,new Size(Math.Max(80,width-28*(int)Math.Ceiling(scale)),0),TextFormatFlags.WordBreak).Height+(int)(30*scale);
-                help.SetBounds(0,y,width,h);y+=h+gap;
-            }
+            scope.AutoEllipsis=true;scope.Text=ReportDesign.Scope[Index];scope.Visible=scope.Text.Length>0;scope.ForeColor=t.Muted;scope.BackColor=(GujianArt.Active||OriArt.Active)?Color.Transparent:t.Background;
+            scope.SetBounds(0,0,width,scope.Visible?(int)(36*scale):0);y+=scope.Height;
             ReportVisual visual=Chart as ReportVisual;if(visual!=null)visual.UiScale=scale;
             CrossReportVisual cross=Chart as CrossReportVisual;if(cross!=null)cross.UiScale=scale;
             RangeReportVisual rangeVisual=Chart as RangeReportVisual;if(rangeVisual!=null)rangeVisual.UiScale=scale;
@@ -75,9 +70,9 @@ namespace KeyMouseStats
             HoldReportVisual holdVisual=Chart as HoldReportVisual;if(holdVisual!=null)holdVisual.UiScale=scale;
             AppKeyReportVisual appKeyVisual=Chart as AppKeyReportVisual;if(appKeyVisual!=null)appKeyVisual.UiScale=scale;
             HoldTrendVisual holdTrendVisual=Chart as HoldTrendVisual;if(holdTrendVisual!=null)holdTrendVisual.UiScale=scale;
-            int chartHeight=(int)(scale*(Index==0?ReportVisual.HabitHeight(width/scale):Index==7?325:Index==13?430:Index==15?432:Index==14?392:Index==16?400:300));
+            int chartHeight=(int)(scale*(Kind==0?ReportVisual.HabitHeight(width/scale):Kind==4?560:Kind==13?430:Kind==16?400:300));
             Chart.SetBounds(0,y,width,chartHeight);y+=chartHeight+gap;
-            details.Text=(DetailsOpen?"▾ 收起明细":"▸ 查看明细")+"   ·   "+List.Items.Count+" 项";
+            details.Text=(DetailsOpen?"▾ 收起底层明细":Kind==4?"▸ 查看底层计算口径与采样规范 ↗":"▸ 查看底层计算公式与日志明细 ↗");
             details.ForeColor=t.Accent;details.BackColor=t.Card;details.FlatAppearance.BorderColor=t.Line;
             details.SetBounds(0,y,width,(int)(38*scale));y+=details.Height;
             List.Visible=DetailsOpen;
@@ -103,7 +98,7 @@ namespace KeyMouseStats
         }
         public ReportPage SelectedTab {get{return selected>=0&&selected<TabPages.Count?TabPages[selected]:null;}}
         public int SelectedIndex {get{return selected;}set{if(value<0||value>=TabPages.Count)return;if(SelectedTab!=null)SelectedTab.Visible=false;selected=value;SelectedTab.Visible=true;AutoScrollPosition=Point.Empty;PerformLayout();if(SelectedIndexChanged!=null)SelectedIndexChanged(this,EventArgs.Empty);}}
-        public void AddPage(ReportPage page){TabPages.Add(page);page.Visible=false;Controls.Add(page);page.SizeRequested+=delegate{PerformLayout();};}
+        public void AddPage(ReportPage page){TabPages.Add(page);page.Visible=false;Controls.Add(page);page.SizeRequested+=delegate{PerformLayout();if(page.DetailsOpen&&page.List!=null)AutoScrollPosition=new Point(0,Math.Max(0,page.List.Top-8));};}
         public void ClearPages(){selected=-1;foreach(ReportPage page in TabPages)page.Dispose();TabPages.Clear();Controls.Clear();AutoScrollMinSize=Size.Empty;}
         protected override void OnLayout(LayoutEventArgs e)
         {
@@ -136,6 +131,268 @@ namespace KeyMouseStats
             using(Pen line=new Pen(t.Line))g.DrawLine(line,24,Height/UiScale-1,width-24,Height/UiScale-1);
         }
     }
+    /// <summary>
+    /// 报告页「说明」抽屉。页面高度不再因说明文字伸缩:打开时截取报告并做轻度模糊,
+    /// 右侧滑出抽屉,关闭后恢复。模糊只在小图上做,避免每帧处理整窗像素。
+    /// </summary>
+    internal sealed class ReportHelpOverlay : Form
+    {
+        private readonly Timer _timer=new Timer{Interval=16};
+        private readonly Font _titleFont=new Font("Microsoft YaHei UI",18f,FontStyle.Bold,GraphicsUnit.Pixel);
+        private readonly Font _bodyFont=new Font("Microsoft YaHei UI",12f,GraphicsUnit.Pixel);
+        private readonly Font _smallFont=new Font("Microsoft YaHei UI",11f,GraphicsUnit.Pixel);
+        private Bitmap _backdrop;private Control _source;private float _progress,_scroll,_scale=1;
+        private int _direction;private string _title="",_scope="",_note="";
+        private RectangleF _closeRect,_drawerRect;private float _contentHeight;
+        internal ReportHelpOverlay()
+        {
+            FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;StartPosition=FormStartPosition.Manual;KeyPreview=true;
+            BackColor=ArtTheme.Current.Background;DoubleBuffered=true;TopMost=true;
+            _timer.Tick+=delegate
+            {
+                _progress+=_direction*0.12f;
+                if(_direction>0&&_progress>=1){_progress=1;_timer.Stop();}
+                if(_direction<0&&_progress<=0){_progress=0;_timer.Stop();DisposeBackdrop();Close();}
+                Invalidate();
+            };
+        }
+        private void Prepare(Control source,string title,string scope,string note,float scale)
+        {
+            _source=source;_title=title??"";_scope=scope??"";_note=note??"";_scale=scale>0?scale:1;_scroll=0;_direction=1;_progress=0;
+            CaptureBackdrop();
+            Form owner=source==null?null:source.FindForm();
+            ClientSize=owner==null?new Size(900,700):owner.ClientSize;
+            if(owner!=null)Location=owner.PointToScreen(Point.Empty);
+            Owner=owner;
+        }
+        internal void ShowHelp(Control source,string title,string scope,string note,float scale)
+        {
+            Prepare(source,title,scope,note,scale);
+            _timer.Start();
+            Form owner=Owner;
+            if(owner!=null)ShowDialog(owner);else ShowDialog();
+        }
+        /// <summary>离屏预览用:不阻塞、由调用方关闭。</summary>
+        internal void ShowPreview(Control source,string title,string scope,string note,float scale)
+        {
+            Prepare(source,title,scope,note,scale);
+            Show(Owner);_timer.Start();
+        }
+        internal void CloseHelp()
+        {
+            if(!Visible)return;
+            _direction=-1;_timer.Start();
+        }
+        private void DisposeBackdrop()
+        {
+            if(_backdrop!=null){_backdrop.Dispose();_backdrop=null;}
+        }
+        private void CaptureBackdrop()
+        {
+            DisposeBackdrop();
+            if(_source==null||_source.Width<=0||_source.Height<=0)return;
+            try
+            {
+                using(Bitmap full=new Bitmap(_source.Width,_source.Height))
+                {
+                    _source.DrawToBitmap(full,new Rectangle(0,0,full.Width,full.Height));
+                    int smallW=Math.Max(1,full.Width/8),smallH=Math.Max(1,full.Height/8);
+                    using(Bitmap small=new Bitmap(smallW,smallH))
+                    {
+                        using(Graphics g=Graphics.FromImage(small))
+                        {
+                            g.InterpolationMode=InterpolationMode.HighQualityBilinear;
+                            g.PixelOffsetMode=PixelOffsetMode.HighQuality;
+                            g.DrawImage(full,new Rectangle(0,0,smallW,smallH));
+                        }
+                        BoxBlur(small,2);BoxBlur(small,1);
+                        _backdrop=new Bitmap(small);
+                    }
+                }
+            }
+            catch(Exception){DisposeBackdrop();}
+        }
+        private static void BoxBlur(Bitmap bitmap,int radius)
+        {
+            if(radius<=0)return;
+            int w=bitmap.Width,h=bitmap.Height;
+            BitmapData data=bitmap.LockBits(new Rectangle(0,0,w,h),ImageLockMode.ReadWrite,PixelFormat.Format32bppArgb);
+            try
+            {
+                int stride=data.Stride;byte[] source=new byte[stride*h];Marshal.Copy(data.Scan0,source,0,source.Length);
+                byte[] target=new byte[source.Length];
+                for(int y=0;y<h;y++)
+                    for(int x=0;x<w;x++)
+                    {
+                        int a=0,r=0,g=0,b=0,count=0;
+                        for(int dy=-radius;dy<=radius;dy++)
+                        {
+                            int sy=y+dy;if(sy<0||sy>=h)continue;
+                            for(int dx=-radius;dx<=radius;dx++)
+                            {
+                                int sx=x+dx;if(sx<0||sx>=w)continue;int p=sy*stride+sx*4;
+                                b+=source[p];g+=source[p+1];r+=source[p+2];a+=source[p+3];count++;
+                            }
+                        }
+                        int q=y*stride+x*4;target[q]=(byte)(b/count);target[q+1]=(byte)(g/count);target[q+2]=(byte)(r/count);target[q+3]=(byte)(a/count);
+                    }
+                Marshal.Copy(target,0,data.Scan0,target.Length);
+            }
+            finally{bitmap.UnlockBits(data);}
+        }
+        private float Ease(float t){return t*t*(3-2*t);}
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g=e.Graphics;g.SmoothingMode=SmoothingMode.AntiAlias;g.TextRenderingHint=System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+            float s=_scale>0?_scale:1,p=Ease(Math.Max(0,Math.Min(1,_progress)));
+            if(_backdrop!=null)g.DrawImage(_backdrop,ClientRectangle);
+            else using(SolidBrush bg=new SolidBrush(ArtTheme.Current.Background))g.FillRectangle(bg,ClientRectangle);
+            using(SolidBrush scrim=new SolidBrush(Color.FromArgb((int)(155*p),0,0,0)))g.FillRectangle(scrim,ClientRectangle);
+            float drawerW=Math.Min(470*s,Width*0.9f),drawerX=Width-drawerW*p;
+            _drawerRect=new RectangleF(drawerX,0,drawerW,Height);
+            using(SolidBrush shadow=new SolidBrush(Color.FromArgb((int)(90*p),0,0,0)))g.FillRectangle(shadow,new RectangleF(drawerX-16*s,0,16*s,Height));
+            ArtTheme t=ArtTheme.Current;
+            using(GraphicsPath path=ReportDesign.Round(new RectangleF(drawerX,0,drawerW,Height),0))
+            using(LinearGradientBrush fill=new LinearGradientBrush(new RectangleF(drawerX,0,drawerW,Math.Max(1,Height)),ArtTheme.Mix(t.Card,t.Text,.05),t.Background,90f))
+                g.FillPath(fill,path);
+            using(Pen edge=new Pen(Color.FromArgb((int)(60*p),t.Line)))g.DrawLine(edge,drawerX,0,drawerX,Height);
+            float pad=24*s,titleY=24*s;
+            using(SolidBrush ink=new SolidBrush(t.Text))g.DrawString(_title,_titleFont,ink,new RectangleF(drawerX+pad,titleY,drawerW-pad*2-28*s,34*s));
+            using(SolidBrush muted=new SolidBrush(t.Muted))g.DrawString("统计口径与计算定义",_smallFont,muted,drawerX+pad,titleY+30*s);
+            _closeRect=new RectangleF(drawerX+drawerW-44*s,20*s,28*s,28*s);
+            using(SolidBrush closeBack=new SolidBrush(t.Raised))g.FillEllipse(closeBack,_closeRect);
+            using(Pen closePen=new Pen(t.Muted,1.4f))
+            {
+                g.DrawLine(closePen,_closeRect.X+9*s,_closeRect.Y+9*s,_closeRect.Right-9*s,_closeRect.Bottom-9*s);
+                g.DrawLine(closePen,_closeRect.Right-9*s,_closeRect.Y+9*s,_closeRect.X+9*s,_closeRect.Bottom-9*s);
+            }
+            using(Pen line=new Pen(t.Line))g.DrawLine(line,drawerX+pad,72*s,drawerX+drawerW-pad,72*s);
+            float bodyTop=88*s,bodyBottom=Height-24*s,bodyX=drawerX+pad,bodyW=drawerW-pad*2;
+            if(bodyW<40||bodyBottom<=bodyTop)return;
+            float scopeH=0;
+            if(_scope.Length>0)
+            {
+                using(SolidBrush accent=new SolidBrush(t.Cyan))g.DrawString(_scope,_smallFont,accent,new RectangleF(bodyX,bodyTop,bodyW,46*s));
+                scopeH=34*s;
+            }
+            float noteTop=bodyTop+scopeH;
+            using(StringFormat wrap=new StringFormat{Trimming=StringTrimming.Word,FormatFlags=StringFormatFlags.LineLimit})
+            using(SolidBrush ink=new SolidBrush(t.Text))
+            {
+                SizeF measured=g.MeasureString(_note,_bodyFont,new SizeF(bodyW,10000),wrap);
+                _contentHeight=measured.Height;
+                float viewH=bodyBottom-noteTop;
+                _scroll=Math.Max(0,Math.Min(_scroll,Math.Max(0,_contentHeight-viewH)));
+                RectangleF body=new RectangleF(bodyX,noteTop,bodyW,viewH);
+                GraphicsState state=g.Save();g.SetClip(body);
+                g.DrawString(_note,_bodyFont,ink,new RectangleF(bodyX,noteTop-_scroll,bodyW,_contentHeight+20),wrap);
+                g.Restore(state);
+                if(_contentHeight>viewH)
+                {
+                    float track=body.Height-4*s,thumb=Math.Max(24*s,track*viewH/Math.Max(viewH,_contentHeight));
+                    float thumbY=body.Y+(_scroll/Math.Max(1,_contentHeight-viewH))*(track-thumb);
+                    using(SolidBrush bar=new SolidBrush(Color.FromArgb(40,t.Text)))g.FillRectangle(bar,drawerX+drawerW-10*s,body.Y,3*s,track);
+                    using(SolidBrush thumbBrush=new SolidBrush(Color.FromArgb(120,t.Text)))g.FillRectangle(thumbBrush,drawerX+drawerW-10*s,thumbY,3*s,thumb);
+                }
+            }
+        }
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if(_closeRect.Contains(e.Location)||e.X<_drawerRect.X)CloseHelp();
+        }
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            _scroll-=e.Delta/120f*90*_scale;
+            Invalidate();
+        }
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            base.OnKeyDown(e);
+            if(e.KeyCode==Keys.Escape){CloseHelp();e.Handled=true;e.SuppressKeyPress=true;}
+        }
+        protected override void Dispose(bool disposing)
+        {
+            if(disposing){_timer.Dispose();_titleFont.Dispose();_bodyFont.Dispose();_smallFont.Dispose();DisposeBackdrop();}
+            base.Dispose(disposing);
+        }
+    }
+
+    /// <summary>报告头部的极简图标按钮:刷新会转一圈并闪一次绿点,复制只做悬停反馈。</summary>
+    internal sealed class ReportIconButton : Control
+    {
+        private readonly int _glyph;private readonly ToolTip _tip=new ToolTip{InitialDelay=300,AutoPopDelay=12000};
+        private readonly Timer _timer=new Timer{Interval=30};
+        private bool _hover,_spinning,_pulsing;private DateTime _spinAt,_pulseAt;
+        internal string Caption="";
+        internal ReportIconButton(int glyph,string tip)
+        {
+            _glyph=glyph;SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.SupportsTransparentBackColor,true);
+            BackColor=Color.Transparent;Cursor=Cursors.Hand;TabStop=false;
+            _tip.SetToolTip(this,tip);
+            _timer.Tick+=delegate
+            {
+                if((DateTime.Now-_pulseAt).TotalMilliseconds>2000){_spinning=false;_pulsing=false;_timer.Stop();}
+                Invalidate();
+            };
+        }
+        internal void Flash()
+        {
+            if(!Enabled)return;
+            _spinning=true;_pulsing=true;_spinAt=DateTime.Now;_pulseAt=DateTime.Now;_timer.Start();Invalidate();
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g=e.Graphics;g.SmoothingMode=SmoothingMode.AntiAlias;ArtTheme t=ArtTheme.Current;
+            float w=Width-1,h=Height-1;
+            if(_hover)using(GraphicsPath hover=ReportDesign.Round(new RectangleF(0,0,Width,Height),7))
+                using(SolidBrush bg=new SolidBrush(Color.FromArgb(30,t.Text)))g.FillPath(bg,hover);
+            Color ink=Enabled?(_hover?t.Accent:t.Text):t.Muted;
+            float cx=Width/2f,cy=Height/2f;
+            if(Caption.Length>0)
+            {
+                using(Font font=new Font("Microsoft YaHei UI",11,FontStyle.Regular,GraphicsUnit.Pixel))
+                using(SolidBrush text=new SolidBrush(ink))
+                using(StringFormat center=new StringFormat{Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center,FormatFlags=StringFormatFlags.NoWrap})
+                    g.DrawString(Caption,font,text,new RectangleF(0,0,Width,Height),center);
+            }
+            else if(_glyph==0)
+            {
+                float angle=0;
+                if(_spinning){double p=Math.Min(1,(DateTime.Now-_spinAt).TotalMilliseconds/650.0);angle=(float)(360*(1-(1-p)*(1-p)*(1-p)));}
+                using(Pen pen=new Pen(ink,1.9f))
+                {
+                    GraphicsState state=g.Save();g.TranslateTransform(cx,cy);g.RotateTransform(angle);
+                    g.DrawArc(pen,new RectangleF(-6,-6,12,12),-70,280);
+                    g.DrawLine(pen,4.6f,-5.2f,7.2f,-8.2f);g.DrawLine(pen,4.6f,-5.2f,8.2f,-3.2f);
+                    g.Restore(state);
+                }
+            }
+            else
+            {
+                using(Pen pen=new Pen(ink,1.4f))
+                {
+                    using(GraphicsPath back=ReportDesign.Round(new RectangleF(cx-7,cy-8,11,12),2))g.DrawPath(pen,back);
+                    using(GraphicsPath front=ReportDesign.Round(new RectangleF(cx-3,cy-5,11,12),2))g.DrawPath(pen,front);
+                }
+            }
+            if(_pulsing)
+            {
+                double fade=1-(DateTime.Now-_pulseAt).TotalMilliseconds/2000.0;
+                if(fade>0)
+                {
+                    int alpha=(int)(220*Math.Min(1,fade*2));
+                    using(SolidBrush dot=new SolidBrush(Color.FromArgb(Math.Max(0,alpha),t.Green)))g.FillEllipse(dot,Width-8,3,4.5f,4.5f);
+                }
+            }
+        }
+        protected override void OnMouseEnter(EventArgs e){base.OnMouseEnter(e);_hover=true;Invalidate();}
+        protected override void OnMouseLeave(EventArgs e){base.OnMouseLeave(e);_hover=false;Invalidate();}
+        protected override void OnEnabledChanged(EventArgs e){base.OnEnabledChanged(e);Invalidate();}
+        protected override void Dispose(bool disposing){if(disposing){_timer.Dispose();_tip.Dispose();}base.Dispose(disposing);}
+    }
+
     internal sealed partial class StatisticsReport
     {
         private readonly DateTime _date;private DateTime _snapshot;
@@ -143,8 +400,10 @@ namespace KeyMouseStats
         private readonly ReportHeader _header=new ReportHeader();private readonly FlowLayoutPanel _navigation=new FlowLayoutPanel{FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoScroll=true};
         private readonly Button _compact=new Button{FlatStyle=FlatStyle.Flat,TextAlign=ContentAlignment.MiddleLeft,Cursor=Cursors.Hand};
         private readonly ContextMenuStrip _navMenu=new ContextMenuStrip();
-        private readonly Button _export=new Button{Text="导出 ▾"},_panel=new Button{Text="在面板中查看"},_copy=new Button{Text="复制指标"},_help=new Button{Text="说明"},_refresh=new Button{Text="刷新"};
+        private readonly Button _export=new Button{Text="导出 ▾"},_panel=new Button{Text="在面板中查看 ↗"},_help=new Button{Text="说明"};
+        private readonly ReportIconButton _copy=new ReportIconButton(1,"复制指标 (Ctrl+C)"),_refresh=new ReportIconButton(0,"刷新数据");
         private readonly ContextMenuStrip _exportMenu=new ContextMenuStrip();
+        private readonly ToolTip _actionsTip=new ToolTip{InitialDelay=350,AutoPopDelay=12000};
         private readonly Label _feedback=new Label();private readonly List<Button> _navButtons=new List<Button>();
         private readonly ComboBox _range=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,FlatStyle=FlatStyle.Flat};
         private readonly ComboBox _compare=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,FlatStyle=FlatStyle.Flat};
@@ -175,28 +434,27 @@ namespace KeyMouseStats
             for(int i=0;i<ReportDesign.Names.Length;i++){int index=i;ToolStripMenuItem item=new ToolStripMenuItem(ReportDesign.Names[i]);item.Click+=delegate{_tabs.SelectedIndex=index;};_navMenu.Items.Add(item);}
             _compact.Click+=delegate{ArtTheme t=ArtTheme.Current;_navMenu.BackColor=t.Card;_navMenu.ForeColor=t.Text;for(int i=0;i<_navMenu.Items.Count;i++){ToolStripMenuItem item=(ToolStripMenuItem)_navMenu.Items[i];item.Checked=i==_tabs.SelectedIndex;item.ForeColor=t.Text;}_navMenu.Show(_compact,new Point(0,_compact.Height));};
             _tabs.SelectedIndexChanged+=delegate{UpdateSelection();};
-            _export.Click+=delegate{ArtTheme t=ArtTheme.Current;_exportMenu.BackColor=t.Card;_exportMenu.ForeColor=t.Text;foreach(ToolStripItem item in _exportMenu.Items)item.ForeColor=t.Text;_exportMenu.Show(_export,new Point(0,_export.Height));};_copy.Click+=delegate{CopyMetric();};_help.Click+=delegate{if(_tabs.SelectedTab!=null){_tabs.SelectedTab.HelpOpen=!_tabs.SelectedTab.HelpOpen;_tabs.PerformLayout();}};
-            _refresh.Click+=delegate{int index=_tabs.SelectedIndex;if(index==10)using(ShortcutSavingsSettings settings=new ShortcutSavingsSettings()){if(settings.ShowDialog(this)!=DialogResult.OK)return;}bool details=_tabs.SelectedTab.DetailsOpen,help=_tabs.SelectedTab.HelpOpen;BuildPages();_tabs.SelectedIndex=index;_tabs.SelectedTab.DetailsOpen=details;_tabs.SelectedTab.HelpOpen=help;_tabs.PerformLayout();_feedback.Text="已刷新";};
-            foreach(Button button in new[]{_export,_panel,_copy,_help,_refresh}){button.FlatStyle=FlatStyle.Flat;button.Cursor=Cursors.Hand;}
+            _export.Click+=delegate{ArtTheme t=ArtTheme.Current;_exportMenu.BackColor=t.Card;_exportMenu.ForeColor=t.Text;foreach(ToolStripItem item in _exportMenu.Items)item.ForeColor=t.Text;_exportMenu.Show(_export,new Point(0,_export.Height));};_copy.Click+=delegate{CopyMetric();};_help.Click+=delegate{ReportPage page=_tabs.SelectedTab;if(page!=null)using(ReportHelpOverlay help=new ReportHelpOverlay())help.ShowHelp(this,page.Text,ReportDesign.Scope[page.Index],BuildHelpText(page),_scale);};
+            _refresh.Click+=delegate{int index=_tabs.SelectedIndex;_refresh.Flash();bool details=_tabs.SelectedTab.DetailsOpen;BuildPages();_tabs.SelectedIndex=Math.Min(ReportDesign.Names.Length-1,index);_tabs.SelectedTab.DetailsOpen=details;_tabs.PerformLayout();_feedback.Text="";};
+            foreach(Button button in new[]{_export,_panel,_help}){button.FlatStyle=FlatStyle.Flat;button.Cursor=Cursors.Hand;}
             _panel.Visible=false;_panel.Click+=delegate{ShowInPanel();};
+            _actionsTip.SetToolTip(_export,"导出当前页：CSV / PNG / HTML");
+            _actionsTip.SetToolTip(_panel,"在详细统计面板中查看当前区间");
+            _actionsTip.SetToolTip(_help,"查看当前页的统计口径与计算定义");
             BuildNavigation();BuildPages();_tabs.SelectedIndex=Math.Max(0,Math.Min(ReportDesign.Names.Length-1,initialTab));
             _suppressRange=true;
             try{_range.SelectedIndex=_initialStart!=DateTime.MinValue?6:0;_compare.SelectedIndex=0;}finally{_suppressRange=false;}
             UpdateSelection();
-            _timer.Tick+=delegate{if(Visible&&WindowState!=FormWindowState.Minimized&&_tabs.SelectedIndex==4){PopulateLiveRows();_tabs.SelectedTab.Chart.Invalidate();UpdateHeader();}};
+            _timer.Tick+=delegate{if(Visible&&WindowState!=FormWindowState.Minimized&&_tabs.SelectedTab!=null&&_tabs.SelectedTab.Kind==4){PopulateLiveRows();_tabs.SelectedTab.Chart.Invalidate();UpdateHeader();}};
             _timer.Start();_ready=true;
         }
         private void BuildPages()
         {
             _tabs.ClearPages();_snapshot=DateTime.Now;ResolveRange();
-            PopulateRatios();PopulateChanges();PopulateApps();PopulateSessions();PopulateLive();
-            for(int index=5;index<=10;index++){CrossReportData data=CrossReportData.Build(_date,index);ListView list=PageCore(data.Title,data.Note,data,data.Headings);foreach(string[] fields in data.Rows)Row(list,fields);}
-            RangeReportData range=RangeReportData.Build(_rangeStart,_rangeEnd,_compareStart,_compareEnd,_compareLabel);ListView rangeList=PageCore(ReportDesign.Names[11],RangeReportData.Note,null,range.Headings);foreach(string[] fields in range.Rows)Row(rangeList,fields);
-            RhythmReportData rhythm=RhythmReportData.Build(_date);ListView rhythmList=PageCore(ReportDesign.Names[12],RhythmReportData.Note,null,rhythm.Headings);foreach(string[] fields in rhythm.Rows)Row(rhythmList,fields);
-            DistributionReportData distribution=DistributionReportData.Build(_rangeStart,_rangeEnd);ListView distributionList=PageCore(ReportDesign.Names[13],DistributionReportData.Note,null,distribution.Headings);foreach(string[] fields in distribution.Rows)Row(distributionList,fields);
-            HoldReportData hold=HoldReportData.Build(_rangeStart,_rangeEnd);ListView holdList=PageCore(ReportDesign.Names[14],HoldReportData.Note,null,hold.Headings);foreach(string[] fields in hold.Rows)Row(holdList,fields);
-            AppKeyReportData appKey=AppKeyReportData.Build(_rangeStart,_rangeEnd);ListView appKeyList=PageCore(ReportDesign.Names[15],AppKeyReportData.Note,null,appKey.Headings);foreach(string[] fields in appKey.Rows)Row(appKeyList,fields);
-            HoldTrendData holdTrend=HoldTrendData.Build(_rangeStart,_rangeEnd);ListView holdTrendList=PageCore(ReportDesign.Names[16],HoldTrendData.Note,null,holdTrend.Headings);foreach(string[] fields in holdTrend.Rows)Row(holdTrendList,fields);
+            PopulateRatios();PopulateLive();
+            CrossReportData mouse=CrossReportData.Build(_date,8);ListView mouseList=PageCore(8,mouse.Title,mouse.Note,mouse,mouse.Headings);foreach(string[] fields in mouse.Rows)Row(mouseList,fields);
+            DistributionReportData distribution=DistributionReportData.Build(_rangeStart,_rangeEnd);ListView distributionList=PageCore(13,ReportDesign.Names[3],DistributionReportData.Note,null,distribution.Headings);foreach(string[] fields in distribution.Rows)Row(distributionList,fields);
+            HoldTrendData holdTrend=HoldTrendData.Build(_rangeStart,_rangeEnd);ListView holdTrendList=PageCore(16,ReportDesign.Names[4],HoldTrendData.Note,null,holdTrend.Headings);foreach(string[] fields in holdTrend.Rows)Row(holdTrendList,fields);
             if(IsHandleCreated)foreach(ReportPage page in _tabs.TabPages)Style(page);
         }
         /// <summary>把区间预设解析成完整日区间;终点不超过最近一个已结束的日。</summary>
@@ -285,16 +543,16 @@ namespace KeyMouseStats
         }
         private void RebuildRangePages()
         {
-            int index=_tabs.SelectedIndex;bool details=false,help=false;
-            if(_tabs.SelectedTab!=null){details=_tabs.SelectedTab.DetailsOpen;help=_tabs.SelectedTab.HelpOpen;}
+            int index=_tabs.SelectedIndex;bool details=false;
+            if(_tabs.SelectedTab!=null){details=_tabs.SelectedTab.DetailsOpen;}
             BuildPages();
             _tabs.SelectedIndex=Math.Max(0,Math.Min(ReportDesign.Names.Length-1,index));
-            if(_tabs.SelectedTab!=null){_tabs.SelectedTab.DetailsOpen=details;_tabs.SelectedTab.HelpOpen=help;_tabs.PerformLayout();}
+            if(_tabs.SelectedTab!=null){_tabs.SelectedTab.DetailsOpen=details;_tabs.PerformLayout();}
             UpdateHeader();
         }
         private void BuildNavigation()
         {
-            string[] groups={"时间与节奏","应用使用","输入方式","周期与分布"};int[][] ids={new[]{0,1,3,4},new[]{2,5,6,7},new[]{8,9,10},new[]{11,12,13,14,15,16}};
+            string[] groups={"时间与节奏","输入与形态"};int[][] ids={new[]{0,1},new[]{2,3,4}};
             for(int group=0;group<groups.Length;group++)
             {
                 _navigation.Controls.Add(new Label{Text=groups[group],Tag="group",TextAlign=ContentAlignment.MiddleLeft,Margin=new Padding(0,14,0,3)});
@@ -303,8 +561,8 @@ namespace KeyMouseStats
         }
         private void UpdateHeader()
         {
-            _refresh.Text=_tabs.SelectedIndex==10?"模型":"刷新";_header.Heading=ReportDesign.Names[Math.Max(0,_tabs.SelectedIndex)];_header.Date=(_tabs.SelectedIndex==4?DateTime.Today:_date).ToString("yyyy.MM.dd  dddd");
-            _header.Status=_tabs.SelectedIndex==4?"实时更新 · 使用状态："+ActivityMonitor.Status:_date==DateTime.Today?"今日尚未结束 · 数据截至 "+_snapshot.ToString("HH:mm:ss")+"，刷新以更新":"历史记录 · 未采集时段不补零";
+            _refresh.Caption="";_refresh.Invalidate();_header.Heading=ReportDesign.Names[Math.Max(0,_tabs.SelectedIndex)];_header.Date=(_tabs.SelectedTab!=null&&_tabs.SelectedTab.Kind==4?DateTime.Today:_date).ToString("yyyy.MM.dd  dddd");
+            _header.Status=_tabs.SelectedTab!=null&&_tabs.SelectedTab.Kind==4?"实时更新 · 使用状态："+ActivityMonitor.Status:_date==DateTime.Today?"今日尚未结束 · 数据截至 "+_snapshot.ToString("HH:mm:ss")+"，刷新以更新":"历史记录 · 未采集时段不补零";
             _header.Invalidate();
         }
         private void UpdateSelection()
@@ -314,11 +572,11 @@ namespace KeyMouseStats
             foreach(Button b in _navButtons){bool selected=(int)b.Tag==_tabs.SelectedIndex;b.BackColor=selected?ArtTheme.Mix(t.Card,t.Accent,.18):t.Background;b.ForeColor=selected?t.Accent:t.Muted;b.FlatAppearance.BorderSize=selected?1:0;b.FlatAppearance.BorderColor=t.Line;}
             // 区间选择器只在用到区间的两页显示;对比选择器只在区间回顾显示;窄窗口没有空间放置。
             _panel.Visible=Owner is Dashboard;
-            _range.Visible=UsesRange(_tabs.SelectedIndex)&&ClientSize.Width/_scale>=1000;
-            _compare.Visible=_tabs.SelectedIndex==11&&ClientSize.Width/_scale>=1000;
+            _range.Visible=_tabs.SelectedTab!=null&&UsesRange(_tabs.SelectedTab.Kind)&&ClientSize.Width/_scale>=1000;
+            _compare.Visible=false;
             UpdateHeader();
         }
-        private static bool UsesRange(int index){return index==11||index>=13;}
+        private static bool UsesRange(int kind){return kind==13||kind==16;}
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);using(Graphics g=CreateGraphics())_scale=g.DpiX/96f;
@@ -331,8 +589,11 @@ namespace KeyMouseStats
         {
             float s=_scale;bool compact=ClientSize.Width/s<1000;int header=(int)((compact?142:106)*s);ArtTheme t=ArtTheme.Current;BackColor=t.Background;
             _header.UiScale=s;_header.SetBounds(0,0,ClientSize.Width,header);
-            Button[] actions={_export,_panel,_copy,_help,_refresh};int[] widths={96,104,80,56,56};int right=ClientSize.Width-(int)(24*s);
-            for(int i=0;i<actions.Length;i++){int w=(int)(widths[i]*s);right-=w;actions[i].SetBounds(right,(int)(25*s),w,(int)(33*s));right-=(int)(8*s);actions[i].ForeColor=i==0?t.OnAccent:t.Text;actions[i].BackColor=i==0?t.Accent:t.Card;actions[i].FlatAppearance.BorderColor=t.Line;}
+            Control[] actions={_export,_panel,_copy,_help,_refresh};int[] widths={92,126,36,52,40};int right=ClientSize.Width-(int)(24*s);
+            for(int i=0;i<actions.Length;i++){int w=(int)(widths[i]*s);right-=w;actions[i].SetBounds(right,(int)(25*s),w,(int)(33*s));right-=(int)(8*s);}
+            _export.ForeColor=t.OnAccent;_export.BackColor=ArtTheme.Mix(t.Accent,Color.Black,.18f);_export.FlatAppearance.BorderColor=ArtTheme.Mix(t.Accent,Color.Black,.25f);
+            _panel.ForeColor=t.Text;_panel.BackColor=Color.Transparent;_panel.FlatAppearance.BorderSize=1;_panel.FlatAppearance.BorderColor=Color.FromArgb(46,t.Text);
+            _help.ForeColor=t.Muted;_help.BackColor=Color.Transparent;_help.FlatAppearance.BorderSize=0;
             _range.BackColor=t.Card;_range.ForeColor=t.Text;_range.SetBounds((int)(302*s),(int)(26*s),(int)(168*s),(int)(28*s));
             _compare.BackColor=t.Card;_compare.ForeColor=t.Text;_compare.SetBounds((int)(478*s),(int)(26*s),(int)(168*s),(int)(28*s));
             _navigation.Visible=!compact;_navigation.BackColor=(GujianArt.Active||OriArt.Active)?ArtTheme.Mix(t.Background,t.Cyan,.04):t.Background;int nav=compact?0:(int)(178*s);
@@ -342,19 +603,47 @@ namespace KeyMouseStats
             _feedback.SetBounds(compact?(int)(230*s):(int)(590*s),compact?(int)(105*s):(int)(86*s),(int)(240*s),(int)(23*s));_feedback.ForeColor=t.Green;_feedback.BackColor=Color.Transparent;
             _tabs.UiScale=s;_tabs.BackColor=t.Background;_tabs.SetBounds(nav+(int)(24*s),header+(int)(16*s),ClientSize.Width-nav-(int)(48*s),Math.Max(1,ClientSize.Height-header-(int)(28*s)));_tabs.PerformLayout();
         }
-        private ListView Page(string title,string note,params string[] headings){return PageCore(title,note,null,headings);}
-        private ListView PageCore(string title,string note,CrossReportData snapshot,string[] headings)
+        private ListView Page(int kind,string title,string note,params string[] headings){return PageCore(kind,title,note,null,headings);}
+        private ListView PageCore(int kind,string title,string note,CrossReportData snapshot,string[] headings)
         {
-            int index=_tabs.TabPages.Count;ReportPage page=new ReportPage{Text=title,Note=note,Index=index};_tabs.AddPage(page);
+            int index=_tabs.TabPages.Count;ReportPage page=new ReportPage{Text=title,Note=note,Index=index,Kind=kind};_tabs.AddPage(page);
             ReportList list=new ReportList{View=View.Details,FullRowSelect=true,HideSelection=false,ShowItemToolTips=true,BorderStyle=BorderStyle.None};
             foreach(string heading in headings)list.Columns.Add(heading,180);
-            Control chart;if(index<5)chart=new ReportVisual(_date,index);else if(index==11)chart=new RangeReportVisual(_rangeStart,_rangeEnd,_compareStart,_compareEnd,_compareLabel);else if(index==12)chart=new RhythmReportVisual(_date);else if(index==13)chart=new DistributionReportVisual(_rangeStart,_rangeEnd);else if(index==14)chart=new HoldReportVisual(_rangeStart,_rangeEnd);else if(index==15)chart=new AppKeyReportVisual(_rangeStart,_rangeEnd);else if(index==16)chart=new HoldTrendVisual(_rangeStart,_rangeEnd);else chart=new CrossReportVisual(_date,index,snapshot);
+            Control chart;
+            switch(kind)
+            {
+                case 4:chart=new ReportVisual(_date,4);break;
+                case 5:case 6:case 7:case 8:chart=new CrossReportVisual(_date,kind,snapshot);break;
+                case 13:chart=new DistributionReportVisual(_rangeStart,_rangeEnd);break;
+                case 16:chart=new HoldTrendVisual(_rangeStart,_rangeEnd);break;
+                default:chart=new ReportVisual(_date,kind);break;
+            }
             RangeReportVisual brush=chart as RangeReportVisual;if(brush!=null)brush.RangeSelected+=delegate(DateTime start,DateTime end){SetCustomRange(start,end);};
             page.List=list;page.Chart=chart;page.Controls.Add(list);page.Controls.Add(chart);
             ReportVisual visual=chart as ReportVisual;if(visual!=null)visual.MetricSelected+=delegate{list.SelectedItems.Clear();_copy.Enabled=true;_feedback.Text="已选中指标 · Ctrl+C 复制";};
             list.SelectedIndexChanged+=delegate{_copy.Enabled=true;};
             list.SizeChanged+=delegate{int space=Math.Max(200,list.ClientSize.Width-SystemInformation.VerticalScrollBarWidth-4);int first=(int)(space*.29);list.Columns[0].Width=first;for(int i=1;i<list.Columns.Count;i++)list.Columns[i].Width=(space-first)/(list.Columns.Count-1);};
             return list;
+        }
+        private string BuildHelpText(ReportPage page)
+        {
+            string text=page.Note??"";
+            if(page.Kind==0)
+            {
+                StringBuilder body=new StringBuilder(text);
+                body.AppendLine();body.AppendLine();
+                body.AppendLine("个人基准指标");
+                for(int i=0;i<ReportDesign.Metrics.Length;i++)
+                    body.AppendLine("• "+ReportDesign.Metrics[i]+"（"+ReportDesign.Units[i]+"）："+ReportDesign.Definitions[i]);
+                body.AppendLine();
+                body.AppendLine("刻度与颜色");
+                body.AppendLine("• 灰线 = P50（通常），表示过去 30 天有效日的中位数。");
+                body.AppendLine("• 金线 = P90（较高），表示 90% 的历史日不超过它。");
+                body.AppendLine("• 当前值超过 P50 后色条转为青色，超过 P90 转为金色；颜色只描述相对区间，不是评分。");
+                body.AppendLine("• 六项指标单位不同，色条各自独立缩放，长度不能跨指标横向比较。");
+                text=body.ToString();
+            }
+            return text;
         }
         private void CopyMetric()
         {
@@ -365,6 +654,6 @@ namespace KeyMouseStats
             try{Clipboard.SetText(text);_feedback.Text="指标已复制";}catch(System.Runtime.InteropServices.ExternalException){_feedback.Text="剪贴板忙，请重试";}
         }
         protected override void OnKeyDown(KeyEventArgs e){base.OnKeyDown(e);if(e.Control&&e.KeyCode==Keys.C){CopyMetric();e.Handled=true;e.SuppressKeyPress=true;}if(e.KeyCode==Keys.Escape)Close();}
-        protected override void Dispose(bool disposing){if(disposing){Program.LogStall("统计报告 关闭", 0);_timer.Dispose();_navMenu.Dispose();_exportMenu.Dispose();}base.Dispose(disposing);}
+        protected override void Dispose(bool disposing){if(disposing){Program.LogStall("统计报告 关闭", 0);_timer.Dispose();_navMenu.Dispose();_exportMenu.Dispose();_actionsTip.Dispose();}base.Dispose(disposing);}
     }
 }

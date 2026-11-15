@@ -81,7 +81,7 @@ namespace KeyMouseStats
                 || (interval > 0 && (now - _rimeLoadedAt).TotalSeconds >= interval);
             if (reload)
             {
-                _rimeStats = RimeTextStats.Load(path);
+                _rimeStats = RimeTextStats.Load(path, true);
                 _rimeLoadedAt = now;
                 _rimeFileStamp = stamp;
                 _rimeFileSize = size;
@@ -151,9 +151,11 @@ namespace KeyMouseStats
                 Motion.Start(EnterMotionKey, 280, Ease.OutCubic);
                 return;
             }
+            if (id == 417) { _textWordMode = 3; Motion.Start(EnterMotionKey, 280, Ease.OutCubic); return; }
             if (id == 408) { _textBlurRecent = !_textBlurRecent; return; }
             if (id == 413 || id == 414) { _textCharFilter = id - 413; return; }
             if (id == 415 || id == 416) { _textWordTab = id - 415; return; }
+            if (id == 418) { _textWordTab = 2; return; }
         }
 
         /// <summary>刷新频率菜单:dirty 后就地重读,不需要重启面板。</summary>
@@ -292,23 +294,37 @@ namespace KeyMouseStats
             else PaintTextDayChart(g, Cx + 18, dayY + 52, 520 - 36, 192 - 70);
 
             // ---- 右卡:词长 / 字符构成 / 输入节奏 ----
-            PaintCard(g, Cx + 537, dayY, 295, 192, _textWordMode == 0 ? "词长分布" : _textWordMode == 1 ? "字符构成" : "输入节奏");
-            PaintTextModeChips(g, Cx + 537, dayY, 295, 410, _textWordMode, WordModeNames);
+            PaintCard(g, Cx + 537, dayY, 295, 192, _textWordMode == 0 ? "词长分布" : _textWordMode == 1 ? "字符构成" : _textWordMode == 2 ? "输入节奏" : "输入效率");
+            PaintTextModeChips(g, Cx + 537, dayY, 295, new[] { 410, 411, 412, 417 }, _textWordMode, WordModeNames);
             float bx = Cx + 537 + 18, by = dayY + 52, bw = 295 - 36, bh = 192 - 70;
             if (_textWordMode == 1) PaintTextComposition(g, bx, by, bw, bh, slice);
             else if (_textWordMode == 2) PaintTextRhythm(g, bx, by, bw, bh, slice);
+            else if (_textWordMode == 3) PaintTextEfficiency(g, bx, by, bw, bh, slice);
             else PaintTextWordLength(g, bx, by, bw, bh, slice);
 
-            // ---- 左下:高频字符 / 高频词组 Top 20 ----
-            PaintCard(g, Cx, Cy + 320, 520, 168, _textWordTab == 0 ? "高频字符 · TOP 20" : "高频词组 · TOP 20");
-            PaintTextControl(g, new RectangleF(Cx + 300, Cy + 329, 48, 24), "汉字", _textCharFilter == 0 && _textWordTab == 0);
-            _chips.Add(new RectangleF(Cx + 300, Cy + 329, 48, 24)); _chipIds.Add(413);
-            PaintTextControl(g, new RectangleF(Cx + 352, Cy + 329, 48, 24), "标点", _textCharFilter == 1 && _textWordTab == 0);
-            _chips.Add(new RectangleF(Cx + 352, Cy + 329, 48, 24)); _chipIds.Add(414);
-            PaintTextControl(g, new RectangleF(Cx + 408, Cy + 329, 46, 24), "单字", _textWordTab == 0);
-            _chips.Add(new RectangleF(Cx + 408, Cy + 329, 46, 24)); _chipIds.Add(415);
-            PaintTextControl(g, new RectangleF(Cx + 458, Cy + 329, 46, 24), "词组", _textWordTab == 1);
-            _chips.Add(new RectangleF(Cx + 458, Cy + 329, 46, 24)); _chipIds.Add(416);
+            // ---- 左下:高频字符 / 高频词组 / 输出应用 ----
+            PaintCard(g, Cx, Cy + 320, 520, 168, _textWordTab == 0 ? "高频字符 · TOP 20" : _textWordTab == 1 ? "高频词组 · TOP 20" : "输出应用 · 按字数");
+            if (_textWordTab == 2)
+            {
+                string title = "输出应用 · 按字数";
+                SizeF titleSize = g.MeasureString(title, _fH2);
+                RectangleF info = new RectangleF(Cx + 18 + titleSize.Width + 6, Cy + 329, 18, 22);
+                AppText(g, "ⓘ", _fAxis, Csub, info, false);
+                AddTextHit(info, 6, 0);
+            }
+            if (_textWordTab == 0)
+            {
+                PaintTextControl(g, new RectangleF(Cx + 250, Cy + 329, 48, 24), "汉字", _textCharFilter == 0);
+                _chips.Add(new RectangleF(Cx + 250, Cy + 329, 48, 24)); _chipIds.Add(413);
+                PaintTextControl(g, new RectangleF(Cx + 302, Cy + 329, 48, 24), "标点", _textCharFilter == 1);
+                _chips.Add(new RectangleF(Cx + 302, Cy + 329, 48, 24)); _chipIds.Add(414);
+            }
+            PaintTextControl(g, new RectangleF(Cx + 358, Cy + 329, 46, 24), "单字", _textWordTab == 0);
+            _chips.Add(new RectangleF(Cx + 358, Cy + 329, 46, 24)); _chipIds.Add(415);
+            PaintTextControl(g, new RectangleF(Cx + 408, Cy + 329, 46, 24), "词组", _textWordTab == 1);
+            _chips.Add(new RectangleF(Cx + 408, Cy + 329, 46, 24)); _chipIds.Add(416);
+            PaintTextControl(g, new RectangleF(Cx + 458, Cy + 329, 46, 24), "应用", _textWordTab == 2);
+            _chips.Add(new RectangleF(Cx + 458, Cy + 329, 46, 24)); _chipIds.Add(418);
             PaintTextTopChars(g, Cx + 18, Cy + 320 + 40, 520 - 36, 168 - 50, slice);
 
             // ---- 右下:最近上屏 ----
@@ -319,6 +335,7 @@ namespace KeyMouseStats
             _textRefreshRect = new RectangleF(Cx + Cw - 16 - 108, Cy + 320 + 9, 108, 24);
             _chips.Add(_textRefreshRect);
             _chipIds.Add(405);
+            AddTextHit(_textRefreshRect, 7, 0);
             PaintTextControl(g, _textRefreshRect, "刷新 " + RimeTextStats.RefreshLabel(Store.TextRefreshSeconds) + " ▾", false);
             PaintTextRecent(g, Cx + 537 + 18, Cy + 320 + 40, 295 - 36, 168 - 50, slice);
 
@@ -331,7 +348,7 @@ namespace KeyMouseStats
             if (_textHoverKind >= 0 && _textHoverText.Length > 0) PaintTextTooltip(g);
         }
 
-        private static readonly string[] WordModeNames = { "词长", "构成", "节奏" };
+        private static readonly string[] WordModeNames = { "词长", "构成", "节奏", "效率" };
 
         private void PaintTextMetric(Graphics g, float x, float y, float w, string label, string value, Color accent, string note)
         {
@@ -355,7 +372,7 @@ namespace KeyMouseStats
         }
 
         /// <summary>卡片右上角的一组模式 chip。baseId 起头,按顺序 +0/+1/…。</summary>
-        private void PaintTextModeChips(Graphics g, float x, float y, float w, int baseId, int selected, string[] names)
+        private void PaintTextModeChips(Graphics g, float x, float y, float w, int[] ids, int selected, string[] names)
         {
             const float chipW = 44, chipH = 24, chipGap = 6;
             float groupWidth = chipW * names.Length + chipGap * (names.Length - 1);
@@ -364,7 +381,7 @@ namespace KeyMouseStats
             {
                 RectangleF rect = new RectangleF(left + i * (chipW + chipGap), y + 9, chipW, chipH);
                 _chips.Add(rect);
-                _chipIds.Add(baseId + i);
+                _chipIds.Add(ids[Math.Min(i, ids.Length - 1)]);
                 PaintTextControl(g, rect, names[i], selected == i);
             }
         }
@@ -639,6 +656,11 @@ namespace KeyMouseStats
         {
             _textTopLabels.Clear();
             _textTopValues.Clear();
+            if (_textWordTab == 2)
+            {
+                PaintTextApps(g, x, y, w, h, slice);
+                return;
+            }
             if (_textWordTab == 1)
             {
                 foreach (KeyValuePair<string, long> row in slice.TopPhrases(20))
@@ -720,6 +742,71 @@ namespace KeyMouseStats
             AppText(g, footer, _fAxis, Csub, new RectangleF(x, y + h - 12, w, 12), false);
         }
 
+        /// <summary>按前台程序聚合的文字产出；只显示程序名，不显示窗口标题或内容上下文。</summary>
+        private void PaintTextApps(Graphics g, float x, float y, float w, float h, RimeSlice slice)
+        {
+            List<RimeAppSummary> apps = slice.TopApps(5);
+            if (apps.Count == 0)
+            {
+                AppText(g, "本区间没有带程序列的上屏记录", _fSmall, Csub, new RectangleF(x, y + h / 2 - 10, w, 20), false);
+                return;
+            }
+
+            long total = Math.Max(1, slice.Chars);
+            float rowH = Math.Min(21f, h / apps.Count);
+            float nameW = 140, charsW = 110, tagsW = 120;
+            float barX = x + nameW + 8;
+            float barW = Math.Max(24f, w - nameW - charsW - tagsW - 24);
+            for (int i = 0; i < apps.Count; i++)
+            {
+                RimeAppSummary app = apps[i];
+                float ry = y + i * rowH;
+                string appName = AppActivity.FriendlyName(app.Path);
+                AddTextHit(new RectangleF(x, ry, w, rowH), 5, i);
+                Bitmap icon = AppIcon(app.Path);
+                if (icon != null) g.DrawImage(icon, x, ry + Math.Max(0, (rowH - 16) / 2), 16, 16);
+                else
+                {
+                    using (GraphicsPath iconPath = RoundedRect(x, ry + Math.Max(0, (rowH - 16) / 2), 16, 16, 4))
+                    using (SolidBrush fill = new SolidBrush(Color.FromArgb(i == 0 ? 55 : 28, Cblue)))
+                        g.FillPath(fill, iconPath);
+                    string initial = appName.Length > 0 ? appName.Substring(0, 1) : "?";
+                    AppText(g, initial, _fAxis, i == 0 ? Ctext : Cblue,
+                        new RectangleF(x, ry + Math.Max(0, (rowH - 16) / 2), 16, 16), true);
+                }
+                AppText(g, appName, _fSmall, i == 0 ? Ctext : Csub,
+                    new RectangleF(x + 22, ry, nameW - 24, rowH), false);
+
+                using (GraphicsPath track = RoundedRect(barX, ry + rowH / 2 - 3, barW, 6, 3))
+                using (SolidBrush fill = new SolidBrush(Color.FromArgb(22, Csub))) g.FillPath(fill, track);
+                float share = (float)(app.Chars / (double)total);
+                float length = Math.Max(2f, (float)(barW * share));
+                using (GraphicsPath bar = RoundedRect(barX, ry + rowH / 2 - 3, length, 6, 3))
+                using (SolidBrush fill = new SolidBrush(Color.FromArgb(i == 0 ? 215 : 125, Cblue))) g.FillPath(fill, bar);
+
+                AppText(g, Analysis.FmtCount(app.Chars) + " 字", _fBody, i == 0 ? Ctext : Csub,
+                    new RectangleF(x + w - tagsW - charsW - 8, ry, 58, rowH), true);
+                AppText(g, (share * 100).ToString("0.#", CultureInfo.InvariantCulture) + "%", _fAxis, Csub,
+                    new RectangleF(x + w - tagsW - 46, ry, 42, rowH), true);
+
+                // 只展示真实汉字徽章，纯标点/空白不进入胶囊。
+                List<KeyValuePair<int, long>> chars = app.TopChars(12);
+                float tagX = x + w - tagsW;
+                int shown = 0;
+                for (int k = 0; k < chars.Count && shown < 3; k++)
+                {
+                    if (!RimeText.IsCjk(chars[k].Key)) continue;
+                    string label = RimeText.DisplayName(chars[k].Key);
+                    float tagW = Math.Min(34f, g.MeasureString(label, _fAxis).Width + 12f);
+                    using (GraphicsPath tag = RoundedRect(tagX, ry + rowH / 2 - 8, tagW, 16, 8))
+                    using (SolidBrush fill = new SolidBrush(Color.FromArgb(26, Cblue))) g.FillPath(fill, tag);
+                    AppText(g, label, _fAxis, Ctext, new RectangleF(tagX, ry + rowH / 2 - 8, tagW, 16), true);
+                    tagX += tagW + 3;
+                    shown++;
+                }
+            }
+        }
+
         /// <summary>最近上屏:时间 + 文本 + 字数;可切换隐私模糊,悬停显示明文。</summary>
         private void PaintTextRecent(Graphics g, float x, float y, float w, float h, RimeSlice slice)
         {
@@ -771,6 +858,8 @@ namespace KeyMouseStats
         /// <summary>找不到 commit_log.csv 时的整页说明。这不是错误状态,只是没开这个功能。</summary>
         private void PaintTextMissing(Graphics g)
         {
+            _textBars.Clear();
+            _textBarKeys.Clear();
             PaintCard(g, Cx, Cy, Cw, 288, "字符内容：还没有数据源");
             float x = Cx + 24, y = Cy + 52, w = Cw - 48;
 
@@ -795,6 +884,7 @@ namespace KeyMouseStats
             RectangleF refresh = new RectangleF(Cx + Cw - 132, Cy + 14, 108, 26);
             _chips.Add(refresh);
             _chipIds.Add(404);
+            AddTextHit(refresh, 7, 0);
             PaintChip(g, refresh, "重新读取", false, null);
         }
 
@@ -811,6 +901,81 @@ namespace KeyMouseStats
                 case 3: return Ccyan;
                 default: return Cpurple;
             }
+        }
+
+        /// <summary>输入效率:首选/翻页分段条与全拼基准码长标尺。分母只取完整样本。</summary>
+        private void PaintTextEfficiency(Graphics g, float x, float y, float w, float h, RimeSlice slice)
+        {
+            if (slice.Commits <= 0)
+            {
+                AppText(g, "本区间没有上屏记录", _fSmall, Csub, new RectangleF(x, y + h / 2 - 10, w, 20), false);
+                return;
+            }
+
+            float half = w / 2f;
+            float leftW = half - 10;
+            float rightX = x + half + 2;
+            bool hasCandidates = slice.CandidateKnown > 0;
+            double firstShare = hasCandidates ? slice.FirstChoiceRate : 0;
+            double pagedShare = hasCandidates ? slice.PagedCandidateRate : 0;
+
+            // ---- 左栏:首选 / 翻页 ----
+            AppText(g, "首选率", _fSmall, Csub, new RectangleF(x, y, leftW, 16), false);
+            AppText(g, hasCandidates ? (firstShare * 100).ToString("0.0", CultureInfo.InvariantCulture) + "%" : "—",
+                _fNum2, Ctext, new RectangleF(x, y + 18, leftW, 28), false);
+
+            float barW = leftW;
+            float barY = y + 52;
+            using (GraphicsPath track = RoundedRect(x, barY, barW, 6, 3))
+            using (SolidBrush fill = new SolidBrush(Color.FromArgb(24, Csub))) g.FillPath(fill, track);
+            if (hasCandidates)
+            {
+                float used = (float)(barW * firstShare);
+                if (used > barW - 2f) used = barW;
+                if (used > 0)
+                    using (GraphicsPath first = RoundedRect(x, barY, Math.Max(2f, used - 2f), 6, 3))
+                    using (SolidBrush fill = new SolidBrush(Cgreen)) g.FillPath(fill, first);
+                float paged = (float)(barW * pagedShare);
+                if (paged > 0)
+                    using (GraphicsPath rest = RoundedRect(x + used, barY, Math.Max(2f, paged), 6, 3))
+                    using (SolidBrush fill = new SolidBrush(Corange)) g.FillPath(fill, rest);
+            }
+            float lineY = y + 66;
+            using (SolidBrush dot = new SolidBrush(Cgreen)) g.FillEllipse(dot, x, lineY + 5, 5, 5);
+            AppText(g, "首选", _fAxis, Csub, new RectangleF(x + 10, lineY, leftW - 50, 14), false);
+            AppText(g, hasCandidates ? slice.CandidateFirst.ToString(CultureInfo.InvariantCulture) : "—", _fAxis, Ctext,
+                new RectangleF(x + leftW - 48, lineY, 48, 14), true);
+            lineY += 15;
+            using (SolidBrush dot = new SolidBrush(Corange)) g.FillEllipse(dot, x, lineY + 5, 5, 5);
+            AppText(g, "翻页", _fAxis, Csub, new RectangleF(x + 10, lineY, leftW - 50, 14), false);
+            AppText(g, hasCandidates ? slice.CandidatePaged.ToString(CultureInfo.InvariantCulture) : "—", _fAxis, Ctext,
+                new RectangleF(x + leftW - 48, lineY, 48, 14), true);
+
+            // ---- 右栏:平均码长与 3.1 全拼基准 ----
+            bool hasCode = !double.IsNaN(slice.AverageCodeLength);
+            double code = hasCode ? slice.AverageCodeLength : 0;
+            AppText(g, "平均码长", _fSmall, Csub, new RectangleF(rightX, y, leftW, 16), false);
+            AppText(g, hasCode ? code.ToString("0.00", CultureInfo.InvariantCulture) + " 键/字" : "—",
+                _fNum2, Ctext, new RectangleF(rightX, y + 18, leftW, 28), false);
+
+            float scaleX = rightX;
+            float scaleW = leftW;
+            const double floor = 1.5, ceiling = 4.0, benchmark = 3.1;
+            float scaleY = y + 54;
+            using (Pen rail = new Pen(Color.FromArgb(45, Csub), 2f)) g.DrawLine(rail, scaleX, scaleY, scaleX + scaleW, scaleY);
+            float mark = scaleX + (float)((benchmark - floor) / (ceiling - floor)) * scaleW;
+            using (Pen dash = new Pen(Color.FromArgb(90, Csub), 1f) { DashStyle = DashStyle.Dash })
+                g.DrawLine(dash, mark, scaleY - 5, mark, scaleY + 5);
+            AppText(g, "全拼均值 3.1", _fAxis, Csub, new RectangleF(mark - 42, scaleY + 6, 84, 12), true);
+            if (hasCode)
+            {
+                float dotX = scaleX + (float)((Math.Max(floor, Math.Min(ceiling, code)) - floor) / (ceiling - floor)) * scaleW;
+                using (SolidBrush glow = new SolidBrush(Color.FromArgb(40, Cblue))) g.FillEllipse(glow, dotX - 6, scaleY - 6, 12, 12);
+                using (SolidBrush dot = new SolidBrush(Cblue)) g.FillEllipse(dot, dotX - 3, scaleY - 3, 6, 6);
+            }
+            AppText(g, hasCode ? slice.CodeSamples + " 条拼音样本" : "没有可统计码长",
+                _fAxis, Csub, new RectangleF(rightX, y + 78, leftW, 14), false);
+            AppText(g, "仅计拼音上屏", _fAxis, Csub, new RectangleF(rightX, y + 92, leftW, 14), false);
         }
 
         /// <summary>字符构成:汉字 / 标点 / 字母数字 / 空白 / 其他,各一行。</summary>
@@ -948,6 +1113,24 @@ namespace KeyMouseStats
                     return _textTopLabels[index] + " · " + Analysis.FmtCount(_textTopValues[index])
                         + " 次" + (_textWordTab == 0 ? " (" + share.ToString("0.#", CultureInfo.InvariantCulture) + "%)" : "");
                 }
+                case 5:
+                {
+                    List<RimeAppSummary> apps = slice.TopApps(5);
+                    if (index >= apps.Count) return "";
+                    RimeAppSummary app = apps[index];
+                    return AppActivity.FriendlyName(app.Path) + " · " + Analysis.FmtCount(app.Chars)
+                        + " 字 / " + app.Commits + " 次 · 汉字 " + Analysis.FmtCount(app.Hanzi);
+                }
+                case 6:
+                    return "应用来自 Rime 的前台进程名 · 不记录窗口标题或应用内容";
+                case 7:
+                {
+                    if (_rimeStats == null) return "正在读取 Rime 日志";
+                    return "文件 " + _rimeStats.RecordLines.ToString("N0", CultureInfo.InvariantCulture) + " 行 · "
+                        + FormatBytes(_rimeStats.FileBytes)
+                        + (_rimeStats.IncompleteRows > 0 ? " · 已跳过 " + _rimeStats.IncompleteRows.ToString("N0", CultureInfo.InvariantCulture) + " 条旧格式" : "")
+                        + " · 刷新 " + RimeTextStats.RefreshLabel(Store.TextRefreshSeconds);
+                }
                 default:
                 {
                     if (index >= slice.Recent.Count) return "";
@@ -999,19 +1182,10 @@ namespace KeyMouseStats
             if (_rimeStats.Missing) return "未找到 commit_log.csv · 本页只读该文件，程序不记录任何输入文字";
             if (_rimeStats.Error.Length > 0) return "读取失败：" + _rimeStats.Error;
 
-            // 这一行的职责是「自证读了多少」:条数、字数、文件行数三者并排,
-            // 任何一个数对不上都能当场看出来,不用再猜是页面没刷新还是解析漏了。
-            string hint = range;
-            if (_rimeSlice != null)
-                hint += " · 已读 " + _rimeSlice.Commits.ToString("N0", CultureInfo.InvariantCulture) + " 条 / "
-                    + Analysis.FmtCount(_rimeSlice.Chars) + " 字";
-            hint += " · 文件 " + _rimeStats.RecordLines.ToString("N0", CultureInfo.InvariantCulture) + " 行 "
-                + FormatBytes(_rimeStats.FileBytes);
+            // 页脚只保留一眼可读的同步状态；行数、体积与跳过条数放到刷新按钮的悬停提示。
+            string hint = range + " · ● Rime 日志已同步";
             if (_rimeStats.LastCommit != null)
                 hint += " · 最新 " + _rimeStats.LastCommit.Value.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
-            hint += " · 刷新 " + RimeTextStats.RefreshLabel(Store.TextRefreshSeconds);
-            if (_rimeStats.BadLines > 0) hint += " · " + _rimeStats.BadLines + " 行无法解析";
-            if (_rimeStats.Truncated) hint += " · 只解析了最近部分";
             return hint;
         }
 

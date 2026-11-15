@@ -59,6 +59,10 @@ namespace KeyMouseStats
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            Store.RepairOnLoad = true;
+            // 只有产品进程允许把内存状态写回数据目录。测试/预览进程不设这个开关,
+            // 除非自己把 Store.DataDirectory 重定向到临时目录,否则一切保存都会被丢弃。
+            Store.PersistenceArmed = true;
             StatsWidget widget = new StatsWidget();
             widget.ListenForDashboard(dashEvent);
             Application.Run(widget);
@@ -163,6 +167,83 @@ namespace KeyMouseStats
         public readonly CrossDay Cross=new CrossDay();
         /// <summary>按键时长(1.7.3 起采集):逐键聚合、8 档直方图与丢弃计数。1.7.6 起增加墙钟占用。</summary>
         public readonly Dictionary<int, KeyHold> Holds = new Dictionary<int, KeyHold>();
+        /// <summary>
+        /// 修正某天的派生计数：以 keys / clicks 这两个日总数为准，按原分布等比缩放到
+        /// 小时桶、按键桶再补齐舍入余数。历史旧格式可能只写了日总数，没有完整的
+        /// 派生桶，这时不能凭空造数据；只有原桶合计大于 0 且与日总数不一致时才修。
+        /// </summary>
+        internal bool RepairDerivedCounts(bool repairButtons)
+        {
+            bool changed = false;
+            if (Keys > 0)
+            {
+                changed |= ScaleBuckets(HourKeys, Keys);
+                changed |= ScaleCounts(KeyCounts, Keys);
+            }
+            if (Clicks > 0)
+            {
+                changed |= ScaleBuckets(HourClicks, Clicks);
+                if (repairButtons)
+                {
+                    long buttons = Left + Right + Middle + XButtons;
+                    if (buttons < Clicks)
+                    {
+                        // 旧版没有逐键位按钮记录，缺失部分几乎都是左键；保留已有右键/中键。
+                        Left += Clicks - buttons;
+                        changed = true;
+                    }
+                }
+            }
+            return changed;
+        }
+
+        private static bool ScaleBuckets(long[] values, long total)
+        {
+            if (values == null || total <= 0) return false;
+            long current = 0;
+            int largest = 0;
+            for (int i = 0; i < values.Length; i++)
+            {
+                current += values[i];
+                if (values[i] > values[largest]) largest = i;
+            }
+            if (current <= 0 || current == total) return false;
+            double factor = total / (double)current;
+            long assigned = 0;
+            for (int i = 0; i < values.Length; i++)
+            {
+                values[i] = Math.Max(0, (long)Math.Round(values[i] * factor));
+                assigned += values[i];
+            }
+            values[largest] = Math.Max(0, values[largest] + total - assigned);
+            return true;
+        }
+
+        private static bool ScaleCounts(Dictionary<int, long> values, long total)
+        {
+            if (values == null || values.Count == 0 || total <= 0) return false;
+            List<int> keys = new List<int>(values.Keys);
+            keys.Sort();
+            long current = 0;
+            int largest = keys[0];
+            foreach (int key in keys)
+            {
+                current += values[key];
+                if (values[key] > values[largest]) largest = key;
+            }
+            if (current <= 0 || current == total) return false;
+            double factor = total / (double)current;
+            long assigned = 0;
+            foreach (int key in keys)
+            {
+                long scaled = Math.Max(0, (long)Math.Round(values[key] * factor));
+                values[key] = scaled;
+                assigned += scaled;
+            }
+            values[largest] = Math.Max(0, values[largest] + total - assigned);
+            return true;
+        }
+
         public readonly long[] HoldBuckets = new long[HoldTracker.BucketCount];
         public long HoldCount, HoldDiscarded;
         public double HoldTotalMs, HoldMaxMs;
@@ -327,14 +408,16 @@ namespace KeyMouseStats
     internal static class Store
     {
         /// <summary>保留天数;0 表示永久保留。超期数据先按月归档再移除。</summary>
-        public static int KeepDays = 365;
+        public static int KeepDays = 0;
         /// <summary>读取到的文件格式版本(缺失按 10 计)。</summary>
         public static int DetectedFormat = 10;
         /// <summary>文件由更新版本写入时为 true,此时只提示不阻止。</summary>
         public static bool FileFromNewerVersion;
-        public const int FormatVersion = 12;
+        public const int FormatVersion = 13;
         /// <summary>按月归档(保留期之外的数据)。</summary>
         public static readonly Dictionary<string, MonthArchive> Archives = new Dictionary<string, MonthArchive>(StringComparer.Ordinal);
+        private static readonly HashSet<string> MonthlyKnown = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private static bool _monthlyMigration;
         private static string Dir = DefaultDirectory();
         private static string FilePath = Path.Combine(Dir, "stats.txt");
 
@@ -349,12 +432,28 @@ namespace KeyMouseStats
         internal static string DataDirectory
         {
             get { return Dir; }
-            set { Dir = value; FilePath = Path.Combine(value, "stats.txt"); }
+            set { Dir = value; FilePath = Path.Combine(value, "stats.txt"); _redirected = true; MonthlyKnown.Clear(); _monthlyMigration = false; }
         }
 
         public static Dictionary<DateTime, DayRecord> History = new Dictionary<DateTime, DayRecord>();
         public static DayRecord Today = new DayRecord();
         public static Counters Total = new Counters();
+        /// <summary>产品启动时启用；测试默认关闭，避免测试夹具的简化桶被自动改写。</summary>
+        public static bool RepairOnLoad;
+        /// <summary>
+        /// 产品进程启动时置 true，表示允许把内存状态写回数据目录。
+        /// 测试 / 预览 / 渲染进程保持 false：它们可能装载夹具数据，一旦落盘就会覆盖用户的真实历史。
+        /// </summary>
+        public static bool PersistenceArmed;
+        /// <summary>DataDirectory 被显式重定向过（测试自己的临时目录），此时允许保存。</summary>
+        private static bool _redirected;
+        /// <summary>是否可以写数据目录。产品进程恒 true；测试必须先把 DataDirectory 指到临时目录。</summary>
+        public static bool CanPersist { get { return PersistenceArmed || _redirected; } }
+        /// <summary>
+        /// 上次 Load 判定为「文件存在但读不出来 / 解析不出任何日记录」。
+        /// 为 true 时拒绝一切保存，避免把用户的完整历史静默覆盖成「只有今天」。
+        /// </summary>
+        public static bool LoadFailed;
         public static DateTime Day = DateTime.Today;
         public static int ThemeId;
         public static int KeyboardLayout;
@@ -403,6 +502,53 @@ namespace KeyMouseStats
                 History[newDay] = rec;
             }
             Today = rec;
+        }
+
+        /// <summary>修复日总数与小时/按键派生桶不一致的记录。返回修复的天数。</summary>
+        internal static int RepairDerivedTotals(bool repairButtons)
+        {
+            int repaired = 0;
+            foreach (DayRecord day in History.Values)
+                if (day != null && day.RepairDerivedCounts(repairButtons)) repaired++;
+            return repaired;
+        }
+
+        /// <summary>按日记录和月归档重建全局累计，避免 total_* 丢失后总览与日明细分离。</summary>
+        internal static void RebuildTotalFromHistory()
+        {
+            Counters total = new Counters();
+            foreach (DayRecord day in History.Values)
+            {
+                if (day == null) continue;
+                total.Keys += day.Keys;
+                total.Clicks += day.Clicks;
+                total.Left += day.Left;
+                total.Right += day.Right;
+                total.Middle += day.Middle;
+                total.XButtons += day.XButtons;
+                total.Wheel += day.Wheel;
+                total.MovePx += day.MovePx;
+                total.MoveMeters += day.MoveMeters;
+                total.HoldCount += day.HoldCount;
+                total.HoldDiscarded += day.HoldDiscarded;
+                total.HoldTotalMs += day.HoldTotalMs;
+                total.HoldActiveSeconds += day.HoldActiveSeconds;
+                if (day.HoldMaxMs > total.HoldMaxMs) total.HoldMaxMs = day.HoldMaxMs;
+            }
+            foreach (MonthArchive archive in Archives.Values)
+            {
+                if (archive == null) continue;
+                total.Keys += archive.Keys;
+                total.Clicks += archive.Clicks;
+                total.Wheel += archive.Wheel;
+                total.MoveMeters += archive.MoveMeters;
+                total.HoldCount += archive.HoldCount;
+                total.HoldDiscarded += archive.HoldDiscarded;
+                total.HoldTotalMs += archive.HoldTotalMs;
+                total.HoldActiveSeconds += archive.HoldActiveSeconds;
+                if (archive.HoldMaxMs > total.HoldMaxMs) total.HoldMaxMs = archive.HoldMaxMs;
+            }
+            Total = total;
         }
 
         private static long ParseL(string s)
@@ -459,13 +605,18 @@ namespace KeyMouseStats
                     if (DateTime.TryParseExact(ds, "yyyy-MM-dd", CultureInfo.InvariantCulture,
                             DateTimeStyles.None, out d))
                     {
-                        if (!result.History.ContainsKey(d))
+                        // 同一天出现第二个 [day=] 节时，旧解析器会复用同一个对象：
+                        // 标量 keys 被后一节覆盖，而 hk/kk/hc 却继续累加，最终生成
+                        // 一个自己都对不上的日记录。异常文件里以第一节为准，后续重复节忽略。
+                        if (result.History.ContainsKey(d))
                         {
-                            DayRecord r = new DayRecord();
-                            r.Date = d;
-                            result.History[d] = r;
+                            cur = null;
+                            continue;
                         }
-                        cur = result.History[d];
+                        DayRecord r = new DayRecord();
+                        r.Date = d;
+                        result.History[d] = r;
+                        cur = r;
                     }
                     continue;
                 }
@@ -618,10 +769,84 @@ namespace KeyMouseStats
 
         public static void Load()
         {
+            // 每次读取都重新判定:成功的读取会清掉上一次的失败标记。
+            LoadFailed = false;
+            bool fileExisted = false;
+            bool readFailed = false;
+            bool hasDayLines = false;
+            int parsedDays = 0;
+            bool loaded = false;
             try
             {
-                if (!File.Exists(FilePath)) return;
-                ApplyParsed(Parse(File.ReadAllLines(FilePath, Encoding.UTF8)), true);
+                if (File.Exists(FilePath))
+                {
+                    fileExisted = true;
+                    try
+                    {
+                        string[] lines = File.ReadAllLines(FilePath, Encoding.UTF8);
+                        foreach (string line in lines)
+                            if (line.TrimStart().StartsWith("[day=", StringComparison.Ordinal)) { hasDayLines = true; break; }
+                        Parsed parsed = Parse(lines);
+                        parsedDays = parsed.History.Count;
+                        DateTime currentMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+                        foreach (DateTime d in parsed.History.Keys)
+                            if (d < currentMonth) { _monthlyMigration = true; break; }
+                        // 迁移旧版单文件时必须先把保留期设为永久，否则 ApplyParsed 里的
+                        // Prune 会在按月拆分之前把老记录折进月度汇总、丢掉逐日明细。
+                        if (_monthlyMigration)
+                        {
+                            parsed.KeepDays = 0;
+                            parsed.HasKeepDays = true;
+                        }
+                        ApplyParsed(parsed, true);
+                        loaded = true;
+                    }
+                    catch { readFailed = true; }
+                }
+                // 文件存在却读不出来,或文件里明明有 [day=] 分节却一条日记录都没解析出来:
+                // 都把这次读取判为失败,后续任何 Save 一律拒绝,避免静默清空历史。
+                if (fileExisted && (readFailed || (hasDayLines && parsedDays == 0)))
+                {
+                    LoadFailed = true;
+                    Program.LogEvent("数据读取失败: 已拒绝覆盖");
+                }
+                MergeMonthlyFiles();
+                if (!loaded && History.Count > 0) { RollDay(DateTime.Today); Prune(); }
+                if (RepairOnLoad && History.Count > 0)
+                {
+                    int repaired = RepairDerivedTotals(false);
+                    // 今天缺失的按钮明细可以安全补到左键；历史日保留原样。
+                    if (Today != null && Today.RepairDerivedCounts(true)) repaired++;
+                    RebuildTotalFromHistory();
+                    if (repaired > 0) Program.LogEvent("数据自检:修正 " + repaired + " 天的派生计数，以 keys/clicks 为准");
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>把年/月目录里的完整日期记录并入内存;stats.txt 中的当前月记录优先。</summary>
+        private static void MergeMonthlyFiles()
+        {
+            MonthlyKnown.Clear();
+            try
+            {
+                if (!Directory.Exists(Dir)) return;
+                foreach (string yearDir in Directory.GetDirectories(Dir))
+                {
+                    string yearName = Path.GetFileName(yearDir);
+                    int year;
+                    if (yearName.Length != 4 || !int.TryParse(yearName, NumberStyles.Integer, CultureInfo.InvariantCulture, out year)) continue;
+                    foreach (string file in Directory.GetFiles(yearDir, "*.txt"))
+                    {
+                        string monthName = Path.GetFileNameWithoutExtension(file);
+                        DateTime month;
+                        if (!DateTime.TryParseExact(monthName + "-01", "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out month)) continue;
+                        MonthlyKnown.Add(monthName);
+                        Parsed parsed = Parse(File.ReadAllLines(file, Encoding.UTF8));
+                        foreach (KeyValuePair<DateTime, DayRecord> day in parsed.History)
+                            if (!History.ContainsKey(day.Key)) History[day.Key] = day.Value;
+                    }
+                }
             }
             catch { }
         }
@@ -761,6 +986,7 @@ namespace KeyMouseStats
         /// <summary>同步保存:返回时文件已落盘。设置对话框与测试使用。</summary>
         public static void Save()
         {
+            if (!CanPersist || LoadFailed) return;   // 测试/预览进程或读取失败:不序列化、不写盘
             string text = Prepare();
             if (text == null) return;
             long sequence;
@@ -775,6 +1001,7 @@ namespace KeyMouseStats
         /// <summary>异步保存:序列化仍在调用线程完成,写盘交给后台线程,不阻塞输入处理。</summary>
         public static void SaveAsync()
         {
+            if (!CanPersist || LoadFailed) return;   // 测试/预览进程或读取失败:不序列化、不写盘
             string text = Prepare();
             if (text == null) return;
             lock (WriteGate)
@@ -824,6 +1051,8 @@ namespace KeyMouseStats
 
         private static void WriteSnapshot(string text, long sequence)
         {
+            // 兜底:调用方可能在排队后才被判定为不允许写盘(如读取失败标记),这里再挡一次。
+            if (!CanPersist || LoadFailed) return;
             // 状态锁只保护计数与待写快照;真正写盘用独立的 FileGate,
             // 这样 UI 线程排队保存时不会等在前一次磁盘写入后面。
             lock (FileGate)
@@ -836,6 +1065,7 @@ namespace KeyMouseStats
                 try
                 {
                     if (!Directory.Exists(Dir)) Directory.CreateDirectory(Dir);
+                    WriteMonthlyFiles();
                     string tmp = FilePath + ".tmp";
                     File.WriteAllText(tmp, text, Encoding.UTF8);
                     if (File.Exists(FilePath)) File.Replace(tmp, FilePath, FilePath + ".bak");
@@ -845,17 +1075,69 @@ namespace KeyMouseStats
             }
         }
 
+        /// <summary>
+        /// 旧月份写进年目录/月文件。迁移时覆盖旧文件，正常运行时只写尚不存在的
+        /// 月份；用户手动删掉的月份不会在后续保存时被重新生成。
+        /// </summary>
+        private static void WriteMonthlyFiles()
+        {
+            DateTime currentMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+            List<DateTime> months = new List<DateTime>();
+            foreach (DateTime d in History.Keys)
+            {
+                DateTime month = new DateTime(d.Year, d.Month, 1);
+                if (month < currentMonth && !months.Contains(month)) months.Add(month);
+            }
+            for (int i = 0; i < months.Count; i++)
+            {
+                DateTime month = months[i];
+                string key = month.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+                string path = Path.Combine(Dir, month.Year.ToString("0000", CultureInfo.InvariantCulture), key + ".txt");
+                if (!_monthlyMigration && MonthlyKnown.Contains(key)) continue;
+                if (!_monthlyMigration && File.Exists(path)) { MonthlyKnown.Add(key); continue; }
+                WriteTextAtomic(path, SerializeMonth(month.Year, month.Month));
+                MonthlyKnown.Add(key);
+            }
+            _monthlyMigration = false;
+        }
+
+        private static string SerializeMonth(int year, int month)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("# 键鼠统计月度数据 " + year.ToString("0000", CultureInfo.InvariantCulture) + "-" + month.ToString("00", CultureInfo.InvariantCulture));
+            sb.AppendLine("format=13");
+            sb.AppendLine("storage_layout=monthly-v1");
+            List<DateTime> days = new List<DateTime>();
+            foreach (DateTime d in History.Keys)
+                if (d.Year == year && d.Month == month) days.Add(d);
+            days.Sort();
+            foreach (DateTime d in days) AppendDay(sb, d, History[d]);
+            return sb.ToString();
+        }
+
+        private static void WriteTextAtomic(string path, string text)
+        {
+            string dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            string tmp = path + ".tmp";
+            File.WriteAllText(tmp, text, Encoding.UTF8);
+            if (File.Exists(path)) File.Replace(tmp, path, path + ".bak");
+            else File.Move(tmp, path);
+        }
+
         /// <summary>导出用的文本,与落盘内容一致;失败返回 null。</summary>
         internal static string ExportPayload()
         {
-            return Prepare();
+            try { Prune(); return Serialize(true); }
+            catch { return null; }
         }
 
-        private static string Serialize()
+        private static string Serialize(bool allDays = false)
         {
             StringBuilder sb = new StringBuilder();
-                sb.AppendLine("# 键鼠统计数据文件 v12 / 正式版 " + BuildInfo.Version);
-                sb.AppendLine("format=12");
+                sb.AppendLine("# 键鼠统计数据文件 v13 / 正式版 " + BuildInfo.Version);
+                sb.AppendLine("format=13");
+                sb.AppendLine("storage_layout=monthly-v1");
                 sb.AppendLine("shortcut_model_v1="+ShortcutSavings.EncodeModel());
                 sb.AppendLine("idle_threshold=" + IdleThresholdSeconds.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("backup_keep=" + BackupKeep.ToString(CultureInfo.InvariantCulture));
@@ -883,6 +1165,15 @@ namespace KeyMouseStats
                 {
                     DayRecord r = History[d];
                     if (r.IsEmpty && d != Day) continue;
+                    if (!allDays && (d.Year != DateTime.Today.Year || d.Month != DateTime.Today.Month)) continue;
+                    AppendDay(sb, d, r);
+                }
+
+                return sb.ToString();
+        }
+
+        private static void AppendDay(StringBuilder sb, DateTime d, DayRecord r)
+        {
                     sb.AppendLine("[day=" + d.ToString("yyyy-MM-dd") + "]");
                     sb.AppendLine("keys=" + r.Keys.ToString(CultureInfo.InvariantCulture));
                     sb.AppendLine("clicks=" + r.Clicks.ToString(CultureInfo.InvariantCulture));
@@ -918,9 +1209,6 @@ namespace KeyMouseStats
                     foreach(string holdLine in HoldCodec.EncodeAll(r))sb.AppendLine(holdLine);
                     foreach(string appKeyLine in AppKeyCodec.EncodeAll(r))sb.AppendLine(appKeyLine);
                     CrossTelemetry.Save(sb,r);
-                }
-
-                return sb.ToString();
         }
 
         private static void AppendTotals(StringBuilder sb, Counters c)
@@ -1339,6 +1627,8 @@ namespace KeyMouseStats
             // 放到线程池:这一串要经过计划任务服务,万一它卡住,不能把装好钩子的 UI 线程一起拖住。
             string exePath = Application.ExecutablePath;
             System.Threading.ThreadPool.QueueUserWorkItem(delegate { AutoStart.Sync(exePath); });
+            // 存储页的日增量需要跨天快照；启动时静默记录一次，避免只有打开存储页才有点。
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate { try { StorageUsage.Measure(); } catch { } });
             if (!_rawMouse.Registered)
                 _tray.ShowBalloonTip(5000, "移动距离无法采集", _rawMouse.Status, ToolTipIcon.Warning);
             else if (!MouseDistance.ValidDpi(Store.MouseDpi))
@@ -1817,9 +2107,17 @@ namespace KeyMouseStats
                 g.DrawString("本程序共占用", _fLabel, muted, 16 * s, 42 * s);
             using (SolidBrush text = new SolidBrush(theme.Text))
                 g.DrawString(StorageUsage.FormatSize(total), _fValue, text, 16 * s, 55 * s);
-            using (SolidBrush muted = new SolidBrush(theme.Muted))
             using (StringFormat far = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Near })
-                g.DrawString("4 项本地数据", _fLabel, muted, new RectangleF(16 * s, 60 * s, ClientSize.Width - 32 * s, 14 * s), far);
+            {
+                string todayText = usage.HasTodayGrowth ? "今日 " + StorageUsage.FormatDelta(usage.TodayGrowthBytes) : "今日 —";
+                string yesterdayText = usage.HasYesterdayGrowth ? "昨日 " + StorageUsage.FormatDelta(usage.YesterdayGrowthBytes) : "昨日 —";
+                Color todayColor = !usage.HasTodayGrowth ? theme.Muted : usage.TodayGrowthBytes > 0 ? theme.Green : theme.Muted;
+                Color yesterdayColor = !usage.HasYesterdayGrowth ? theme.Muted : usage.YesterdayGrowthBytes > 0 ? theme.Green : theme.Muted;
+                using (SolidBrush todayBrush = new SolidBrush(todayColor))
+                    g.DrawString(todayText, _fLabel, todayBrush, new RectangleF(104 * s, 55 * s, ClientSize.Width - 120 * s, 13 * s), far);
+                using (SolidBrush yesterdayBrush = new SolidBrush(yesterdayColor))
+                    g.DrawString(yesterdayText, _fLabel, yesterdayBrush, new RectangleF(104 * s, 68 * s, ClientSize.Width - 120 * s, 13 * s), far);
+            }
 
             string[] names = { "程序本体", "历史备份", "核心统计", "日报归档" };
             long[] values = { usage.ProgramBytes, usage.BackupBytes, usage.CoreBytes, usage.ReportBytes };

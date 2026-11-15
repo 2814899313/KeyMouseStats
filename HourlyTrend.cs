@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.Collections.Generic;
 using System.IO;
@@ -58,15 +59,24 @@ namespace KeyMouseStats
         private DateTime _hourlyTrendDay = DateTime.Today;
         private int _hourlyCompareMode = 1; // 0=关闭 1=昨天 2=上周同日 3=近N天 4=本周
         private int _hourlyCompareDays = 3;
+        private bool _hourlyMenuOpen;
+        private readonly List<RectangleF> _hourlyMenuRects = new List<RectangleF>();
 
         private void ApplyHourlyTrendChip(int id)
         {
-            if (id == 300 || id == 301) { _trendHourly = id == 301; _hover = -1; }
+            if (id == 300 || id == 301) { _trendHourly = id == 301; _hourlyMenuOpen = false; _hover = -1; }
             if (id >= 310 && id <= 314) _hourlyTrendMetric = id - 310;
             if (id == 320) _hourlyTrendDay = _hourlyTrendDay.AddDays(-1);
             if (id == 321) _hourlyTrendDay = _hourlyTrendDay.AddDays(1);
             if (id == 322) _hourlyTrendDay = DateTime.Today;
-            if (id == 326) ShowHourlyComparisonDialog();
+            if (id == 326) { _hourlyMenuOpen = !_hourlyMenuOpen; Invalidate(); }
+            if (id == 327) { _hourlyCompareMode = 0; _hourlyMenuOpen = false; Invalidate(); }
+            if (id == 328) { _hourlyCompareMode = 1; _hourlyMenuOpen = false; Invalidate(); }
+            if (id == 329) { _hourlyCompareMode = 2; _hourlyMenuOpen = false; Invalidate(); }
+            if (id == 330) { _hourlyCompareMode = 3; _hourlyMenuOpen = false; Invalidate(); }
+            if (id == 331) { _hourlyCompareMode = 4; _hourlyMenuOpen = false; Invalidate(); }
+            if (id == 332) { _hourlyCompareDays = Math.Max(2, _hourlyCompareDays - 1); _hourlyCompareMode = 3; Invalidate(); }
+            if (id == 333) { _hourlyCompareDays = Math.Min(14, _hourlyCompareDays + 1); _hourlyCompareMode = 3; Invalidate(); }
             if (id == 323)
             {
                 using (Form dialog = new ThemedDialog { Text = "选择小时趋势日期", ClientSize = new Size(304, 102),
@@ -193,8 +203,8 @@ namespace KeyMouseStats
         {
             string[] names = { "击键", "点击", "活跃时长", "击键/分", "点击/分" };
             for (int i = 0; i < names.Length; i++) AppChip(g, 310 + i, Cx + i * 78, 98, 70, names[i], _hourlyTrendMetric == i);
-            string compareButton = _hourlyCompareMode == 0 ? "曲线：仅所选日" : _hourlyCompareMode == 1 ? "曲线：昨天" :
-                _hourlyCompareMode == 2 ? "曲线：上周同日" : _hourlyCompareMode == 4 ? "曲线：本周 7 天" : "曲线：近" + _hourlyCompareDays + "天";
+            string compareButton = _hourlyCompareMode == 0 ? "曲线：仅所选日 ▾" : _hourlyCompareMode == 1 ? "曲线：昨天 ▾" :
+                _hourlyCompareMode == 2 ? "曲线：上周同日 ▾" : _hourlyCompareMode == 4 ? "曲线：本周 7 天 ▾" : "曲线：近" + _hourlyCompareDays + "天 ▾";
             AppChip(g, 326, Cx + 540, 98, 190, compareButton, _hourlyCompareMode > 0);
             AppChip(g, 322, Cx + Cw - 88, 98, 88, "回今天", false);
             PaintCardBase(g, Cx, 150, Cw, 360);
@@ -328,6 +338,50 @@ namespace KeyMouseStats
                 PaintCardBase(g, x, 524, 196, 62);
                 AppText(g, labels[i], _fSmall, Csub, new RectangleF(x + 14, 530, 168, 18), false);
                 AppText(g, numbers[i], _fNum2, Ctext, new RectangleF(x + 14, 549, 176, 28), false);
+            }
+            PaintHourlyMenu(g);
+        }
+
+        private void PaintHourlyMenu(Graphics g)
+        {
+            if (!_hourlyMenuOpen) return;
+            float x = Cx + 540, y = 132, w = 190, rowH = 34, pad = 8;
+            string[] labels = { "不对比", "昨天", "上周同日", "近 " + _hourlyCompareDays + " 天 · 多曲线", "本周 7 天 · 多曲线" };
+            int[] ids = { 327, 328, 329, 330, 331 };
+            int selected = _hourlyCompareMode;
+            float h = pad * 2 + rowH * labels.Length;
+            using (GraphicsPath shadow = RoundedRect(x + 3, y + 4, w, h, 12))
+            using (SolidBrush shade = new SolidBrush(Color.FromArgb(70, Color.Black))) g.FillPath(shade, shadow);
+            using (GraphicsPath panel = RoundedRect(x, y, w, h, 12))
+            {
+                using (SolidBrush fill = new SolidBrush(Ccard2)) g.FillPath(fill, panel);
+                using (Pen edge = new Pen(Color.FromArgb(45, Ctext))) g.DrawPath(edge, panel);
+            }
+            _hourlyMenuRects.Clear();
+            for (int i = 0; i < labels.Length; i++)
+            {
+                float ry = y + pad + i * rowH;
+                RectangleF row = new RectangleF(x + 6, ry, w - 12, rowH - 2);
+                bool hover = Hit(row, new PointF(ToBase(_mouse).X - ContentX, ToBase(_mouse).Y - ContentY));
+                if (hover || selected == i)
+                {
+                    using (GraphicsPath path = RoundedRect(row.X, row.Y, row.Width, row.Height, 7))
+                    using (SolidBrush fill = new SolidBrush(selected == i ? Color.FromArgb(30, Cblue) : Color.FromArgb(24, Ctext))) g.FillPath(fill, path);
+                }
+                if (selected == i) AppText(g, "✓", _fSmall, Cblue, new RectangleF(x + 12, ry + 7, 16, 18), false);
+                AppText(g, labels[i], _fBody, selected == i ? Ctext : Csub, new RectangleF(x + 32, ry + 7, w - 44, 20), false);
+                if (i == 3)
+                {
+                    // 先登记加减按钮，保证点击不会被整行命中抢走。
+                    RectangleF minus = new RectangleF(x + w - 58, ry + 6, 20, 22);
+                    RectangleF plus = new RectangleF(x + w - 24, ry + 6, 18, 22);
+                    _chips.Add(minus); _chipIds.Add(332);
+                    _chips.Add(plus); _chipIds.Add(333);
+                    AppText(g, "−", _fBody, Csub, minus, false);
+                    AppText(g, "+", _fBody, Csub, plus, false);
+                }
+                _hourlyMenuRects.Add(row);
+                _chips.Add(row); _chipIds.Add(ids[i]);
             }
         }
         private void ExportHourlyTrend()

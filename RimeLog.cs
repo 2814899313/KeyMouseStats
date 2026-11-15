@@ -24,7 +24,24 @@ namespace KeyMouseStats
     {
         public DateTime Time;
         public string Text;
+        /// <summary>写入方声明的字符数(旧三列格式的第二列);缺失或非法时回算。</summary>
         public int Chars;
+        /// <summary>排除换行后的真实码点数,用于和字符构成严格闭环。</summary>
+        public int TotalLength;
+        /// <summary>纯汉字个数(CJK,不含标点字母)。</summary>
+        public int HanziCount;
+        /// <summary>normal / raw_ascii / punct / mixed / other。</summary>
+        public string CommitType = "other";
+        /// <summary>候选框选择下标；-1 表示非候选上屏或未采集。</summary>
+        public int CandidateIndex = -1;
+        /// <summary>候选下标是否由写入方明确给出(空字符串为未采集)。</summary>
+        public bool CandidateKnown;
+        /// <summary>Rime 输入的原始码长；-1 表示没有该列。</summary>
+        public int CodeLength = -1;
+        public string Application = "";
+        public string Scheme = "";
+        /// <summary>是否为完整七列格式；旧三列/空候选/缺程序或缺码长的行不参与产品统计。</summary>
+        public bool FormatComplete;
     }
 
     /// <summary>字符编码工具。.NET Framework 4.x 没有 Rune,这里自己按码点走。</summary>
@@ -114,6 +131,26 @@ namespace KeyMouseStats
         public long Commits;
     }
 
+    /// <summary>某个前台程序的文字产出摘要；只保留字符频次，不记录窗口标题。</summary>
+    internal sealed class RimeAppSummary
+    {
+        public string Path = "";
+        public long Chars, Commits, Hanzi;
+        public readonly Dictionary<int, long> CharCounts = new Dictionary<int, long>();
+
+        public List<KeyValuePair<int, long>> TopChars(int limit)
+        {
+            List<KeyValuePair<int, long>> list = new List<KeyValuePair<int, long>>(CharCounts);
+            list.Sort(delegate(KeyValuePair<int, long> a, KeyValuePair<int, long> b)
+            {
+                int byCount = b.Value.CompareTo(a.Value);
+                return byCount != 0 ? byCount : a.Key.CompareTo(b.Key);
+            });
+            if (limit > 0 && list.Count > limit) list.RemoveRange(limit, list.Count - limit);
+            return list;
+        }
+    }
+
     /// <summary>某个日期区间的聚合视图。页面上画什么,这里就只算什么。</summary>
     internal sealed class RimeSlice
     {
@@ -141,6 +178,12 @@ namespace KeyMouseStats
         public int ActiveMinutes;
         /// <summary>区间内出现过的汉字种类数(去重后)。「输入了多少种文字」的一半答案。</summary>
         public int DistinctHan;
+        /// <summary>候选序有效样本、首选、非首选；-1/未知不进入候选率分母。</summary>
+        public long CandidateKnown, CandidateFirst, CandidatePaged;
+        /// <summary>码效样本：只统计有码长、有汉字且类型为 normal/mixed 的记录。</summary>
+        public long CodeSamples, CodeLengthTotal, CodeHanziTotal;
+        /// <summary>按前台程序聚合的字数、次数与字符频次。</summary>
+        public readonly Dictionary<string, RimeAppSummary> Apps = new Dictionary<string, RimeAppSummary>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>区间内一共出现过多少种不同的字符(去重后,按码点算)。</summary>
         public int DistinctChars
@@ -180,6 +223,38 @@ namespace KeyMouseStats
         }
 
         public bool HasData { get { return Commits > 0; } }
+
+        public double CandidateCoverage
+        {
+            get { return Commits > 0 ? CandidateKnown / (double)Commits : 0; }
+        }
+
+        public double FirstChoiceRate
+        {
+            get { return CandidateKnown > 0 ? CandidateFirst / (double)CandidateKnown : double.NaN; }
+        }
+
+        public double PagedCandidateRate
+        {
+            get { return CandidateKnown > 0 ? CandidatePaged / (double)CandidateKnown : double.NaN; }
+        }
+
+        public double AverageCodeLength
+        {
+            get { return CodeHanziTotal > 0 ? CodeLengthTotal / (double)CodeHanziTotal : double.NaN; }
+        }
+
+        public List<RimeAppSummary> TopApps(int limit)
+        {
+            List<RimeAppSummary> list = new List<RimeAppSummary>(Apps.Values);
+            list.Sort(delegate(RimeAppSummary a, RimeAppSummary b)
+            {
+                int byChars = b.Chars.CompareTo(a.Chars);
+                return byChars != 0 ? byChars : string.Compare(a.Path, b.Path, StringComparison.OrdinalIgnoreCase);
+            });
+            if (limit > 0 && list.Count > limit) list.RemoveRange(limit, list.Count - limit);
+            return list;
+        }
 
         /// <summary>平均每次上屏的字数。空区间返回 0,调用方自己决定显示 "--"。</summary>
         public double AverageChars
@@ -325,6 +400,8 @@ namespace KeyMouseStats
         public DateTime? LastCommit;
         public long TotalChars, TotalCommits;
         public long BadLines, HeaderLines;
+        /// <summary>格式不完整、被产品读取模式跳过的行数（旧日志/空候选等）。</summary>
+        public long IncompleteRows;
         public bool Missing, Truncated;
         public string Error = "";
 
@@ -348,10 +425,16 @@ namespace KeyMouseStats
         /// <summary>读默认位置。找不到文件不算错误 —— 那是「没开这个功能」,页面上说清楚就行。</summary>
         public static RimeTextStats Load()
         {
-            return Load(DefaultPath);
+            return Load(DefaultPath, true);
         }
 
         public static RimeTextStats Load(string path)
+        {
+            return Load(path, false);
+        }
+
+        /// <summary>completeOnly=true 时只接收完整七列记录；产品页面使用这个模式，测试用三列旧格式仍走 false。</summary>
+        public static RimeTextStats Load(string path, bool completeOnly)
         {
             RimeTextStats stats = new RimeTextStats();
             stats.Source = path == null ? "" : path;
@@ -406,7 +489,12 @@ namespace KeyMouseStats
                         record = null;
                         stats.RecordLines++;
                         RimeCommit commit = ParseLine(text);
-                        if (commit != null) { stats.Add(commit); continue; }
+                        if (commit != null)
+                        {
+                            if (completeOnly && !commit.FormatComplete) { stats.IncompleteRows++; continue; }
+                            stats.Add(commit);
+                            continue;
+                        }
                         // 表头只可能是第一条有效行之前的那一行。不能只看关键字:
                         // 一条时间戳写坏的记录里也可能出现「时间」两个字,那属于坏行。
                         if (stats.TotalCommits == 0 && stats.HeaderLines == 0 && LooksLikeHeader(text))
@@ -418,7 +506,12 @@ namespace KeyMouseStats
                     {
                         stats.RecordLines++;
                         RimeCommit commit = ParseLine(record.ToString());
-                        if (commit != null) stats.Add(commit); else stats.BadLines++;
+                        if (commit != null)
+                        {
+                            if (completeOnly && !commit.FormatComplete) stats.IncompleteRows++;
+                            else stats.Add(commit);
+                        }
+                        else stats.BadLines++;
                     }
                 }
             }
@@ -515,16 +608,85 @@ namespace KeyMouseStats
                 && !DateTime.TryParse(stamp, CultureInfo.InvariantCulture, DateTimeStyles.None, out time))
                 return null;
 
-            // 明文里带英文逗号、而写入方没有加引号时,后面的字段都属于明文 —— 直接拼回去。
-            // 只用 fields[2] 会把「a,b」截成「a」:次数没错,但字符与词频会少一截。
+            string application = "", scheme = "";
+            int codeLength = -1, candidate = -1;
+            bool candidateKnown = false;
+            int textEnd = fields.Count;
+            bool metadata = false;
+
+            // 新日志:时间,字符数,明文,程序,方案,码长,候选序。
+            // 明文可能没加引号而带逗号，所以从右侧锚定元数据列，而不是硬取 fields[3]。
+            int count = fields.Count;
+            if (count >= 7 && IsApplicationField(fields[count - 4]))
+            {
+                int code;
+                application = fields[count - 4].Trim();
+                scheme = fields[count - 3].Trim();
+                if (int.TryParse(fields[count - 2].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out code))
+                    codeLength = code >= 0 ? code : -1;
+                string candidateField = fields[count - 1].Trim();
+                if (candidateField.Length > 0 && int.TryParse(candidateField, NumberStyles.Integer,
+                        CultureInfo.InvariantCulture, out candidate))
+                    candidateKnown = true;
+                textEnd = count - 4;
+                metadata = true;
+            }
+
+            // 六列版本:时间,字符数,明文,程序,方案,码长(没有候选列)。
+            if (!metadata && count == 6 && IsApplicationField(fields[3]))
+            {
+                int code;
+                application = fields[3].Trim();
+                scheme = fields[4].Trim();
+                if (int.TryParse(fields[5].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out code))
+                    codeLength = code >= 0 ? code : -1;
+                textEnd = 3;
+                metadata = true;
+            }
+
+            // 导出文件额外带 总字符数/汉字数/输入类型，仍是同一套元数据锚点。
+            if (!metadata && count >= 10 && IsCommitType(fields[count - 1].Trim()))
+            {
+                int code;
+                int parsedTotal, parsedHanzi;
+                if (int.TryParse(fields[count - 2].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out parsedHanzi)
+                    && int.TryParse(fields[count - 3].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out parsedTotal))
+                {
+                    application = fields[count - 7].Trim();
+                    scheme = fields[count - 6].Trim();
+                    if (int.TryParse(fields[count - 5].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out code))
+                        codeLength = code >= 0 ? code : -1;
+                    string candidateField = fields[count - 4].Trim();
+                    if (candidateField.Length > 0 && int.TryParse(candidateField, NumberStyles.Integer,
+                            CultureInfo.InvariantCulture, out candidate))
+                        candidateKnown = true;
+                    textEnd = count - 7;
+                    metadata = true;
+                }
+            }
+
             string text;
-            if (fields.Count > 3)
+            if (metadata)
             {
                 StringBuilder joined = new StringBuilder(fields[2]);
-                for (int i = 3; i < fields.Count; i++) joined.Append(',').Append(fields[i]);
+                for (int i = 3; i < textEnd; i++) joined.Append(',').Append(fields[i]);
                 text = joined.ToString();
             }
-            else text = fields[2];
+            else
+            {
+                // 旧格式末尾可能带一串空元数据列：时间,字符数,明文,,,,
+                // 这些空列不属于明文，不能拼成「明文,,,」。
+                bool trailingEmpty = true;
+                for (int i = 3; i < fields.Count; i++)
+                    if (fields[i].Trim().Length > 0) { trailingEmpty = false; break; }
+                if (trailingEmpty) text = fields[2];
+                else
+                {
+                    StringBuilder joined = new StringBuilder(fields[2]);
+                    for (int i = 3; i < fields.Count; i++) joined.Append(',').Append(fields[i]);
+                    text = joined.ToString();
+                }
+            }
             if (text == null) text = "";
             // 单次上屏不该有几百个字符;真出现这种行,大概率是文件坏了,截断防御而不是崩掉。
             if (text.Length > 512) text = text.Substring(0, 512);
@@ -534,11 +696,49 @@ namespace KeyMouseStats
                 || chars <= 0 || chars > 100000)
                 chars = RimeText.CountCodePoints(text);
 
+            List<int> points = RimeText.CodePoints(text);
+            int hanzi = 0, letters = 0, punctuation = 0;
+            for (int i = 0; i < points.Count; i++)
+            {
+                if (RimeText.IsCjk(points[i])) hanzi++;
+                else
+                {
+                    int kind = RimeText.Classify(points[i]);
+                    if (kind == 2) letters++;
+                    else if (kind == 1) punctuation++;
+                }
+            }
+
             RimeCommit commit = new RimeCommit();
             commit.Time = time;
             commit.Text = text;
             commit.Chars = chars;
+            commit.TotalLength = points.Count;
+            commit.HanziCount = hanzi;
+            commit.CommitType = hanzi > 0 ? (letters > 0 ? "mixed" : "normal")
+                : letters > 0 ? "raw_ascii" : punctuation > 0 ? "punct" : "other";
+            commit.CandidateIndex = candidateKnown ? candidate : -1;
+            commit.CandidateKnown = candidateKnown;
+            commit.CodeLength = codeLength;
+            commit.Application = application;
+            commit.Scheme = scheme;
+            commit.FormatComplete = metadata && candidateKnown
+                && application.Length > 0 && scheme.Length > 0 && codeLength >= 0;
             return commit;
+        }
+
+        private static bool IsApplicationField(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return false;
+            string trimmed = value.Trim();
+            return trimmed.IndexOf(".exe", StringComparison.OrdinalIgnoreCase) >= 0
+                || trimmed.IndexOf('\\') >= 0 || trimmed.IndexOf('/') >= 0;
+        }
+
+        private static bool IsCommitType(string value)
+        {
+            return value == "normal" || value == "raw_ascii" || value == "punct"
+                || value == "mixed" || value == "other";
         }
 
         private static bool LooksLikeHeader(string line)
@@ -617,6 +817,39 @@ namespace KeyMouseStats
                 }
                 slice.TextChars += textCount;
                 if (textCount > 0) slice.TextCommits++;
+
+                if (commit.CandidateKnown && commit.CandidateIndex >= 0)
+                {
+                    slice.CandidateKnown++;
+                    if (commit.CandidateIndex == 0) slice.CandidateFirst++;
+                    else slice.CandidatePaged++;
+                }
+                if (commit.CodeLength > 0 && commit.HanziCount > 0
+                    && (commit.CommitType == "normal" || commit.CommitType == "mixed"))
+                {
+                    slice.CodeSamples++;
+                    slice.CodeLengthTotal += commit.CodeLength;
+                    slice.CodeHanziTotal += commit.HanziCount;
+                }
+
+                string appKey = string.IsNullOrEmpty(commit.Application) ? "未识别应用" : commit.Application;
+                RimeAppSummary app;
+                if (!slice.Apps.TryGetValue(appKey, out app))
+                {
+                    app = new RimeAppSummary();
+                    app.Path = appKey;
+                    slice.Apps[appKey] = app;
+                }
+                app.Chars += commit.Chars;
+                app.Commits++;
+                app.Hanzi += commit.HanziCount;
+                for (int k = 0; k < points.Count; k++)
+                {
+                    long appCount;
+                    app.CharCounts.TryGetValue(points[k], out appCount);
+                    app.CharCounts[points[k]] = appCount + 1;
+                }
+
                 RimeSlice.AddPhrases(commit.Text, slice);
 
                 int length = points.Count;
@@ -717,11 +950,11 @@ namespace KeyMouseStats
             return list;
         }
 
-        /// <summary>导出区间内的原始上屏记录(时间/字符数/明文)。</summary>
+        /// <summary>导出区间内的原始上屏记录,附带总字符/纯汉字/输入类型等衍生列。</summary>
         public static string Export(RimeTextStats stats, DateTime from, DateTime to)
         {
             StringBuilder text = new StringBuilder();
-            text.AppendLine("时间点,字符数,明文");
+            text.AppendLine("时间点,字符数,明文,程序,方案,码长,候选序,总字符数,汉字数,输入类型");
             if (stats == null) return text.ToString();
             DateTime start = from.Date, end = to.Date;
             for (int i = 0; i < stats.Commits.Count; i++)
@@ -734,6 +967,13 @@ namespace KeyMouseStats
                     .Append(commit.Chars.ToString(CultureInfo.InvariantCulture))
                     .Append(',')
                     .Append(QuoteCsv(commit.Text))
+                    .Append(',').Append(QuoteCsv(commit.Application))
+                    .Append(',').Append(QuoteCsv(commit.Scheme))
+                    .Append(',').Append(commit.CodeLength >= 0 ? commit.CodeLength.ToString(CultureInfo.InvariantCulture) : "")
+                    .Append(',').Append(commit.CandidateKnown ? commit.CandidateIndex.ToString(CultureInfo.InvariantCulture) : "-1")
+                    .Append(',').Append(commit.TotalLength.ToString(CultureInfo.InvariantCulture))
+                    .Append(',').Append(commit.HanziCount.ToString(CultureInfo.InvariantCulture))
+                    .Append(',').Append(commit.CommitType)
                     .AppendLine();
             }
             return text.ToString();

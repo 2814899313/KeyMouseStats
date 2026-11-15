@@ -26,7 +26,7 @@ internal static class DailyReportLayoutTests
         };
         for(int i=9;i<22;i++) r.HourKeys[i]=200+(i*379)%1712;
         r.HourKeys[14]=1912;
-        string[] names={"Microsoft Edge","Visual Studio Code","ChatGPT.exe","explorer.exe","Application with a very long name.exe"};
+        string[] names={"Microsoft Edge","Visual Studio Code","ChatGPT","文件资源管理器","一个名字很长的写作工具"};
         for(int i=0;i<5;i++) r.Apps.Add(new DailyReport.AppLine { Name=names[i], Seconds=18000/(i*3+1) });
         r.Combos.AddRange(new[]{"CTRL+V 95","CTRL+C 55","CTRL+ALT+A 42","ALT+TAB 37"});
         r.TopKeys.AddRange(new[]{"I 1,247","空格 1,018","A 980"});

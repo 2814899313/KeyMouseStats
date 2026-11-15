@@ -18,6 +18,20 @@ internal static class ClickHeatTests
         if (!ok) throw new Exception(what);
     }
 
+    private static long SumHours(long[] values)
+    {
+        long total = 0;
+        foreach (long value in values) total += value;
+        return total;
+    }
+
+    private static long SumKeys(Dictionary<int, long> values)
+    {
+        long total = 0;
+        foreach (long value in values.Values) total += value;
+        return total;
+    }
+
     private static void Main()
     {
         Environment.ExitCode = KeyMouseStats.Tests.TestDiagnostics.Run("ClickHeatTests", Run);
@@ -46,6 +60,52 @@ internal static class ClickHeatTests
         }
         Check(ClickHeat.CellKey(-40000, 0) == ClickHeat.CellKey(-32768, 0), "out-of-range cells are clamped");
         Check(ClickHeat.CellLeft(-2) == -ClickHeat.Cell * 2, "cell left edge is derived from the cell index");
+
+        // ---- 2b. 鼠标动作多日聚合:方向、拖拽、移动后点击与样本天数 ----
+        DayRecord motionDay = new DayRecord();
+        motionDay.Cross.Direction[0] = 315;
+        motionDay.Cross.Direction[1] = 304;
+        motionDay.Cross.Direction[2] = 189;
+        motionDay.Cross.Direction[3] = 192;
+        motionDay.Cross.PathCounts = 1000;
+        motionDay.Cross.DragCounts = 39;
+        motionDay.Cross.Clicks = 1000;
+        motionDay.Cross.MoveClicks = 871;
+        motionDay.Cross.Packets = 483489;
+        motionDay.Cross.CalibratedPackets = 480000;
+        motionDay.Cross.Flicks = 6823;
+        motionDay.Cross.Reversals = 439;
+        MouseActionStats motion = MouseActionStats.Build(new[] { motionDay });
+        Check(motion.Days == 1 && motion.Packets == 483489, "mouse action aggregates sample count");
+        Check(Math.Abs(motion.DirectionShare(0) - 315.0 / 1000.0) < 1e-9, "direction shares use all four axes");
+        Check(Math.Abs(motion.DragShare - 0.039) < 1e-9, "drag share uses path samples");
+        Check(Math.Abs(motion.MoveClickShare - 0.871) < 1e-9, "move-click share uses clicks");
+        Check(motion.HorizontalInsight().Contains("1.62"), "horizontal/vertical insight is derived from direction shares");
+
+        // ---- 2c. 派生桶与日总数不一致时可自检修复（以 keys/clicks 为准） ----
+        DayRecord brokenDay = new DayRecord();
+        brokenDay.Keys = 100;
+        brokenDay.Clicks = 20;
+        brokenDay.HourKeys[9] = 70;
+        brokenDay.HourKeys[10] = 30;
+        brokenDay.KeyCounts[65] = 80;
+        brokenDay.HourClicks[9] = 15;
+        brokenDay.Left = 10;
+        Check(brokenDay.RepairDerivedCounts(true), "an inconsistent day is detected");
+        Check(SumHours(brokenDay.HourKeys) == 100 && SumKeys(brokenDay.KeyCounts) == 100,
+            "key totals are normalized to the day total");
+        Check(SumHours(brokenDay.HourClicks) == 20, "click hours are normalized to the day total");
+        Check(brokenDay.Left + brokenDay.Right + brokenDay.Middle + brokenDay.XButtons == 20,
+            "missing button detail is filled without changing total clicks");
+
+        // ---- 2d. 同日重复节不应把 hk/kk 累加到后一节的 keys 上 ----
+        Store.Parsed duplicated = Store.ParseText(
+            "format=13\n[day=2026-11-14]\nkeys=10\nhk=1:10,2:0\n[day=2026-11-14]\nkeys=5\nhk=1:5,2:0\n");
+        DayRecord duplicateDay;
+        Check(duplicated.History.TryGetValue(new DateTime(2026, 11, 14), out duplicateDay), "duplicate day still parses");
+        Check(duplicateDay.Keys == 10 && SumHours(duplicateDay.HourKeys) == 10,
+            "duplicate day uses the first consistent section instead of mixing buckets");
+
 
         // ---- 2. 记录与双通路去重:同一次物理按下只算一次,不同键/不同格不合并 ----
         ClickHeat.ResetDedupe();
@@ -220,19 +280,18 @@ internal static class ClickHeatTests
             Store.Today.ClickCells[ClickHeat.CellKey(10, 5)] = 3;
             Store.Save();
             string text = File.ReadAllText(Path.Combine(dir, "stats.txt"));
-            Check(text.IndexOf("format=12", StringComparison.Ordinal) >= 0, "the data file is written as v12");
+            Check(text.IndexOf("format=13", StringComparison.Ordinal) >= 0, "the data file is written as v13");
             Check(text.IndexOf("ch=", StringComparison.Ordinal) >= 0, "click heat is written as a ch= line");
             Store.History.Clear();
             Store.Today = new DayRecord();
             Store.Load();
             Check(Store.Today.ClickCells.Count == 1 && Store.Today.ClickCells[ClickHeat.CellKey(10, 5)] == 3,
                 "click heat round trips through stats.txt");
-            Check(Store.DetectedFormat == 12, "the format version is detected");
+            Check(Store.DetectedFormat == 13, "the format version is detected");
         }
         finally
         {
-            foreach (string file in Directory.GetFiles(dir)) File.Delete(file);
-            Directory.Delete(dir);
+            try { Directory.Delete(dir, true); } catch { }
         }
 
         // ---- 8. 旧文件没有 ch= 行也能读,不当成损坏 ----

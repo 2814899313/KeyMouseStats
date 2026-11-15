@@ -276,6 +276,37 @@ internal static class RimeLogTests
         Check(commit.Text == "数据精度", "the text is preserved");
         Check(commit.Time == new DateTime(2026, 10, 28, 16, 17, 30), "the timestamp is parsed exactly");
 
+        RimeCommit rich = RimeTextStats.ParseLine("2026-11-13 00:10:45,5,你现在看看,msedge.exe,rime_ice,15,");
+        Check(rich != null && rich.Text == "你现在看看", "metadata columns do not leak into the text");
+        Check(rich.TotalLength == 5 && rich.HanziCount == 5, "total length and hanzi count are derived");
+        Check(rich.CodeLength == 15 && rich.Application == "msedge.exe" && rich.Scheme == "rime_ice",
+            "code length and application metadata are kept");
+        Check(!rich.CandidateKnown && rich.CandidateIndex == -1, "an empty candidate column is unknown, not candidate zero");
+        Check(rich.CommitType == "normal", "Chinese commits are normal");
+
+        RimeCommit punctuation = RimeTextStats.ParseLine("2026-11-13 00:14:16,1,，,msedge.exe,rime_ice,1,");
+        Check(punctuation != null && punctuation.CommitType == "punct" && punctuation.HanziCount == 0,
+            "punctuation-only commits are classified separately");
+
+        RimeCommit raw = RimeTextStats.ParseLine("2026-11-13 00:20:00,11,hello world,msedge.exe,rime_ice,11,");
+        Check(raw != null && raw.CommitType == "raw_ascii" && raw.TotalLength == 11,
+            "raw ASCII commits are classified separately");
+
+        RimeCommit emptyMeta = RimeTextStats.ParseLine("2026-11-12 23:58:35,3,我想的,,,,");
+        Check(emptyMeta != null && emptyMeta.Text == "我想的" && emptyMeta.TotalLength == 3,
+            "trailing empty metadata columns do not join the text");
+
+        string mixedPath = WriteTemp("rime-tests-complete-only.csv",
+            "2026-11-13 10:00:00,2,旧记录\r\n"
+            + "2026-11-13 10:00:01,3,新记录,code.exe,rime_ice,8,0\r\n");
+        try
+        {
+            RimeTextStats strict = RimeTextStats.Load(mixedPath, true);
+            Check(strict.TotalCommits == 1 && strict.IncompleteRows == 1, "product mode skips incomplete rows");
+            Check(strict.Commits[0].FormatComplete, "the complete row is marked");
+        }
+        finally { TryDelete(mixedPath); }
+
         // 计数列错的时候按真实码点回算,而不是把 0 写进统计。
         RimeCommit fallback = RimeTextStats.ParseLine("2026-10-28 16:17:30,abc,数据精度");
         Check(fallback != null && fallback.Chars == 4, "a broken count falls back to the real length");
@@ -433,12 +464,14 @@ internal static class RimeLogTests
             string exported = RimeTextStats.Export(stats, new DateTime(2026, 10, 28), new DateTime(2026, 10, 28));
             string[] lines = exported.Split(new string[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
             Check(lines.Length == 2, "export writes a header plus one row");
-            Check(lines[0] == "时间点,字符数,明文", "export header matches the source format");
+            Check(lines[0] == "时间点,字符数,明文,程序,方案,码长,候选序,总字符数,汉字数,输入类型", "export header includes derived fields");
 
             // 导出再解析回去必须得到同一个词 —— 这是导出能被重新导入的前提。
             RimeCommit again = RimeTextStats.ParseLine(lines[1].TrimStart('\uFEFF'));
             Check(again != null && again.Text == "a,b", "exported row survives a round trip");
             Check(again.Chars == 3, "exported character count survives");
+            Check(again.TotalLength == 3 && again.HanziCount == 0, "derived length columns survive");
+            Check(again.CommitType == "raw_ascii", "commit type survives");
         }
         finally { TryDelete(path); }
     }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
@@ -79,12 +80,28 @@ namespace KeyMouseStats
         private readonly int page;
         private readonly double keys,active,clicks,combos;
         private readonly double[] values=new double[6],medians=new double[6],highs=new double[6];
-        private readonly double[] daily=new double[30],averages=new double[30];
+        private readonly double[] daily=new double[30],averages=new double[30],dailyActive=new double[30];
         private readonly List<KeyValuePair<string,double>> apps=new List<KeyValuePair<string,double>>();
         private readonly List<ActiveSession> sessions=new List<ActiveSession>();
+        private readonly long[] hourKeys=new long[24],hourClicks=new long[24];
+        private readonly double[] hourActive=new double[24];
+        private readonly List<double> sessionKeys=new List<double>(),sessionClicks=new List<double>(),sessionRates=new List<double>();
+        private readonly List<RectangleF> rhythmRects=new List<RectangleF>();
         private readonly int observed;
         private readonly bool hasDay,hasAppTime;
         private readonly double priorMean;
+        private int dailyHover=-1;
+        private bool dailyCompact;
+        private RectangleF dailyToggle,dailyInfo,dailyChart;
+        private float dailyStep,dailyTop,dailyBottom;
+        private PointF dailyMouse;
+        private readonly List<int> dailyVisible=new List<int>();
+        private double sessionMean,sessionMedian;
+        private int rhythmHover=-1;
+        private RectangleF rhythmInfo;
+        private PointF rhythmMouse;
+        private RectangleF liveInfo;
+        private string livePeakCaption="";
         public ReportVisual(DateTime selected,int index)
         {
             date=selected;page=index;DoubleBuffered=true;ResizeRedraw=true;
@@ -97,15 +114,45 @@ namespace KeyMouseStats
                 foreach(KeyValuePair<string,double> pair in sums)apps.Add(new KeyValuePair<string,double>(string.IsNullOrEmpty(pair.Key)?"未识别应用":Path.GetFileName(pair.Key),pair.Value));
                 apps.Sort(delegate(KeyValuePair<string,double> a,KeyValuePair<string,double> b){return b.Value.CompareTo(a.Value);});
                 foreach(ActiveSession session in day.Sessions)if(session.Seconds>0)sessions.Add(new ActiveSession{Start=session.Start,End=session.End,Seconds=session.Seconds});
+                for(int h=0;h<24;h++){hourKeys[h]=day.HourKeys[h];hourClicks[h]=day.HourClicks[h];hourActive[h]=day.ActiveHours[h];}
+                foreach(ActiveSession session in sessions)
+                {
+                    double sessionKeyCount=0,sessionClickCount=0;
+                    for(int h=0;h<24;h++)
+                    {
+                        DateTime from=session.Start>day.Date.AddHours(h)?session.Start:day.Date.AddHours(h);
+                        DateTime to=session.End<day.Date.AddHours(h+1)?session.End:day.Date.AddHours(h+1);
+                        double overlap=(to-from).TotalSeconds;if(overlap<=0)continue;
+                        if(hourActive[h]>0){sessionKeyCount+=hourKeys[h]*overlap/hourActive[h];sessionClickCount+=hourClicks[h]*overlap/hourActive[h];}
+                    }
+                    sessionKeys.Add(sessionKeyCount);sessionClicks.Add(sessionClickCount);
+                    sessionRates.Add(session.Seconds>0?(sessionKeyCount+sessionClickCount)/session.Seconds*60:0);
+                }
+                if(sessions.Count>0)
+                {
+                    List<double> lengths=new List<double>();foreach(ActiveSession session in sessions)lengths.Add(session.Seconds);
+                    sessionMean=PersonalStats.Mean(lengths);sessionMedian=PersonalStats.Quantile(lengths,.5);
+                }
             }
             List<double> prior=PersonalStats.History(date.AddDays(-1),30,delegate(DayRecord d){return d.Keys;});observed=prior.Count;priorMean=PersonalStats.Mean(prior);
+            long bestPeak=0;DateTime bestPeakDate=DateTime.MinValue;
+            foreach(DayRecord record in Store.History.Values)
+            {
+                if(record==null||record.PeakApm<=bestPeak)continue;
+                bestPeak=record.PeakApm;bestPeakDate=record.Date;
+            }
+            livePeakCaption=Store.AllTimePeakApm<=0?"暂无历史峰值":(bestPeak>=Store.AllTimePeakApm&&bestPeakDate!=DateTime.MinValue?"创于 "+bestPeakDate.ToString("yyyy.MM.dd"):"长期保留");
             for(int i=0;i<6;i++)
             {
                 int metric=i;values[i]=day==null?double.NaN:PersonalStats.Metric(day,i);
                 List<double> history=PersonalStats.History(date.AddDays(-1),30,delegate(DayRecord d){return PersonalStats.Metric(d,metric);});
                 medians[i]=history.Count>=7?PersonalStats.Quantile(history,.5):double.NaN;highs[i]=history.Count>=7?PersonalStats.Quantile(history,.9):double.NaN;
             }
-            for(int i=0;i<30;i++){DateTime d=date.AddDays(i-29);DayRecord record=Analysis.GetDay(d);daily[i]=record==null||record.IsEmpty?double.NaN:record.Keys;averages[i]=PersonalStats.MovingAverage(d,0);}
+            for(int i=0;i<30;i++){DateTime d=date.AddDays(i-29);DayRecord record=Analysis.GetDay(d);daily[i]=record==null||record.IsEmpty?double.NaN:record.Keys;averages[i]=PersonalStats.MovingAverage(d,0);dailyActive[i]=record==null||record.IsEmpty?double.NaN:record.ActiveSeconds;}
+        }
+        private int CoverageDays()
+        {
+            int count=0;foreach(double value in daily)if(Valid(value))count++;return count;
         }
         private static bool Valid(double n){return !double.IsNaN(n)&&!double.IsInfinity(n);}
         private static string MetricText(double n){return PersonalStats.Number(n,Math.Abs(n)<.1?"0.####":"0.##");}
@@ -130,9 +177,11 @@ namespace KeyMouseStats
             using(Font small=new Font("Microsoft YaHei UI",11,FontStyle.Regular,GraphicsUnit.Pixel))
             using(Font body=new Font("Microsoft YaHei UI",12,FontStyle.Regular,GraphicsUnit.Pixel))
             using(Font number=new Font("Segoe UI",25,FontStyle.Bold,GraphicsUnit.Pixel))
+            using(Font hero=new Font("Segoe UI",36,FontStyle.Bold,GraphicsUnit.Pixel))
+            using(Font tiny=new Font("Microsoft YaHei UI",9.5f,FontStyle.Regular,GraphicsUnit.Pixel))
             {
                 string[] names={"键盘击键","有效使用","较前 30 日均值","历史覆盖"};
-                string[] data={hasDay?Analysis.FmtCount((long)keys):"--",hasDay?ActivityMonitor.FormatDuration(active):"--",hasDay&&observed>=7?PersonalStats.Change(keys,priorMean):"基准不足",observed+" / 30 天"};
+                string[] data={hasDay?Analysis.FmtCount((long)keys):"--",hasDay?ActivityMonitor.FormatDuration(active):"--",hasDay&&observed>=7?PersonalStats.Change(keys,priorMean):"基准不足",CoverageDays()+" / 30 天"};
                 if(page==2)
                 {
                     double sum=0;foreach(KeyValuePair<string,double> app in apps)sum+=app.Value;
@@ -149,26 +198,60 @@ namespace KeyMouseStats
                 float card=(width-44)/4;
                 for(int i=0;i<4;i++)
                 {
-                    float x=10+i*(card+8);ReportDesign.Surface(g,new RectangleF(x,10,card,72),t.Card,t.Line);
-                    TextAt(g,names[i],small,t.Muted,x+12,18,card-24);TextAt(g,data[i],data[i].Length>11?body:number,t.Text,x+12,39,card-24);
-                }
-                string[] titles={"操作习惯 · 当前值与个人基准","30 日击键走势 · 日记录 + 7 日移动均值","应用活跃时长 · Top 5","一天的连续使用 · 24 小时时间轴","最近 5 分钟 · APM 微趋势"};
-                TextAt(g,titles[page],body,t.Text,14,94,width-28);
-                if(page==1)
-                {
-                    double max=1;foreach(double v in daily)if(Valid(v))max=Math.Max(max,v);foreach(double v in averages)if(Valid(v))max=Math.Max(max,v);
-                    float left=62,top=132,bottom=231,step=(width-left-20)/30;
-                    TextAt(g,Analysis.FmtCount((long)max),small,t.Muted,12,124,48);TextAt(g,"0",small,t.Muted,30,220,28);
-                    PointF last=PointF.Empty;bool previous=false;
-                    using(Pen line=new Pen(t.Orange,2))for(int i=0;i<30;i++)
+                    float cardHeight=page==1?82:page==3?86:page==4?92:72;float x=10+i*(card+8);ReportDesign.Surface(g,new RectangleF(x,10,card,cardHeight),t.Card,t.Line);
+                    string value=data[i];Color valueColor=t.Text;
+                    if(page==1&&i==2&&value.Length>0)
                     {
-                        float x=left+i*step;
-                        if(Valid(daily[i]))Fill(g,i==29?t.Accent:ArtTheme.Mix(t.Card,t.Accent,.52),x,bottom-(float)(daily[i]/max*(bottom-top)),step-3,(float)(daily[i]/max*(bottom-top)));
-                        else TextAt(g,"·",small,t.Muted,x,bottom-14,step);
-                        if(Valid(averages[i])){PointF point=new PointF(x+(step-3)/2,bottom-(float)(averages[i]/max*(bottom-top)));if(previous)g.DrawLine(line,last,point);last=point;previous=true;}else previous=false;
+                        if(value.StartsWith("-",StringComparison.Ordinal)){value="↓ "+value.Substring(1);valueColor=t.Orange;}
+                        else if(value.StartsWith("+",StringComparison.Ordinal)){value="↑ "+value.Substring(1);valueColor=t.Green;}
+                        else if(value=="--")valueColor=t.Muted;
                     }
-                    TextAt(g,date.AddDays(-29).ToString("MM.dd"),small,t.Muted,left,234,80);TextAt(g,date.ToString("MM.dd"),small,t.Muted,width-65,234,60);
-                    TextAt(g,"柱：每日击键  /  橙线：完整 7 日均值  /  ·：缺失记录"+(date==DateTime.Today?"  /  今日仍在累计":""),small,t.Muted,14,256,width-28);
+                    Font valueFont=page==4&&i==0?hero:value.Length>11?body:number;
+                    TextAt(g,names[i],small,t.Muted,x+12,18,card-24);TextAt(g,value,valueFont,valueColor,x+12,page==4&&i==0?32:39,card-24);
+                    if(page==1&&i==3)
+                    {
+                        float progress=(float)Math.Max(0,Math.Min(1,CoverageDays()/30.0));
+                        Fill(g,t.Raised,x+12,74,card-24,3);
+                        Fill(g,t.Cyan,x+12,74,(card-24)*progress,3);
+                    }
+                    if(page==3&&i==1)
+                    {
+                        string insight=sessions.Count==0?"暂无连续段":(sessionMedian>0&&sessionMean/sessionMedian>=1.5?"离散度偏大 · 碎片较多":"段长分布较均匀");
+                        TextAt(g,insight,tiny,t.Muted,x+12,72,card-24);
+                    }
+                    if(page==4&&i==0)
+                    {
+                        bool isActive=ActivityMonitor.IsActive;Color dotColor=isActive?t.Green:t.Muted;
+                        using(SolidBrush dot=new SolidBrush(dotColor))g.FillEllipse(dot,x+13,76,6,6);
+                        TextAt(g,isActive?"活跃中":"空闲",tiny,t.Muted,x+24,70,card-36);
+                    }
+                    if(page==4&&i==3)TextAt(g,livePeakCaption,tiny,t.Muted,x+12,72,card-24);
+                }
+                string[] titles={"操作习惯 · 当前值与个人基准","击键走势 · 30 天","应用活跃时长 · Top 5","一天的连续使用 · 24 小时时间轴","实时 APM 趋势 (近 5 分钟)"};
+                if(page==4)
+                {
+                    TextAt(g,titles[4],body,t.Text,14,112,width-260);
+                    long windowPeak=0;foreach(long value in LiveRate.Trend())if(value>=0)windowPeak=Math.Max(windowPeak,value);
+                    string pill="窗口峰值: "+windowPeak;
+                    using(Font pillFont=new Font("Microsoft YaHei UI",10.5f,FontStyle.Regular,GraphicsUnit.Pixel))
+                    {
+                        float pw=TextRenderer.MeasureText(pill,pillFont).Width+22;
+                        RectangleF pillRect=new RectangleF(width-16-pw-28,108,pw,21);
+                        using(GraphicsPath path=ReportDesign.Round(pillRect,10))
+                        using(SolidBrush fill=new SolidBrush(Color.FromArgb(28,t.Cyan)))
+                        using(Pen edge=new Pen(Color.FromArgb(55,t.Cyan))){g.FillPath(fill,path);g.DrawPath(edge,path);}
+                        using(StringFormat center=new StringFormat{Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center})
+                        using(SolidBrush text=new SolidBrush(t.Text))g.DrawString(pill,pillFont,text,pillRect,center);
+                        liveInfo=new RectangleF(pillRect.Right+6,107,20,20);
+                        TextAt(g,"ⓘ",small,t.Muted,liveInfo.X,liveInfo.Y-1,20);
+                    }
+                    PaintLive(g,width,ClientSize.Height/scale,small,tiny,body);
+                }
+                else TextAt(g,titles[page],body,t.Text,14,page==3?100:94,width-28);
+                if(page==3)PaintRhythm(g,width,ClientSize.Height/scale);
+                else if(page==1)
+                {
+                    PaintDaily(g,width,ClientSize.Height/scale);
                 }
                 else if(page==2)
                 {
@@ -185,28 +268,6 @@ namespace KeyMouseStats
                         TextAt(g,"占全日活跃时间  /  已归因 "+Math.Min(100,sum/active*100).ToString("0.#")+"%  /  未归因 "+ActivityMonitor.FormatDuration(Math.Max(0,active-sum)),small,t.Muted,16,254,width-32);
                     }
                 }
-                else if(page==3)
-                {
-                    float left=18,track=width-36;Fill(g,t.Raised,left,152,track,26);
-                    double total=0,longest=0;
-                    foreach(ActiveSession session in sessions)
-                    {
-                        total+=session.Seconds;longest=Math.Max(longest,session.Seconds);
-                        double start=Math.Max(0,(session.Start-date).TotalSeconds),end=Math.Min(86400,(session.End-date).TotalSeconds);
-                        if(end>start)Fill(g,t.Accent,left+(float)(start/86400*track),152,Math.Max(1,(float)((end-start)/86400*track)),26);
-                    }
-                    for(int h=0;h<=24;h+=4)TextAt(g,h.ToString("00")+":00",small,t.Muted,left+(track-38)*h/24,183,45);
-                    TextAt(g,sessions.Count==0?"暂无连续使用段":sessions.Count+" 段  ·  平均 "+ActivityMonitor.FormatDuration(total/sessions.Count)+"  ·  最长 "+ActivityMonitor.FormatDuration(longest),body,t.Text,18,218,width-36);
-                    TextAt(g,"色块表示连续活跃区间；空白可能是空闲、锁屏或未采集，不等同于休息。",small,t.Muted,18,254,width-36);
-                }
-                else
-                {
-                    long peak=0;bool sampled=false;foreach(long value in LiveRate.Trend())if(value>=0){sampled=true;peak=Math.Max(peak,value);}
-                    TextAt(g,"窗口峰值 "+peak+" APM",small,t.Muted,16,120,width-32);
-                    LiveRate.PaintTrend(g,new RectangleF(18,148,width-36,82),t.Cyan);
-                    TextAt(g,"5 分钟前",small,t.Muted,18,234,110);TextAt(g,"现在",small,t.Muted,width-50,234,40);
-                    TextAt(g,sampled?"每秒一个采样点 · 每点为最近 60 秒击键 + 点击；断线表示未观测。":"正在积累实时样本，曲线会随输入更新。",small,t.Muted,18,256,width-36);
-                }
             }
         }
     }
@@ -220,21 +281,38 @@ namespace KeyMouseStats
         }
         private void PopulateRatios()
         {
-            List<double>[] histories=new List<double>[6];bool baseline=false;
-            for(int i=0;i<6;i++){int m=i;histories[i]=PersonalStats.History(_date.AddDays(-1),30,delegate(DayRecord d){return PersonalStats.Metric(d,m);});baseline|=histories[i].Count>=7;}
-            ListView list=Page("输入习惯","个人基准仅使用所选日之前 30 天的记录，每项指标至少需要 7 个有效日。P50 是中位数；P90 表示 90% 的历史日不超过该值。\n分母为零时显示 —，不当作零值。鼠标距离受 DPI 设置影响；旧版长按计数会影响跨日比较。点击指标卡或明细行后可复制。",baseline?new[]{"指标","当前值","通常 · P50","较高 · P90","含义"}:new[]{"指标","当前值","含义"});
+            List<double>[] histories=new List<double>[6];List<double>[] allHistory=new List<double>[6];bool baseline=false;
+            for(int i=0;i<6;i++){int m=i;histories[i]=PersonalStats.History(_date.AddDays(-1),30,delegate(DayRecord d){return PersonalStats.Metric(d,m);});allHistory[i]=PersonalStats.History(_date.AddDays(-1),3650,delegate(DayRecord d){return PersonalStats.Metric(d,m);});baseline|=histories[i].Count>=7;}
+            ListView list=Page(0,"输入习惯","个人基准仅使用所选日之前 30 天的记录，每项指标至少需要 7 个有效日。P50 是中位数；P90 表示 90% 的历史日不超过该值。\n历史最高取全部已记录日；较昨日环比为当前值相对昨天的变化。缺失日不补零，分母为零时显示 —，不当作零值。鼠标距离受 DPI 设置影响；旧版长按计数会影响跨日比较。点击指标卡或明细行后可复制。",baseline?new[]{"指标","当前值","P50 通常","P90 较高","历史最高","较昨日","含义"}:new[]{"指标","当前值","含义"});
             DayRecord day=Analysis.GetDay(_date);
+            DayRecord yesterday=Analysis.GetDay(_date.AddDays(-1));
             for(int i=0;i<6;i++)
             {
                 double factor=i==3?100:1,value=day==null?double.NaN:PersonalStats.Metric(day,i)*factor;
-                string name=ReportDesign.Metrics[i]+"（"+ReportDesign.Units[i]+"）",raw=PersonalStats.Number(value,"R");
-                if(baseline)Row(list,name,raw,histories[i].Count>=7?PersonalStats.Number(PersonalStats.Quantile(histories[i],.5)*factor,"R"):"—",histories[i].Count>=7?PersonalStats.Number(PersonalStats.Quantile(histories[i],.9)*factor,"R"):"—",ReportDesign.Definitions[i]);
+                double yesterdayValue=yesterday==null||yesterday.IsEmpty?double.NaN:PersonalStats.Metric(yesterday,i)*factor;
+                string name=ReportDesign.Metrics[i]+"（"+ReportDesign.Units[i]+"）";
+                string raw=FormatHabitValue(value,i);
+                if(baseline)
+                {
+                    double high=double.NaN;
+                    foreach(double historic in allHistory[i]) if(double.IsNaN(high)||historic>high) high=historic;
+                    string change=PersonalStats.Change(value,yesterdayValue);
+                    Row(list,name,raw,FormatHabitValue(histories[i].Count>=7?PersonalStats.Quantile(histories[i],.5)*factor:double.NaN,i),
+                        FormatHabitValue(histories[i].Count>=7?PersonalStats.Quantile(histories[i],.9)*factor:double.NaN,i),
+                        FormatHabitValue(high,i),change,ReportDesign.Definitions[i]);
+                }
                 else Row(list,name,raw,ReportDesign.Definitions[i]);
             }
         }
+        private static string FormatHabitValue(double value,int index)
+        {
+            if(double.IsNaN(value)||double.IsInfinity(value))return "—";
+            string text=PersonalStats.Number(value,"R");
+            return index==5?text+"%":text;
+        }
         private void PopulateChanges()
         {
-            ListView list = Page("变化与分布", "本页比较击键量。今天与完整历史日对比仅表示当前进度；周/月比较截止最近已结束的一天。\n工作日按周一至周五划分，不处理节假日；异常提示是描述性阈值，不是显著性检验。缺失日不补零。", "项目", "数值 / 变化", "基准 / 覆盖", "说明");
+            ListView list = Page(1,"变化与分布", "本页比较击键量。今天与完整历史日对比仅表示当前进度；周/月比较截止最近已结束的一天。\n工作日按周一至周五划分，不处理节假日；异常提示是描述性阈值，不是显著性检验。缺失日不补零。", "项目", "数值 / 变化", "基准 / 覆盖", "说明");
             DayRecord day = Analysis.GetDay(_date), lastWeek = Analysis.GetDay(_date.AddDays(-7));
             List<double> prior = PersonalStats.History(_date.AddDays(-1), 30, delegate(DayRecord d) { return d.Keys; });
             List<double> prior7 = PersonalStats.History(_date.AddDays(-1), 7, delegate(DayRecord d) { return d.Keys; });
@@ -273,7 +351,7 @@ namespace KeyMouseStats
         }
         private void PopulateApps()
         {
-            ListView list = Page("应用交叉", "时长来自新版约每秒的前台采样，只归因连续两次观测到同一进程的活跃区间；快速切换可能漏记。\n时间占比以全日 ActiveSeconds 为分母，不能归因的部分单列；使用天数按此前 30 天有记录的日子计算。", "应用", "键鼠比", "活跃时长", "占全日活跃", "使用日/观测日", "击键 / 点击");
+            ListView list = Page(2,"应用交叉", "时长来自新版约每秒的前台采样，只归因连续两次观测到同一进程的活跃区间；快速切换可能漏记。\n时间占比以全日 ActiveSeconds 为分母，不能归因的部分单列；使用天数按此前 30 天有记录的日子计算。", "应用", "键鼠比", "活跃时长", "占全日活跃", "使用日/观测日", "击键 / 点击");
             Dictionary<string, AppUsage> apps = new Dictionary<string, AppUsage>(StringComparer.OrdinalIgnoreCase);
             DayRecord day = Analysis.GetDay(_date);
             if (day == null) return;
@@ -306,7 +384,7 @@ namespace KeyMouseStats
         }
         private void PopulateSessions()
         {
-            ListView list = Page("会话节奏", "会话是连续活跃区间，包含空闲阈值内停顿。变异系数 CV = 样本标准差 / 平均时长，越小仅表示长度越接近。\n平均段间空闲仅使用准确衔接前后会话的 IdlePeriods；锁屏和离线间隔不当作空闲。段内峰值从新版开始采集。", "指标", "数值", "覆盖 / 定义", "补充");
+            ListView list = Page(3,"会话节奏", "会话是连续活跃区间，包含空闲阈值内停顿。变异系数 CV = 样本标准差 / 平均时长，越小仅表示长度越接近。\n平均段间空闲仅使用准确衔接前后会话的 IdlePeriods；锁屏和离线间隔不当作空闲。段内峰值从新版开始采集。", "指标", "数值", "覆盖 / 定义", "补充");
             DayRecord day = Analysis.GetDay(_date); if (day == null) return;
             List<double> lengths = new List<double>(), idle = new List<double>();
             foreach (ActiveSession s in day.Sessions) if (s.Seconds > 0) lengths.Add(s.Seconds);
@@ -328,7 +406,7 @@ namespace KeyMouseStats
         }
         private void PopulateLive()
         {
-            _live = Page("实时与峰值", "APM = 最近 60 秒去重击键 + 鼠标点击，不含滚轮；不足 60 秒不外推。\n当前会话速率仅包含该段内的事件。峰值从新版启用起保存，无法还原旧记录的历史峰值。此页每秒刷新。", "指标", "当前值", "口径");
+            _live = Page(4,"实时状态", "APM = 最近 60 秒去重击键 + 鼠标点击，不含滚轮；不足 60 秒不外推。\n当前会话速率仅包含该段内的事件。峰值从新版启用起保存，无法还原旧记录的历史峰值。此页每秒刷新。", "指标", "当前值", "口径");
             PopulateLiveRows();
         }
         private void PopulateLiveRows()

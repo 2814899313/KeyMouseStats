@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Reflection;
 using System.Windows.Forms;
@@ -31,20 +31,22 @@ internal static class ReportVisualTests
             typeof(StatisticsReport).GetMethod("OnLoad",flags).Invoke(report,new object[]{EventArgs.Empty});
             ReportDeck tabs=(ReportDeck)typeof(StatisticsReport).GetField("_tabs",flags).GetValue(report);
             report.ClientSize=new Size(width,width==820?700:900);report.LayoutReport();
-            for(int p=0;p<11;p++)
+            for(int p=0;p<ReportDesign.Names.Length;p++)
             {
                 tabs.SelectedIndex=p;CreateHandles(report);report.PerformLayout();
                 using(Bitmap bitmap=new Bitmap(report.Width,report.Height))
                 {report.DrawToBitmap(bitmap,new Rectangle(Point.Empty,bitmap.Size));if(width==1040&&theme==7)bitmap.Save("tests/report-preview-"+p+".png");}
                 tabs.SelectedTab.DetailsOpen=true;tabs.PerformLayout();
-                ListView list=null;Control chart=null;
-                foreach(Control child in tabs.SelectedTab.Controls){if(child is ListView)list=(ListView)child;if(child is ReportVisual||child is CrossReportVisual)chart=child;}
+                ListView list=null;Control chart=tabs.SelectedTab.Chart;
+                foreach(Control child in tabs.SelectedTab.Controls){if(child is ListView)list=(ListView)child;}
                 if(list==null||chart==null||list.Height<65||list.Top<chart.Bottom)throw new Exception("Report layout overlap");
                 renders++;
             }
         }
         Store.History.Clear();Store.RollDay(DateTime.Today);
-        for(int p=0;p<11;p++)using(Control chart=p<5?(Control)new ReportVisual(DateTime.Today,p):new CrossReportVisual(DateTime.Today,p))
+        int[] kinds={0,4,5,6,7,8,13,16};
+        foreach(int kind in kinds)
+        using(Control chart=kind==0||kind==4?new ReportVisual(DateTime.Today,kind):kind>=5&&kind<=8?new CrossReportVisual(DateTime.Today,kind,CrossReportData.Build(DateTime.Today,kind)):kind==13?(Control)new DistributionReportVisual(DateTime.Today.AddDays(-30),DateTime.Today):(Control)new HoldTrendVisual(DateTime.Today.AddDays(-30),DateTime.Today))
         using(Bitmap bitmap=new Bitmap(1560,520))
         {
             chart.Size=bitmap.Size;bitmap.SetResolution(144,144);

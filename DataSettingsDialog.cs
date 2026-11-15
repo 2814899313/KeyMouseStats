@@ -71,7 +71,7 @@ namespace KeyMouseStats
 
             Label retentionTitle = Header("数据保留");
             Label retentionLabel = new Label { Text = "保留", TextAlign = ContentAlignment.MiddleLeft };
-            Label retentionTail = new Label { Text = "天（超期先按月归档，不会直接删除）", TextAlign = ContentAlignment.MiddleLeft };
+            Label retentionTail = new Label { Text = "天（仅按天裁剪；默认永久保留）", TextAlign = ContentAlignment.MiddleLeft };
             retentionTitle.SetBounds(20, 594, 200, 22);
             retentionLabel.SetBounds(20, 622, 34, 26);
             _retentionDays.SetBounds(56, 622, 74, 26);

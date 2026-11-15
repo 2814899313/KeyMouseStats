@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -103,6 +104,64 @@ namespace KeyMouseStats
 
     internal static class AppActivity
     {
+        /// <summary>
+        /// 统一的友好应用名：优先文件描述，其次常见进程映射，最后去掉 .exe 的进程名。
+        /// 日报、应用统计、提示文案都从这里取，避免同一程序在不同页面显示不同名字。
+        /// </summary>
+        public static string FriendlyName(string processPath)
+        {
+            string baseName = ProcessBaseName(processPath);
+            if (baseName.Length == 0) return "未识别应用";
+            string description = "";
+            try { description = FileVersionInfo.GetVersionInfo(processPath).FileDescription; }
+            catch (Exception) { }
+            if (!string.IsNullOrWhiteSpace(description) && !IsGenericDescription(description))
+                return description.Trim();
+            string known;
+            if (KnownNames.TryGetValue(baseName.ToLowerInvariant(), out known)) return known;
+            return baseName;
+        }
+
+        public static string ProcessBaseName(string processPath)
+        {
+            try { return string.IsNullOrEmpty(processPath) ? "" : Path.GetFileNameWithoutExtension(processPath); }
+            catch (Exception) { return ""; }
+        }
+
+        private static bool IsGenericDescription(string description)
+        {
+            string value = description.ToLowerInvariant();
+            return value.Contains("windows") && (value.Contains("operating system") || value.Contains("application"));
+        }
+
+        private static readonly Dictionary<string, string> KnownNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            { "msedge", "Microsoft Edge" },
+            { "chrome", "Google Chrome" },
+            { "firefox", "Firefox" },
+            { "chatgpt", "ChatGPT" },
+            { "qq", "QQ" },
+            { "weixin", "微信" },
+            { "wechat", "微信" },
+            { "wps", "WPS Office" },
+            { "winword", "Microsoft Word" },
+            { "excel", "Microsoft Excel" },
+            { "powerpnt", "Microsoft PowerPoint" },
+            { "code", "Visual Studio Code" },
+            { "devenv", "Visual Studio" },
+            { "explorer", "文件资源管理器" },
+            { "steam", "Steam" },
+            { "discord", "Discord" },
+            { "telegram", "Telegram" },
+            { "notepad", "记事本" },
+            { "notepad++", "Notepad++" },
+            { "vlc", "VLC" },
+            { "spotify", "Spotify" },
+            { "doubao", "豆包" },
+            { "yuanbao", "腾讯元宝" },
+            { "quark", "夸克" }
+        };
+
         // Append categories to preserve numeric IDs in existing manual rules.
         public static readonly string[] Categories = { "编程", "游戏", "视频", "其他", "未分类", "办公" };
         public static readonly Dictionary<string, int> Rules = new Dictionary<string, int>(StringComparer.Ordinal);

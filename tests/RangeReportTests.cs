@@ -68,10 +68,10 @@ internal static class RangeReportTests
     [STAThread]
     private static void Main()
     {
-        Check(ReportDesign.Names.Length == 17, "seventeen report pages");
+        Check(ReportDesign.Names.Length == 5, "five report pages");
         Check(ReportDesign.Scope.Length == ReportDesign.Names.Length, "scope array matches page count");
-        Check(ReportDesign.Names[11] == "区间回顾" && ReportDesign.Names[12] == "星期节律" && ReportDesign.Names[13] == "分布", "new page titles");
-        Check(ReportDesign.Names[14] == "按键时长" && ReportDesign.Names[15] == "应用键位" && ReportDesign.Names[16] == "按住时长趋势", "press pages are registered");
+        Check(ReportDesign.Names[0] == "输入习惯" && ReportDesign.Names[1] == "实时状态" && ReportDesign.Names[3] == "分布", "report page titles");
+        Check(ReportDesign.Names[4] == "按住时长趋势", "press trend is registered");
 
         Store.History.Clear();
         Store.Total = new Counters();
@@ -234,7 +234,7 @@ internal static class RangeReportTests
             new HoldTrendVisual(rangeStart, rangeEnd) };
         foreach (Control chart in charts)
         {
-            using (ReportPage page = new ReportPage { Index = 11 })
+            using (ReportPage page = new ReportPage { Index = 3, Kind = 13 })
             {
                 page.Chart = chart;
                 page.List = new ReportList();

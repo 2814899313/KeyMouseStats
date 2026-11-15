@@ -75,6 +75,7 @@ namespace KeyMouseStats
         internal sealed class AppLine
         {
             public string Name = "";
+            public string ProcessPath = "";
             public double Seconds;
             public long Keys;
         }
@@ -141,7 +142,8 @@ namespace KeyMouseStats
                     if (!byProcess.TryGetValue(key, out line))
                     {
                         line = new AppLine();
-                        line.Name = key.Length == 0 ? "未识别应用" : Path.GetFileName(key);
+                        line.Name = key.Length == 0 ? "未识别应用" : AppActivity.FriendlyName(key);
+                        line.ProcessPath = key;
                         byProcess[key] = line;
                     }
                     line.Seconds += usage.ActiveSeconds;
@@ -343,9 +345,10 @@ namespace KeyMouseStats
         {
             get
             {
-                return Path.Combine(
-                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "键鼠统计"),
-                    "日报");
+                // 跟随数据目录:产品进程就是 %APPDATA%\键鼠统计\日报;
+                // 测试/预览进程重定向了 DataDirectory 之后,日报也只能写进它自己的临时目录,
+                // 否则“重定向过的测试”会绕过 CanPersist,把夹具日报写进用户目录。
+                return Path.Combine(Store.DataDirectory, "日报");
             }
         }
 
@@ -357,6 +360,7 @@ namespace KeyMouseStats
         /// <summary>写一份 Markdown。失败返回空串,不抛——日报写不出来不该影响统计。</summary>
         public string Save()
         {
+            if (!Store.CanPersist) return "";   // 测试/预览进程不往用户日报目录写东西
             try
             {
                 System.IO.Directory.CreateDirectory(Directory);

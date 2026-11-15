@@ -497,6 +497,7 @@ namespace KeyMouseStats
         /// <summary>立即备份当前数据文件,返回备份路径。</summary>
         public static string BackupNow()
         {
+            if (!Store.CanPersist) return null;   // 测试/预览进程不往用户备份目录写快照
             string source = DataFile;
             if (!File.Exists(source)) throw new InvalidOperationException("还没有数据文件可以备份。");
             Directory.CreateDirectory(BackupFolder);
@@ -540,6 +541,7 @@ namespace KeyMouseStats
         /// <summary>每天最多留一份备份;今天已有则返回 null。</summary>
         public static string EnsureDailyBackup()
         {
+            if (!Store.CanPersist) return null;   // 测试/预览进程不往用户备份目录写快照
             if (!File.Exists(DataFile)) return null;
             string today = "stats-" + DateTime.Today.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
             foreach (string path in ListBackups())

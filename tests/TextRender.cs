@@ -52,22 +52,30 @@ internal static class TextRender
             };
             StringBuilder csv = new StringBuilder();
             DateTime start = DateTime.Today.AddDays(-29).AddHours(9);
+            string[] apps = { "msedge.exe", "code.exe", "weixin.exe" };
             for (int i = 0; i < 900; i++)
             {
                 string text = phrases[i % phrases.Length];
                 if (i % 7 == 0) text += "，";
                 DateTime time = start.AddMinutes(i * 45);
                 if (time.Date > DateTime.Today) break;
+                int candidate = text.EndsWith("，", StringComparison.Ordinal) ? -1 : (i % 11 == 0 ? 1 : 0);
+                int code = text.EndsWith("，", StringComparison.Ordinal) ? 0 : Math.Max(1, text.Length * 3);
                 csv.Append(time.ToString("yyyy-MM-dd HH:mm:ss")).Append(',')
-                   .Append(text.Length).Append(',').Append(text).AppendLine();
+                   .Append(text.Length).Append(',').Append(text).Append(',')
+                   .Append(apps[i % apps.Length]).Append(",rime_ice,")
+                   .Append(code).Append(',').Append(candidate).AppendLine();
             }
             for (int i = 0; i < 24; i++)
             {
                 DateTime time = DateTime.Today.AddHours(9).AddMinutes(i * 12);
                 if (time > DateTime.Now.AddMinutes(-5)) break;
                 string text = phrases[(i * 3) % phrases.Length];
+                int candidate = i % 11 == 0 ? 1 : 0;
                 csv.Append(time.ToString("yyyy-MM-dd HH:mm:ss")).Append(',')
-                   .Append(text.Length).Append(',').Append(text).AppendLine();
+                   .Append(text.Length).Append(',').Append(text).Append(',')
+                   .Append(apps[i % apps.Length]).Append(",rime_ice,")
+                   .Append(Math.Max(1, text.Length * 3)).Append(',').Append(candidate).AppendLine();
             }
             File.WriteAllText(log, csv.ToString(), new UTF8Encoding(false));
             RimeTextStats.PathOverride = log;
@@ -89,6 +97,12 @@ internal static class TextRender
                 Render(form, "text-chars-punct", 1f);
                 SetField(form, "_textWordTab", 1);
                 Render(form, "text-phrases", 1f);
+                SetField(form, "_textWordTab", 2);
+                Render(form, "text-apps", 1f);
+                SetField(form, "_textWordTab", 0);
+                SetField(form, "_textWordMode", 3);
+                Render(form, "text-efficiency", 1f);
+                SetField(form, "_textWordMode", 0);
 
                 SetField(form, "_textBlurRecent", true);
                 Render(form, "text-blur", 1f);

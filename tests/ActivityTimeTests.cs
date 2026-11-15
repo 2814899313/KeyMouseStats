@@ -171,6 +171,7 @@ internal static class ActivityTimeTests
         try
         {
             Store.History.Clear(); Store.Total = new Counters(); Store.RollDay(DateTime.Today);
+            Store.KeepDays = 365;
             Store.IdleThresholdSeconds = 120;
             Store.ThemeId = 3;
             DateTime start = DateTime.Today.AddHours(10);
@@ -206,7 +207,7 @@ internal static class ActivityTimeTests
         {
             foreach (string name in new string[] { "stats.txt", "stats.txt.tmp", "stats.txt.bak" })
                 if (File.Exists(Path.Combine(directory, name))) File.Delete(Path.Combine(directory, name));
-            Directory.Delete(directory);
+            try { Directory.Delete(directory, true); } catch { }
         }
         ActivityMonitor.Message(0x02B1, new IntPtr(7));
         ActivityMonitor.Message(0x02B1, new IntPtr(1));

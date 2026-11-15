@@ -42,6 +42,9 @@ namespace KeyMouseStats
         private const int TriggerLogon = 9;            // TASK_TRIGGER_LOGON
         private const int ActionExec = 0;              // TASK_ACTION_EXEC
         private const int InstancesIgnoreNew = 3;      // 已经在跑就忽略新的
+        // 程序清单是 requireAdministrator;任务若用 LIMITED 启动会在登录时直接
+        // 以 0x800702E4 (ERROR_ELEVATION_REQUIRED) 失败,所以任务本身也要用最高权限。
+        private const int RunLevelHighest = 1;
 
         // ---------------------------------------------------------------- 公共接口
 
@@ -296,7 +299,7 @@ namespace KeyMouseStats
                 if (principal != null)
                 {
                     TrySet(principal, "LogonType", LogonInteractiveToken);
-                    TrySet(principal, "RunLevel", 0);   // 最低权限,不弹 UAC
+                    TrySet(principal, "RunLevel", RunLevelHighest);   // 与 requireAdministrator 清单一致,不弹 UAC
                 }
 
                 step = "创建触发器";
@@ -368,7 +371,7 @@ namespace KeyMouseStats
         /// <summary>COM 不可用时的登录触发兜底;不需要管理员,不会弹 UAC。</summary>
         private static bool CreateWithSchtasks(string exe, out string error)
         {
-            string args = "/Create /TN \"" + TaskName + "\" /TR \\\"" + exe + "\\\" /SC ONLOGON /RL LIMITED /F";
+            string args = "/Create /TN \"" + TaskName + "\" /TR \\\"" + exe + "\\\" /SC ONLOGON /RL HIGHEST /F";
             bool ok = RunSchtasks(args, out error);
             if (!ok && string.IsNullOrEmpty(error)) error = "schtasks 创建任务失败。";
             return ok;

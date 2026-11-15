@@ -79,6 +79,20 @@ internal static class ClickHeatRender
                 int used = 0;
                 foreach (KeyValuePair<int, long> pair in day.ClickCells) used += (int)pair.Value;
                 day.Clicks = Math.Max(used, clicks);
+                // 鼠标动作视图的合成矢量数据:横向明显多于纵向,接近双屏用户。
+                CrossDay cross = day.Cross;
+                cross.Direction[0] = 315;
+                cross.Direction[1] = 304;
+                cross.Direction[2] = 189;
+                cross.Direction[3] = 192;
+                cross.PathCounts = 1000;
+                cross.DragCounts = 39;
+                cross.Clicks = 1000;
+                cross.MoveClicks = 871;
+                cross.Packets = 483489;
+                cross.CalibratedPackets = 480000;
+                cross.Flicks = 6823;
+                cross.Reversals = 439;
                 Store.History[day.Date] = day;
                 Store.Total.Clicks += day.Clicks;
                 Store.Total.Left += day.Clicks;
@@ -98,6 +112,16 @@ internal static class ClickHeatRender
 
                 SetField(form, "_clickRange", 2);
                 Render(form, "click-heat-30", 1f);
+                SetField(form, "_clickActionView", true);
+                Render(form, "mouse-action-30", 1f);
+                SetField(form, "_mouse", new Point(968, 214));
+                Render(form, "mouse-action-info", 1f);
+                SetField(form, "_mouse", new Point(-100, -100));
+                SetField(form, "_clickRange", 0);
+                Render(form, "mouse-action-today", 1f);
+                SetField(form, "_clickRange", 2);
+                Render(form, "mouse-action-150", 1.5f);
+                SetField(form, "_clickActionView", false);
                 SetField(form, "_clickSmooth", true);
                 Render(form, "click-heat-smooth", 1f);
                 SetField(form, "_clickSmooth", false);

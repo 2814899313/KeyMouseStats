@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Diagnostics;
 using System.Reflection;
@@ -12,7 +12,7 @@ internal static class ThemePerf {
   using(Dashboard form=new Dashboard()) {
    typeof(Dashboard).GetMethod("OnLoad",flags).Invoke(form,new object[]{EventArgs.Empty});
    FieldInfo tab=typeof(Dashboard).GetField("_tab",flags);tab.SetValue(form,Enum.ToObject(tab.FieldType,3));
-   typeof(Dashboard).GetField("_showKeyboardHeatmap",flags).SetValue(form,true);
+   typeof(Dashboard).GetField("_keyView",flags).SetValue(form,2);
    foreach(float scale in new[]{1f,1.5f}) {
     typeof(Dashboard).GetField("_s",flags).SetValue(form,scale);
     using(Bitmap bmp=new Bitmap((int)(1072*scale),(int)(724*scale))) using(Graphics g=Graphics.FromImage(bmp)) {

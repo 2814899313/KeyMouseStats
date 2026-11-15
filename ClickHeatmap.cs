@@ -370,6 +370,65 @@ namespace KeyMouseStats
         }
     }
 
+    /// <summary>鼠标动作视图的多日聚合；只读取已落盘的相对鼠标交叉数据。</summary>
+    internal sealed class MouseActionStats
+    {
+        public readonly double[] Direction = new double[4]; // 左、右、上、下
+        public long Flicks, Reversals, Packets, CalibratedPackets;
+        public double DragCounts, PathCounts;
+        public long Clicks, MoveClicks;
+        public int Days;
+
+        public bool HasData { get { return Packets > 0 || DirectionTotal > 0; } }
+        public double DirectionTotal { get { return Direction[0] + Direction[1] + Direction[2] + Direction[3]; } }
+
+        public double DirectionShare(int index)
+        {
+            return DirectionTotal > 0 ? Direction[index] / DirectionTotal : 0;
+        }
+
+        public double DragShare { get { return PathCounts > 0 ? DragCounts / PathCounts : 0; } }
+        public double MoveClickShare { get { return Clicks > 0 ? MoveClicks / (double)Clicks : 0; } }
+
+        public string HorizontalInsight()
+        {
+            double horizontal = Direction[0] + Direction[1];
+            double vertical = Direction[2] + Direction[3];
+            if (horizontal <= 0 || vertical <= 0) return "方向样本不足，继续使用后形成移动画像。";
+            double ratio = horizontal / vertical;
+            string amount = ratio >= 1 ? ratio.ToString("0.00", CultureInfo.InvariantCulture) + " : 1"
+                : "1 : " + (1 / ratio).ToString("0.00", CultureInfo.InvariantCulture);
+            return "水平 / 垂直 " + amount + (ratio >= 1.2 ? " · 典型横向跨屏特征" : ratio <= 0.83 ? " · 纵向移动为主" : " · 横纵较均衡");
+        }
+
+        public static MouseActionStats Build(IEnumerable<DayRecord> days)
+        {
+            MouseActionStats stats = new MouseActionStats();
+            if (days == null) return stats;
+            foreach (DayRecord day in days)
+            {
+                if (day == null || day.Cross == null) continue;
+                CrossDay cross = day.Cross;
+                if (cross.Packets > 0) stats.Days++;
+                for (int i = 0; i < 4; i++) stats.Direction[i] += cross.Direction[i];
+                stats.Flicks += cross.Flicks;
+                stats.Reversals += cross.Reversals;
+                stats.DragCounts += cross.DragCounts;
+                stats.PathCounts += cross.PathCounts;
+                stats.Clicks += cross.Clicks;
+                stats.MoveClicks += cross.MoveClicks;
+                stats.Packets += cross.Packets;
+                stats.CalibratedPackets += cross.CalibratedPackets;
+            }
+            return stats;
+        }
+
+        public static string Percent(double value)
+        {
+            return value > 0 ? (value * 100).ToString("0.0", CultureInfo.InvariantCulture) + "%" : "--";
+        }
+    }
+
     internal sealed partial class Dashboard
     {
         /// <summary>0 今日 / 1 近 7 天 / 2 近 30 天。</summary>
@@ -396,6 +455,11 @@ namespace KeyMouseStats
         private ClickHeat.Aggregate _clickCache;
         private int _clickCacheRange = -1;
         private long _clickCacheSignature;
+        private bool _clickActionView;
+        private MouseActionStats _mouseActionCache;
+        private int _mouseActionRange = -1;
+        private RectangleF _mouseActionInfoRect;
+        private bool _mouseActionInfoHover;
 
         private IEnumerable<DayRecord> ClickRangeDays()
         {
@@ -476,8 +540,30 @@ namespace KeyMouseStats
             return _clickRange == 0 ? "今日" : _clickRange == 1 ? "近 7 天" : "近 30 天";
         }
 
+        private void PaintClickRangeChips(Graphics g)
+        {
+            string[] ranges = { "今日", "近 7 天", "近 30 天" };
+            for (int i = 0; i < ranges.Length; i++)
+            {
+                RectangleF chip = new RectangleF(Cx + i * 98, 98, 88, 30);
+                _chips.Add(chip);
+                _chipIds.Add(510 + i);
+                PaintChip(g, chip, ranges[i], _clickRange == i, null);
+            }
+        }
+
+        /// <summary>点击热区 / 鼠标动作的二级视图切换；两个视图共用顶部时间范围。</summary>
+        private void PaintClickViewToggle(Graphics g)
+        {
+            AppChip(g, 519, Cx + 330, 150, 92, "点击热区", !_clickActionView);
+            AppChip(g, 520, Cx + 426, 150, 100, "鼠标动作", _clickActionView);
+        }
+
         private void PaintClickHeat(Graphics g)
         {
+            PaintClickRangeChips(g);
+            if (_clickActionView) { PaintMouseAction(g); return; }
+
             Screen[] screens = Screen.AllScreens;
             int screenIndex = ClickScreenIndex(screens);
             Screen chosen = screens.Length > 0 ? screens[screenIndex] : null;
@@ -491,14 +577,6 @@ namespace KeyMouseStats
             _clickScreenBounds = visible;
             ClickHeat.Aggregate aggregate = ClickAggregate(visible, regionArea, screenRects);
 
-            string[] ranges = { "今日", "近 7 天", "近 30 天" };
-            for (int i = 0; i < ranges.Length; i++)
-            {
-                RectangleF chip = new RectangleF(Cx + i * 98, 98, 88, 30);
-                _chips.Add(chip);
-                _chipIds.Add(510 + i);
-                PaintChip(g, chip, ranges[i], _clickRange == i, null);
-            }
             // 一级视图:跨屏全览 / 每块屏幕(单屏即放大形态),取代原来「下拉选屏 + 单屏放大」两个重叠控件。
             float viewX = Cx + 300;
             RectangleF gallery = new RectangleF(viewX, 98, 88, 30);
@@ -522,6 +600,7 @@ namespace KeyMouseStats
             PaintCard(g, Cx, 138, 600, 438, null);
             using (Font title = new Font("Microsoft YaHei UI", 17, FontStyle.Bold, GraphicsUnit.Pixel))
                 AppText(g, "你的屏幕，点击的痕迹", title, Ctext, new RectangleF(Cx + 22, 152, 400, 28), false);
+            PaintClickViewToggle(g);
             string subtitle = screens.Length > 1
                 ? (_clickFocused
                     ? "单屏放大 · 屏幕 " + (screenIndex + 1) + " · 九宫格按所选屏幕计算"
@@ -648,7 +727,148 @@ namespace KeyMouseStats
                 new RectangleF(Cx + 784, legendY + 10, 42, 16), true);
         }
 
-        /// <summary>屏幕托盘:缓存成位图,悬停重绘时只贴图。</summary>
+        private MouseActionStats MouseActionData()
+        {
+            // 页面在采集期间会持续重绘；直接重建 30 天的轻量聚合，保证样本数不会停留在首帧。
+            _mouseActionCache = MouseActionStats.Build(ClickRangeDays());
+            _mouseActionRange = _clickRange;
+            return _mouseActionCache;
+        }
+
+        /// <summary>鼠标动作:方向罗盘 + 四项运动特征。和点击热区共用顶部时间范围。</summary>
+        private void PaintMouseAction(Graphics g)
+        {
+            MouseActionStats data = MouseActionData();
+            PaintCardBase(g, Cx, 138, Cw, 438);
+            AppText(g, "鼠标动作", _fH2, Ctext, new RectangleF(Cx + 22, 152, 260, 26), false);
+            AppText(g, ClickRangeName() + " · 方向与操作特征 · 仅相对鼠标数据", _fSmall, Csub,
+                new RectangleF(Cx + 22, 180, 430, 18), false);
+            PaintClickViewToggle(g);
+
+            // 样本徽标:版本与过滤规则不再常驻页脚。
+            float badgeX = Cx + Cw - 216, badgeY = 150;
+            _mouseActionInfoRect = new RectangleF(badgeX, badgeY, 196, 24);
+            PointF badgeMouse = ToBase(_mouse);
+            badgeMouse = new PointF(badgeMouse.X - ContentX, badgeMouse.Y - ContentY);
+            _mouseActionInfoHover = Hit(_mouseActionInfoRect, badgeMouse);
+            using (GraphicsPath pill = RoundedRect(badgeX, badgeY, 196, 24, 12))
+            using (SolidBrush fill = new SolidBrush(Color.FromArgb(16, Ctext))) g.FillPath(fill, pill);
+            AppText(g, data.Packets > 0 ? "样本 " + Analysis.FmtCount(data.Packets) + " 包  ⓘ" : "暂无样本  ⓘ",
+                _fAxis, Csub, new RectangleF(badgeX + 10, badgeY + 3, 176, 18), false);
+            if (_mouseActionInfoHover)
+            {
+                string info = "仅 1.0.0 相对鼠标数据 · 排除校准期间，绝对坐标设备不参与。";
+                SizeF size = g.MeasureString(info, _fSmall);
+                RectangleF box = new RectangleF(Cx + Cw - size.Width - 60, 180, size.Width + 28, 30);
+                using (GraphicsPath tip = RoundedRect(box.X, box.Y, box.Width, box.Height, 7))
+                {
+                    using (SolidBrush fill = new SolidBrush(Ccard2)) g.FillPath(fill, tip);
+                    using (Pen edge = new Pen(Cline)) g.DrawPath(edge, tip);
+                }
+                AppText(g, info, _fSmall, Ctext, new RectangleF(box.X + 8, box.Y + 6, box.Width - 16, 20), false);
+            }
+
+            PaintVectorCompass(g, new RectangleF(Cx + 24, 210, 440, 330), data);
+            PaintMouseActionCards(g, new RectangleF(Cx + 486, 210, 322, 330), data);
+        }
+
+        private void PaintVectorCompass(Graphics g, RectangleF area, MouseActionStats data)
+        {
+            float cx = area.X + area.Width / 2f;
+            float cy = area.Y + 150;
+            float radius = 112;
+            PointF c = new PointF(cx, cy);
+            using (SolidBrush halo = new SolidBrush(Color.FromArgb(26, Cblue))) g.FillEllipse(halo, cx - radius - 8, cy - radius - 8, radius * 2 + 16, radius * 2 + 16);
+            using (Pen outer = new Pen(Color.FromArgb(90, Csub), 1.2f)) g.DrawEllipse(outer, cx - radius, cy - radius, radius * 2, radius * 2);
+            using (Pen cross = new Pen(Color.FromArgb(42, Csub), 1f) { DashStyle = DashStyle.Dot })
+            {
+                g.DrawLine(cross, cx - radius, cy, cx + radius, cy);
+                g.DrawLine(cross, cx, cy - radius, cx, cy + radius);
+            }
+            using (Pen ring = new Pen(Color.FromArgb(30, Csub), 1f))
+                for (int i = 1; i <= 4; i++)
+                {
+                    float r = radius * i / 4f;
+                    g.DrawEllipse(ring, cx - r, cy - r, r * 2, r * 2);
+                }
+            using (SolidBrush ringInk = new SolidBrush(Color.FromArgb(150, Csub)))
+                for (int i = 1; i <= 3; i++)
+                {
+                    float r = radius * i / 4f;
+                    g.DrawString((i * 10).ToString(CultureInfo.InvariantCulture) + "%", _fAxis, ringInk,
+                        cx + r * 0.68f + 2, cy - r * 0.68f - 12);
+                }
+            using (SolidBrush center = new SolidBrush(Ctext)) g.FillEllipse(center, cx - 2, cy - 2, 4, 4);
+
+            double maximum = 0.4;
+            for (int i = 0; i < 4; i++) maximum = Math.Max(maximum, data.DirectionShare(i));
+            float[] angles = { (float)Math.PI, 0f, -(float)Math.PI / 2f, (float)Math.PI / 2f };
+            string[] labels = { "←", "→", "↑", "↓" };
+            Color[] colors = { Ccyan, Cblue, Ccyan, Cblue };
+            for (int i = 0; i < 4; i++)
+            {
+                double share = data.DirectionShare(i);
+                float length = (float)(radius * Math.Min(1.0, share / maximum));
+                if (share > 0 && length < 10) length = 10;
+                double angle = angles[i];
+                PointF direction = new PointF((float)Math.Cos(angle), (float)Math.Sin(angle));
+                PointF perpendicular = new PointF(-direction.Y, direction.X);
+                PointF tip = new PointF(c.X + direction.X * length, c.Y + direction.Y * length);
+                PointF base1 = new PointF(c.X + perpendicular.X * 14, c.Y + perpendicular.Y * 14);
+                PointF base2 = new PointF(c.X - perpendicular.X * 14, c.Y - perpendicular.Y * 14);
+                PointF shoulder1 = new PointF(tip.X + perpendicular.X * 7, tip.Y + perpendicular.Y * 7);
+                PointF shoulder2 = new PointF(tip.X - perpendicular.X * 7, tip.Y - perpendicular.Y * 7);
+                using (GraphicsPath petal = new GraphicsPath())
+                {
+                    petal.AddPolygon(new[] { base1, shoulder1, tip, shoulder2, base2 });
+                    using (SolidBrush fill = new SolidBrush(Color.FromArgb(125, colors[i]))) g.FillPath(fill, petal);
+                    using (Pen edge = new Pen(Color.FromArgb(200, colors[i]), 1f)) g.DrawPath(edge, petal);
+                }
+                using (SolidBrush dot = new SolidBrush(colors[i])) g.FillEllipse(dot, tip.X - 3, tip.Y - 3, 6, 6);
+                string value = (share * 100).ToString("0.0", CultureInfo.InvariantCulture) + "%";
+                float lx = cx, ly = cy;
+                if (i == 0) { lx = area.X + 8; ly = cy - 9; }
+                else if (i == 1) { lx = area.Right - 58; ly = cy - 9; }
+                else if (i == 2) { lx = cx - 24; ly = cy - radius - 28; }
+                else { lx = cx - 24; ly = cy + radius + 10; }
+                AppText(g, labels[i] + " " + value, _fAxis, colors[i],
+                    new RectangleF(lx, ly, 64, 18), false);
+            }
+
+            float lastY = cy + radius + 34;
+            AppText(g, data.HasData ? data.HorizontalInsight() : "尚无相对鼠标方向样本", _fBody,
+                data.HasData ? Cgreen : Csub, new RectangleF(area.X + 20, lastY, area.Width - 40, 22), false);
+            if (data.CalibratedPackets <= 0 && data.Packets > 0)
+                AppText(g, "甩动 / 折返需要已校准 DPI；当前只有原始方向分量。", _fAxis, Csub,
+                    new RectangleF(area.X + 20, lastY + 22, area.Width - 40, 16), false);
+        }
+
+        private void PaintMouseActionCards(Graphics g, RectangleF area, MouseActionStats data)
+        {
+            string[] labels = { "快速甩动 (Flicks)", "急转 / 折返", "拖拽移动占比", "瞄准命中率" };
+            string[] values =
+            {
+                data.CalibratedPackets > 0 ? Analysis.FmtCount(data.Flicks) + " 次" : data.Packets > 0 ? "需 DPI" : "--",
+                data.CalibratedPackets > 0 ? Analysis.FmtCount(data.Reversals) + " 次" : data.Packets > 0 ? "需 DPI" : "--",
+                MouseActionStats.Percent(data.DragShare),
+                MouseActionStats.Percent(data.MoveClickShare)
+            };
+            string[] notes = { "瞬时高速位移", "方向突变 > 120°", "按住按键时的位移", "位移后紧跟点击" };
+            float gap = 10, cardW = (area.Width - gap) / 2f, cardH = 120;
+            float top = area.Y + Math.Max(0, (area.Height - (cardH * 2 + gap)) / 2f);
+            for (int i = 0; i < 4; i++)
+            {
+                float x = area.X + (i % 2) * (cardW + gap);
+                float y = top + (i / 2) * (cardH + gap);
+                PaintCardBase(g, x, y, cardW, cardH);
+                AppText(g, labels[i], _fAxis, Csub, new RectangleF(x + 14, y + 12, cardW - 28, 18), false);
+                AppText(g, values[i], _fH2, i < 2 && data.CalibratedPackets <= 0 ? Csub : Ctext,
+                    new RectangleF(x + 14, y + 34, cardW - 28, 28), false);
+                AppText(g, notes[i], _fSmall, Csub, new RectangleF(x + 14, y + cardH - 26, cardW - 28, 18), false);
+            }
+        }
+
+
         private void PaintClickTray(Graphics g, ClickHeat.Aggregate aggregate, int screenIndex, Screen[] screens)
         {
             int width = Math.Max(1, (int)Math.Ceiling(_clickTray.Width * _s));
@@ -911,6 +1131,36 @@ namespace KeyMouseStats
                 }
                 string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
                     "点击热区_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".csv");
+                File.WriteAllText(path, csv.ToString(), new UTF8Encoding(true));
+                ThemeMessage.Show(this, "已导出：\n" + path, "导出成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                ThemeMessage.Show(this, ex.Message, "导出失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+        private void ExportMouseAction()
+        {
+            try
+            {
+                MouseActionStats data = MouseActionData();
+                StringBuilder csv = new StringBuilder();
+                csv.AppendLine("# 键鼠统计 · 鼠标动作");
+                csv.AppendLine("# 区间," + ClickRangeName());
+                csv.AppendLine("# 记录天数," + data.Days);
+                csv.AppendLine("# 样本包," + data.Packets);
+                csv.AppendLine("# 已校准包," + data.CalibratedPackets);
+                csv.AppendLine("方向,占比");
+                string[] names = { "向左", "向右", "向上", "向下" };
+                for (int i = 0; i < 4; i++)
+                    csv.Append(names[i]).Append(',').Append(data.DirectionShare(i).ToString("0.######", CultureInfo.InvariantCulture)).AppendLine();
+                csv.AppendLine("指标,数值,说明");
+                csv.AppendLine("快速甩动 (Flicks)," + data.Flicks + ",瞬时高速位移");
+                csv.AppendLine("急转 / 折返," + data.Reversals + ",方向突变 > 120°");
+                csv.AppendLine("拖拽移动占比," + data.DragShare.ToString("0.######", CultureInfo.InvariantCulture) + ",按住按键时的位移");
+                csv.AppendLine("瞄准命中率," + data.MoveClickShare.ToString("0.######", CultureInfo.InvariantCulture) + ",位移停止后紧跟点击");
+                string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                    "鼠标动作_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".csv");
                 File.WriteAllText(path, csv.ToString(), new UTF8Encoding(true));
                 ThemeMessage.Show(this, "已导出：\n" + path, "导出成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }

@@ -26,7 +26,7 @@ set "RES=%RES% @"%~dp0theme-extra-resources.rsp""
 set "OUT=%TEMP%\KeyMouseStatsTests"
 if not exist "%OUT%" mkdir "%OUT%"
 set "FAIL=0"
-set "TESTS=DistanceTests SaveReliabilityTests DataManagementTests WellbeingTests PressDurationTests MotionTests KeyPaletteTests RangeStatsTests RangeReportTests ActivityTimeTests AppActivityTests AppFlowTests HourProfileTests RimePhraseTests StorageUsageTests TrendCutoffTests AxisScaleTests ShortcutTests StatisticsTests HourlyCompareTests KeyboardHeatTests ClickHeatTests LiveRateTests PopupLifetimeTests ReportVisualTests Report110Tests KeyRangeTests Release120Tests ThemeLoadingTests ThemeOwnershipTests WuxiaThemeTests OriThemeTests GujianThemeTests Release100Tests AnomalyRenderTests RimeLogTests AutoStartTests DailyReportTests HookWatchdogTests RawInputTests"
+set "TESTS=DistanceTests SaveReliabilityTests PersistenceGuardTests DataManagementTests WellbeingTests PressDurationTests MotionTests KeyPaletteTests RangeStatsTests RangeReportTests ActivityTimeTests AppActivityTests AppFlowTests HourProfileTests RimePhraseTests StorageUsageTests TrendCutoffTests AxisScaleTests ShortcutTests StatisticsTests HourlyCompareTests KeyboardHeatTests ClickHeatTests LiveRateTests PopupLifetimeTests ReportVisualTests Report110Tests KeyRangeTests Release120Tests ThemeLoadingTests ThemeOwnershipTests WuxiaThemeTests OriThemeTests GujianThemeTests Release100Tests AnomalyRenderTests RimeLogTests AutoStartTests DailyReportTests HookWatchdogTests RawInputTests MonthlyStorageTests"
 if defined THEME_ONLY set "TESTS=ThemeLoadingTests WuxiaThemeTests OriThemeTests GujianThemeTests"
 
 for %%T in (%TESTS%) do (
@@ -217,6 +217,42 @@ if !ERRORLEVEL! neq 0 (
         set "FAIL=1"
     ) else (
         echo [PASS] WidgetStorageRender
+    )
+)
+
+echo [Render] ReportHabitRender (previews/report-habit*.png)
+"%CSC%" /nologo /target:exe /optimize+ /main:ReportHabitRender /out:"%OUT%\ReportHabitRender.exe" %SRC% "%~dp0tests\ReportHabitRender.cs"
+if !ERRORLEVEL! neq 0 (
+    echo [COMPILE FAIL] ReportHabitRender
+    set "FAIL=1"
+) else (
+    pushd "%~dp0"
+    "%OUT%\ReportHabitRender.exe"
+    set "RC=!ERRORLEVEL!"
+    popd
+    if !RC! neq 0 (
+        echo [RUN FAIL] ReportHabitRender
+        set "FAIL=1"
+    ) else (
+        echo [PASS] ReportHabitRender
+    )
+)
+
+echo [Render] ReportLiveRender (previews/report-live.png)
+"%CSC%" /nologo /target:exe /optimize+ /main:ReportLiveRender /out:"%OUT%\ReportLiveRender.exe" %SRC% "%~dp0tests\ReportLiveRender.cs"
+if !ERRORLEVEL! neq 0 (
+    echo [COMPILE FAIL] ReportLiveRender
+    set "FAIL=1"
+) else (
+    pushd "%~dp0"
+    "%OUT%\ReportLiveRender.exe"
+    set "RC=!ERRORLEVEL!"
+    popd
+    if !RC! neq 0 (
+        echo [RUN FAIL] ReportLiveRender
+        set "FAIL=1"
+    ) else (
+        echo [PASS] ReportLiveRender
     )
 )
 

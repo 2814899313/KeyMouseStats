@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -53,7 +53,7 @@ namespace KeyMouseStats
         {
             EnsureDayReport();
             string path = _dayReport.Save();
-            if (path.Length > 0) SetStatus("已保存：" + path);
+            if (path.Length > 0) SetStatus("已保存至本地日报目录");
             else ThemeMessage.Show(this, "写文件失败，检查数据目录权限。", "日报保存失败",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
@@ -202,6 +202,10 @@ namespace KeyMouseStats
                 float barHeight = (float)(value / (double)max) * plotHeight;
                 float bx = left + slot * hour + slot * 0.16f;
                 float bw = Math.Max(3f, slot * 0.68f);
+                // 每个小时都保留极淡的底槽，空时段也不会让横轴断开。
+                using (GraphicsPath emptyTrack = RoundedRect(bx, top, bw, plotHeight, 3))
+                using (SolidBrush empty = new SolidBrush(Color.FromArgb(13, Csub)))
+                    g.FillPath(empty, emptyTrack);
                 if (value <= 0)
                 {
                     using (SolidBrush empty = new SolidBrush(Color.FromArgb(22, Csub)))
@@ -256,9 +260,18 @@ namespace KeyMouseStats
             for (int i = 0; i < r.Apps.Count; i++)
             {
                 float ry = top + i * rowHeight;
-                AppText(g, r.Apps[i].Name, _fSmall, i == 0 ? Ctext : Csub, new RectangleF(x + 38, ry, 132, rowHeight), false);
                 AppText(g, (i + 1).ToString(CultureInfo.InvariantCulture), _fAxis, i == 0 ? Cblue : Csub,
                     new RectangleF(x + 18, ry, 18, rowHeight), false);
+                Bitmap icon = AppIcon(r.Apps[i].ProcessPath);
+                if (icon != null)
+                    g.DrawImage(icon, x + 36, ry + Math.Max(0, (rowHeight - 16) / 2), 16, 16);
+                else
+                {
+                    using (GraphicsPath iconPath = RoundedRect(x + 36, ry + Math.Max(0, (rowHeight - 16) / 2), 16, 16, 4))
+                    using (SolidBrush fill = new SolidBrush(Color.FromArgb(i == 0 ? 55 : 30, Cblue)))
+                        g.FillPath(fill, iconPath);
+                }
+                AppText(g, r.Apps[i].Name, _fSmall, i == 0 ? Ctext : Csub, new RectangleF(x + 56, ry, 116, rowHeight), false);
                 float barLeft = x + 178, barMax = w - 178 - 76;
                 using (GraphicsPath track = RoundedRect(barLeft, ry + rowHeight / 2 - 3, barMax, 6, 3))
                 using (SolidBrush brush = new SolidBrush(Color.FromArgb(24, Csub))) g.FillPath(brush, track);
@@ -303,7 +316,7 @@ namespace KeyMouseStats
         // ---- 字符内容 ----
         private void PaintDayChars(Graphics g, float x, float y, float w, float h, DailyReport r)
         {
-            PaintCard(g, x, y, w, h, "字符内容");
+            PaintCard(g, x, y, w, h, "字符构成");
             if (!r.HasChars)
             {
                 AppText(g, "这一天没有上屏记录", _fSmall, Csub, new RectangleF(x + 18, y + h / 2 - 8, w - 36, 20), false);
@@ -311,8 +324,9 @@ namespace KeyMouseStats
                 return;
             }
 
-            AppText(g, Analysis.FmtCount(r.Chars) + " 字", _fNum2, Ctext, new RectangleF(x + 18, y + 35, 120, 26), false);
-            AppText(g, Analysis.FmtCount(r.Commits) + " 次 · 均 " + r.AvgCharsPerCommit.ToString("0.0", CultureInfo.InvariantCulture) + " 字 · 不同字 "
+            AppText(g, "均 " + r.AvgCharsPerCommit.ToString("0.0", CultureInfo.InvariantCulture) + " 字/次",
+                _fNum2, Ctext, new RectangleF(x + 18, y + 35, 170, 26), false);
+            AppText(g, Analysis.FmtCount(r.Chars) + " 字 · " + Analysis.FmtCount(r.Commits) + " 次 · 不同字 "
                 + Analysis.FmtCount(r.DistinctChars) + " 种",
                 _fAxis, Csub, new RectangleF(x + 18, y + 62, w - 36, 16), false);
 
@@ -391,6 +405,7 @@ namespace KeyMouseStats
                 string path = report.Save();
                 Store.DailyReportDay = DateTime.Today;
                 Store.Save();
+                _dailyReportPath = path;
                 if (path.Length > 0) SetStatus("昨日日报已生成:" + System.IO.Path.GetFileName(path));
             }
             catch (Exception) { /* 日报是附加价值,不能影响面板打开 */ }
@@ -407,7 +422,7 @@ namespace KeyMouseStats
             string hint = "日报 · " + r.Day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             hint += r.HasData ? (r.InProgress ? " · 进行中" : " · 完整") : " · 无数据";
             if (r.BaseDays > 0) hint += " · 对比" + r.BaselineLabel;
-            hint += " · 保存为 " + DailyReport.Directory + "\\" + r.Day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ".md";
+            hint += " · 已归档至本地日报目录";
             return hint;
         }
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
@@ -28,6 +29,16 @@ namespace KeyMouseStats
         private readonly List<AppActivity.Row> _appCompareRows = new List<AppActivity.Row>();
         private readonly List<AppActivity.Row> _comparePicked = new List<AppActivity.Row>();
         private RectangleF _appCompareClearRect;
+        private RectangleF _appPendingLinkRect;
+        private AppActivity.Row _appDetail;
+        private readonly List<RectangleF> _appRowRects = new List<RectangleF>();
+        private readonly List<AppActivity.Row> _appRowRows = new List<AppActivity.Row>();
+
+        private sealed class AppDetailSession
+        {
+            public DateTime Start, End;
+            public double Seconds, AppSeconds;
+        }
 
         private void ToggleCompare(AppActivity.Row row)
         {
@@ -70,18 +81,29 @@ namespace KeyMouseStats
         }
         private void ApplyAppChip(int id)
         {
-            if (id == 64) { using (StatisticsReport report = new StatisticsReport(DateTime.Today, 2)) report.ShowDialog(this); return; }
+            if (id == 64) return;   // 报告页已退役;应用详情由行内抽屉承接
+            if (id == 69) { _appDetail = null; return; }
             if (id == 65) { _appKeyGroups = !_appKeyGroups; _appPage = 0; return; }
-            if (id >= 66 && id <= 68) { _appView = id - 66; _appPage = 0; _comparePicked.Clear(); return; }
+            if (id >= 66 && id <= 68) { _appView = id - 66; _appPage = 0; _comparePicked.Clear(); _appDetail = null; return; }
             if (id == 40) _appPage = Math.Max(0, _appPage - 1);
             else if (id == 41) _appPage = Math.Min(_appPageCount - 1, _appPage + 1);
-            else if (id == 50 || id == 51) { _appsByWindow = id == 51; if (id == 50) _onlyUnclassified = false; _appPage = 0; }
-            else if (id == 63) { _onlyUnclassified = !_onlyUnclassified; if (_onlyUnclassified) { _appsByWindow = true; _appCategory = -1; } _appPage = 0; _comparePicked.Clear(); }
-            else if (id >= 60 && id <= 62) { _appDays = id == 60 ? 1 : id == 61 ? 7 : 90; _appPage = 0; _comparePicked.Clear(); }
+            else if (id == 50 || id == 51) { _appsByWindow = id == 51; if (id == 50) _onlyUnclassified = false; _appPage = 0; _appDetail = null; }
+            else if (id == 63) { _onlyUnclassified = !_onlyUnclassified; if (_onlyUnclassified) { _appsByWindow = true; _appCategory = -1; } _appPage = 0; _comparePicked.Clear(); _appDetail = null; }
+            else if (id >= 60 && id <= 62) { _appDays = id == 60 ? 1 : id == 61 ? 7 : 90; _appPage = 0; _comparePicked.Clear(); _appDetail = null; }
         }
 
         private bool HandleAppClick(PointF point)
         {
+            if (_appPendingLinkRect.Width > 0 && _appPendingLinkRect.Contains(point))
+            {
+                _onlyUnclassified = true;
+                _appsByWindow = true;
+                _appCategory = -1;
+                _appPage = 0;
+                _appDetail = null;
+                Invalidate();
+                return true;
+            }
             for (int i = 0; i < _appCategoryRects.Count; i++)
                 if (_appCategoryRects[i].Contains(point))
                 {
@@ -90,6 +112,7 @@ namespace KeyMouseStats
                     if (_appCategory >= 0) _onlyUnclassified = false;
                     _appPage = 0;
                     _comparePicked.Clear();
+                    _appDetail = null;
                     Invalidate();
                     return true;
                 }
@@ -110,6 +133,13 @@ namespace KeyMouseStats
                 if (_appEditRects[i].Contains(point))
                 {
                     ShowManualCategoryMenu(_appEditRows[i]);
+                    return true;
+                }
+            for (int i = 0; i < _appRowRects.Count; i++)
+                if (_appRowRects[i].Contains(point))
+                {
+                    _appDetail = i < _appRowRows.Count ? _appRowRows[i] : null;
+                    Invalidate();
                     return true;
                 }
             return false;
@@ -193,11 +223,12 @@ namespace KeyMouseStats
             _appEditRects.Clear(); _appEditRows.Clear();
             _appCompareRects.Clear(); _appCompareRows.Clear();
             _appCategoryRects.Clear(); _appCategoryValues.Clear();
+            _appRowRects.Clear(); _appRowRows.Clear();
+            _appPendingLinkRect = RectangleF.Empty;
             // 第一级:时间范围(左) + 对象粒度(右) + 明确的跳转动作(独立描边样式)。
             AppChip(g, 60, Cx, 98, 80, "今日", _appDays == 1);
             AppChip(g, 61, Cx + 90, 98, 80, "近 7 天", _appDays == 7);
             AppChip(g, 62, Cx + 180, 98, 90, "近 90 天", _appDays == 90);
-            AppActionChip(g, 64, Cx + 290, 98, 120, "今日分析 ↗");
             AppChip(g, 50, Cx + Cw - 180, 98, 80, "按应用", !_appsByWindow);
             AppChip(g, 51, Cx + Cw - 90, 98, 90, "按窗口", _appsByWindow);
 
@@ -212,10 +243,14 @@ namespace KeyMouseStats
             foreach (long value in categoryKeys) totalKeys += value;
             Color[] colors = { Cblue, Cpurple, Corange, Cgreen, Csub, Ccyan };
             int[] order = { 0, 5, 1, 2, 3, 4 };
-            float width = (Cw - (order.Length - 1) * 12) / order.Length;
-            for (int position = 0; position < order.Length; position++)
+            List<int> visible = new List<int>();
+            foreach (int i in order) if (categoryKeys[i] > 0) visible.Add(i);
+            if (visible.Count == 0) foreach (int i in order) visible.Add(i);
+            if (_appCategory >= 0 && !visible.Contains(_appCategory)) _appCategory = -1;
+            float width = (Cw - (visible.Count - 1) * 12) / visible.Count;
+            for (int position = 0; position < visible.Count; position++)
             {
-                int i = order[position];
+                int i = visible[position];
                 float x = Cx + position * (width + 12);
                 PaintCardBase(g, x, 143, width, 78);
                 if (_appCategory == i)
@@ -235,9 +270,15 @@ namespace KeyMouseStats
                 if (categoryKeys[i] > 0 && totalKeys > 0)
                     using (SolidBrush brush = new SolidBrush(colors[i]))
                         g.FillRectangle(brush, x + 12, 208, (float)((width - 24) * categoryKeys[i] / totalKeys), 3);
+                if (i == 4 && pending > 0)
+                {
+                    _appPendingLinkRect = new RectangleF(x + width - 82, 178, 70, 16);
+                    AppText(g, "去分类 ↗", _fAxis, Cblue, _appPendingLinkRect, true);
+                }
             }
 
             PaintCardBase(g, Cx, 235, Cw, 351);
+            if (_appDetail != null) { PaintAppDetail(g); return; }
             AppText(g, _appsByWindow ? "窗口标题 / 应用" : "应用 / 进程路径", _fH2, Ctext, new RectangleF(Cx + 18, 242, 260, 24), false);
             string[] views = { "次数", "APM 效率", "时长占比" };
             int[] viewIds = { 66, 67, 68 };
@@ -270,6 +311,128 @@ namespace KeyMouseStats
         }
 
         /// <summary>原有列表:分类、击键、点击、滚轮 / 键位构成。</summary>
+        private string AppDetailTitle(AppActivity.Row row)
+        {
+            if (row == null) return "";
+            if (row.Window != null && !string.IsNullOrEmpty(row.Name)) return row.Name;
+            return AppActivity.FriendlyName(row.ProcessPath);
+        }
+
+        private void PaintAppDetail(Graphics g)
+        {
+            AppActivity.Row row = _appDetail;
+            float left = Cx + 18, right = Cx + Cw - 18, width = right - left;
+            AppChip(g, 69, Cx + Cw - 136, 242, 120, "← 返回全部应用", false);
+            Bitmap appIcon = row.Legacy ? null : AppIcon(row.ProcessPath);
+            if (appIcon != null) g.DrawImage(appIcon, left, 243, 20, 20);
+            else
+            {
+                using (GraphicsPath iconPath = RoundedRect(left, 243, 20, 20, 5))
+                using (SolidBrush iconFill = new SolidBrush(Color.FromArgb(40, Cblue))) g.FillPath(iconFill, iconPath);
+            }
+            AppText(g, AppDetailTitle(row), _fH2, Ctext, new RectangleF(left + 28, 242, width - 178, 24), false);
+            string kind = row.Category >= 0 && row.Category < AppActivity.Categories.Length ? AppActivity.Categories[row.Category] : "未分类";
+            string process = string.IsNullOrEmpty(row.ProcessPath) ? "" : Path.GetFileNameWithoutExtension(row.ProcessPath);
+            AppText(g, kind + (process.Length > 0 ? " · " + process : ""), _fSmall, Csub, new RectangleF(left + 28, 268, width - 178, 17), false);
+            string active = row.ActiveSeconds > 0 ? ActivityMonitor.FormatDuration(row.ActiveSeconds) : "无时长观测";
+            string kpis = "击键 " + Analysis.FmtCount(row.Keys) + "  ·  点击 " + Analysis.FmtCount(row.Clicks)
+                + "  ·  滚轮 " + Analysis.FmtCount(row.Wheel) + "  ·  活跃 " + active;
+            AppText(g, kpis, _fBody, Ctext, new RectangleF(left, 290, width, 20), false);
+
+            // 应用 × 时段:只使用真实交叉观测,按有观测日平均到 24 小时。
+            double[] hours = new double[24];
+            int observedDays = 0;
+            foreach (DayRecord day in Analysis.RangeDays(_appDays))
+            {
+                bool observed = false;
+                for (int h = 0; h < 24; h++) if (day.Cross.ObservedHours[h] > 0) { observed = true; break; }
+                if (!observed) continue;
+                double[] values;
+                if (row.ProcessPath == null || !day.Cross.AppHours.TryGetValue(row.ProcessPath, out values)) continue;
+                observedDays++;
+                for (int h = 0; h < 24; h++) hours[h] += values[h];
+            }
+            AppText(g, "应用 × 时段 · 按有观测日平均到每小时", _fSmall, Csub, new RectangleF(left, 320, width, 18), false);
+            double peak = 0;
+            if (observedDays > 0) for (int h = 0; h < 24; h++) { hours[h] /= observedDays; peak = Math.Max(peak, hours[h]); }
+            float cellW = width / 24f, cellY = 340, cellH = 30;
+            for (int h = 0; h < 24; h++)
+            {
+                RectangleF cell = new RectangleF(left + h * cellW, cellY, Math.Max(1, cellW - 2), cellH);
+                using (SolidBrush fill = new SolidBrush(peak > 0 && hours[h] > 0 ? ArtTheme.Mix(Color.FromArgb(18, Ctext), Cblue, (float)Math.Sqrt(hours[h] / peak)) : Color.FromArgb(14, Ctext)))
+                    g.FillRectangle(fill, cell);
+                using (Pen edge = new Pen(Color.FromArgb(22, Ctext))) g.DrawRectangle(edge, cell.X, cell.Y, cell.Width, cell.Height);
+            }
+            using (SolidBrush label = new SolidBrush(Csub))
+                for (int h = 0; h <= 24; h += 6)
+                    g.DrawString(h.ToString("00") + ":00", _fAxis, label, left + h * cellW - 4, cellY + cellH + 4);
+            if (observedDays == 0)
+                AppText(g, "无新版交叉观测（1.0.0 起记录）；不从旧汇总反推", _fAxis, Csub, new RectangleF(left, cellY + cellH + 22, width, 16), false);
+
+            // 操作构成。
+            long opTotal = row.Keys + row.Clicks + row.Wheel;
+            AppText(g, "操作构成", _fSmall, Csub, new RectangleF(left, 406, width, 18), false);
+            if (opTotal > 0)
+            {
+                float barX = left, barW = width, x = barX;
+                long[] parts = { row.Keys, row.Clicks, row.Wheel };
+                Color[] colors = { Cblue, Ccyan, Corange };
+                for (int i = 0; i < 3; i++)
+                {
+                    float part = (float)(barW * parts[i] / (double)opTotal);
+                    using (GraphicsPath path = RoundedRect(x, 426, Math.Max(2, part - 1), 8, 4))
+                    using (SolidBrush fill = new SolidBrush(colors[i])) g.FillPath(fill, path);
+                    x += part;
+                }
+                string[] names = { "击键", "点击", "滚轮" };
+                float lx = left;
+                for (int i = 0; i < 3; i++)
+                {
+                    double share = parts[i] * 100.0 / opTotal;
+                    using (SolidBrush dot = new SolidBrush(colors[i])) g.FillEllipse(dot, lx, 442, 7, 7);
+                    string legend = names[i] + " " + share.ToString("0.0", CultureInfo.InvariantCulture) + "% (" + Analysis.FmtCount(parts[i]) + ")";
+                    AppText(g, legend, _fAxis, i == 0 ? Ctext : Csub, new RectangleF(lx + 12, 438, 240, 17), false);
+                    lx += 258;
+                }
+            }
+            else AppText(g, "无操作事件", _fAxis, Csub, new RectangleF(left, 426, width, 18), false);
+
+            // 会话归因:最近 6 段。
+            List<AppDetailSession> sessions = new List<AppDetailSession>();
+            foreach (DayRecord day in Analysis.RangeDays(_appDays))
+                foreach (ActiveSession session in day.Sessions)
+                {
+                    double seconds;
+                    if (row.ProcessPath == null || !session.AppSeconds.TryGetValue(row.ProcessPath, out seconds) || seconds <= 0) continue;
+                    sessions.Add(new AppDetailSession { Start = session.Start, End = session.End, Seconds = session.Seconds, AppSeconds = seconds });
+                }
+            sessions.Sort(delegate(AppDetailSession a, AppDetailSession b) { return b.Start.CompareTo(a.Start); });
+            AppText(g, "最近专注会话占比", _fSmall, Csub, new RectangleF(left, 468, width, 18), false);
+            if (sessions.Count == 0)
+                AppText(g, "无新版会话归因样本（1.0.0 起记录）", _fAxis, Csub, new RectangleF(left, 490, width, 18), false);
+            else
+            {
+                AppText(g, "应用时长", _fAxis, Csub, new RectangleF(left + 425, 481, 100, 14), true);
+                AppText(g, "占段", _fAxis, Csub, new RectangleF(left + 530, 481, 45, 14), true);
+                AppText(g, "全段", _fAxis, Csub, new RectangleF(left + 580, 481, width - 585, 14), true);
+                int count = Math.Min(5, sessions.Count);
+                for (int i = 0; i < count; i++)
+                {
+                    AppDetailSession session = sessions[i];
+                    float y = 496 + i * 18;
+                    string time = session.Start.ToString("MM-dd HH:mm") + "–" + session.End.ToString("HH:mm");
+                    double share = session.Seconds > 0 ? Math.Max(0, Math.Min(1, session.AppSeconds / session.Seconds)) : 0;
+                    float barX = left + 170, barW = 245;
+                    using (SolidBrush track = new SolidBrush(Color.FromArgb(18, Ctext))) g.FillRectangle(track, barX, y + 5, barW, 3);
+                    using (SolidBrush fill = new SolidBrush(Cblue)) g.FillRectangle(fill, barX, y + 5, (float)(barW * share), 3);
+                    AppText(g, time, _fAxis, Csub, new RectangleF(left, y, 165, 14), false);
+                    AppText(g, ActivityMonitor.FormatDuration(session.AppSeconds), _fAxis, Ctext, new RectangleF(left + 425, y, 100, 14), true);
+                    AppText(g, (share * 100).ToString("0.#", CultureInfo.InvariantCulture) + "%", _fAxis, Cblue, new RectangleF(left + 530, y, 45, 14), true);
+                    AppText(g, "共 " + ActivityMonitor.FormatDuration(session.Seconds), _fAxis, Csub, new RectangleF(left + 580, y, width - 585, 14), true);
+                }
+            }
+        }
+
         private void PaintAppsTable(Graphics g, List<AppActivity.Row> rows, Dictionary<string, long[]> keyGroups)
         {
             Color[] colors = { Cblue, Cpurple, Corange, Cgreen, Csub, Ccyan };
@@ -309,6 +472,8 @@ namespace KeyMouseStats
             {
                 AppActivity.Row row = rows[_appPage * pageSize + i];
                 float y = 300 + i * 33;
+                _appRowRects.Add(new RectangleF(Cx + 4, y, Cw - 8, 33));
+                _appRowRows.Add(row);
                 if (i % 2 == 0)
                     using (SolidBrush brush = new SolidBrush(Color.FromArgb(12, Ctext)))
                         g.FillRectangle(brush, Cx + 8, y, Cw - 16, 33);
@@ -608,14 +773,39 @@ namespace KeyMouseStats
             if (string.IsNullOrEmpty(path)) return null;
             Bitmap icon;
             if (_appIconCache.TryGetValue(path, out icon)) return icon;
+            string resolved = ResolveProcessPath(path);
             try
             {
-                using (Icon extracted = Icon.ExtractAssociatedIcon(path))
+                using (Icon extracted = Icon.ExtractAssociatedIcon(resolved))
                     if (extracted != null) icon = extracted.ToBitmap();
             }
             catch { icon = null; }
             _appIconCache[path] = icon;
             return icon;
+        }
+
+        /// <summary>Rime 只写进程名时，借当前同名进程找回完整路径以提取图标；只在本机内存里用。</summary>
+        private static string ResolveProcessPath(string path)
+        {
+            if (File.Exists(path)) return path;
+            string dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir)) return path;
+            string name = Path.GetFileNameWithoutExtension(path);
+            if (string.IsNullOrEmpty(name)) return path;
+            try
+            {
+                Process[] processes = Process.GetProcessesByName(name);
+                for (int i = 0; i < processes.Length; i++)
+                    try
+                    {
+                        string file = processes[i].MainModule == null ? null : processes[i].MainModule.FileName;
+                        if (!string.IsNullOrEmpty(file) && File.Exists(file)) return file;
+                    }
+                    catch { }
+                    finally { processes[i].Dispose(); }
+            }
+            catch { }
+            return path;
         }
 
         private void ExportAppsApm()
