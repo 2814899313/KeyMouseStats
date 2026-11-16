@@ -63,6 +63,18 @@ internal static class DashboardAdditionsRender
             Set(form, "_trendHourly", false);
             object hours = Enum.ToObject(typeof(Dashboard).GetNestedType("TabId", BindingFlags.NonPublic), 2);
             Set(form, "_tab", hours); Set(form, "_hourView", 2); Set(form, "_hourRange", 0); Render(form, Path.Combine(output, "dashboard-hours-intensity.png"));
+            // 连续段:三种指标必须各出一张(指标真正联动)、一张带悬停气泡、一张钉到更早的记录日。
+            for (int metric = 0; metric < 3; metric++)
+            {
+                Set(form, "_hourMetric", metric);
+                Render(form, Path.Combine(output, "dashboard-hours-intensity-m" + metric + ".png"));
+            }
+            Set(form, "_hourMetric", 0); Set(form, "_hover", 2);
+            Render(form, Path.Combine(output, "dashboard-hours-intensity-hover.png"));
+            Set(form, "_hover", -1);
+            Set(form, "_hourRecordDate", DateTime.Today.AddDays(-3));
+            Render(form, Path.Combine(output, "dashboard-hours-intensity-pinned.png"));
+            Set(form, "_hourRecordDate", DateTime.MinValue);
             object keys = Enum.ToObject(typeof(Dashboard).GetNestedType("TabId", BindingFlags.NonPublic), 3);
             Set(form, "_tab", keys); Set(form, "_keyView", 0); Set(form, "_keyMetric", 0); Set(form, "_keyRange", 0); Render(form, Path.Combine(output, "dashboard-keys-redesign.png"));
             object apps = Enum.ToObject(typeof(Dashboard).GetNestedType("TabId", BindingFlags.NonPublic), 4);

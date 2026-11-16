@@ -90,6 +90,20 @@ internal static class TrendCutoffTests
         Check(TrendCutoff.DeltaText(TrendCutoff.Compare(currentDay, zeroYesterday, 0, now)) == "新增",
             "zero data in yesterday's same period is reported as new");
 
+        // 今天同期还是 0、昨天有量:这是"今天还没开始",不是 -100% 的暴跌。
+        DayRecord silentToday = Day(today, new long[] { 0, 0, 0, 0, 0, 0, 0, 0, 0 }, 0);
+        TrendCutoff.Comparison silent = TrendCutoff.Compare(silentToday, previousDay, 0, now);
+        Check(silent.Available && silent.NoInputToday, "a silent morning is flagged instead of treated as a cliff");
+        Check(TrendCutoff.DeltaText(silent) == "今日尚无输入", "a silent morning gets a neutral label, not -100%");
+
+        // 极小的负值不再打成「-0%」,真实跌幅仍保留负号。
+        DayRecord nearFlat = Day(today, new long[] { 100, 100, 100, 100, 100, 100, 100, 100, 99 }, 0);
+        Check(TrendCutoff.DeltaText(TrendCutoff.Compare(nearFlat, previousDay, 0, now)) == "0%",
+            "a -0.1% change prints 0%, never -0%");
+        DayRecord slightlyDown = Day(today, new long[] { 96, 96, 96, 96, 96, 96, 96, 96, 96 }, 0);
+        Check(TrendCutoff.DeltaText(TrendCutoff.Compare(slightlyDown, previousDay, 0, now)) == "-4%",
+            "a real drop keeps its negative sign");
+
         // 正常涨跌的格式化。
         long[] rising = { 110, 110, 110, 110, 110, 110, 110, 110, 110 };
         TrendCutoff.Comparison up = TrendCutoff.Compare(Day(today, rising, 0), Day(today.AddDays(-1), new long[] { 100, 100, 100, 100, 100, 100, 100, 100, 100 }, 0), 0, now);

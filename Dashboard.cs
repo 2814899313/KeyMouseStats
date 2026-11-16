@@ -62,6 +62,19 @@ namespace KeyMouseStats
             return r;
         }
 
+        /// <summary>
+        /// 趋势页的「有效数据日」判据:当天有条目,且不是全 0 的空壳。
+        /// 灰带、主折线断线、区间日均与 7 日移动均值必需共用这一处 —— 以前灰带/折线只看
+        /// ContainsKey、7 日均值只看 IsEmpty,于是"内存里有键但全 0"的日子会同时得到
+        /// 「实线砸到 0」和「虚线说没数据」两种矛盾结论。
+        /// ActivityTime 会按需给任意日期建档,所以空壳日在内存里是真实存在的。
+        /// </summary>
+        public static bool HasRecord(DateTime d)
+        {
+            DayRecord r = GetDay(d);
+            return r != null && !r.IsEmpty;
+        }
+
         /// <summary>最近 n 天(含今天,缺失的天补零)。</summary>
         public static List<DayRecord> RangeDays(int n)
         {
@@ -115,7 +128,6 @@ namespace KeyMouseStats
         public static List<KeyValuePair<string, long>> KeyRanking(IEnumerable<DayRecord> rs)
         {
             Dictionary<string, long> byName = new Dictionary<string, long>();
-            long total = 0;
             foreach (DayRecord r in rs)
             {
                 foreach (KeyValuePair<int, long> kv in r.KeyCounts)
@@ -124,20 +136,16 @@ namespace KeyMouseStats
                     long old;
                     byName.TryGetValue(name, out old);
                     byName[name] = old + kv.Value;
-                    total += kv.Value;
                 }
             }
             List<KeyValuePair<string, long>> list = new List<KeyValuePair<string, long>>(byName);
-            list.Sort(delegate(KeyValuePair<string, long> a, KeyValuePair<string, long> b)
-            {
-                return b.Value.CompareTo(a.Value);
-            });
-            if (list.Count > 0 && total > 0)
-            {
-                // 附带总量,供占比计算:塞在尾部不易用,改为由调用方自行求和
-            }
+            list.Sort(ByValueDescending);
             return list;
         }
+
+        /// <summary>降序比较器。提成静态字段,避免每次 KeyRanking 都 new 一个 Comparison 闭包。</summary>
+        private static readonly Comparison<KeyValuePair<string, long>> ByValueDescending =
+            delegate (KeyValuePair<string, long> a, KeyValuePair<string, long> b) { return b.Value.CompareTo(a.Value); };
 
         public static long KeyTotal(IEnumerable<DayRecord> rs)
         {
@@ -235,7 +243,7 @@ namespace KeyMouseStats
         private int _trendMetric = 0;     // 0击键 1点击 2滚轮 3移动
         private int _trendRange = 14;     // 14 / 30
         private bool _trendCompare;
-        private int _hourMetric = 0;      // 0击键 1点击
+        private int _hourMetric = 0;      // 0 击键 1 点击 2 活跃时长(柱子/矩阵/连续段共用)
         private int _hourView;             // 0 时段柱子 1 周×24 矩阵 2 连续段强度
         private int _hourRange = 2;        // 0 今日 1 近7天 2 全部历史
         private RectangleF _activityRect, _sessionsRect;
@@ -253,6 +261,46 @@ namespace KeyMouseStats
         private bool _overviewKeyboard;
         private int _distributionPeriod;
         private int _distributionTop=10;
+        /// <summary>总览「按键分布」卡上的 7 个胶囊。以前靠 OnMouseClick 里手写的 if 链分发、
+        /// 不进 _chips,键盘 Tab 永远摸不到;现在统一走 chip id。</summary>
+        private const int DistributionMouseChipId = 303;
+        private const int DistributionKeyboardChipId = 304;
+        private const int DistributionTopChipId = 305;
+        private const int DistributionPeriodChipId = 306;   // 306..309 = 今日/本周/本月/本年
+        /// <summary>图例行 / 扇区的下钻 chip id 基数:350+i,i = 扇区下标(最后一个是「其他」)。</summary>
+        private const int DistributionSliceChipId = 350;
+        /// <summary>页脚「导出 CSV」的 chip id(47 在取值表里是空档,44/45/46 已被报告类入口占用)。</summary>
+        internal const int ExportChipId = 47;
+        /// <summary>步进/翻页类按钮的统一高度与圆角,与 ToggleChip 对齐(收敛方案 §8.2)。</summary>
+        internal const float StepChipHeight = 30;
+        internal const float StepChipRadius = 8;
+        /// <summary>独立 ToggleChip 的统一高度与圆角。全站不再出现 24/25/27/28 高的小方块。</summary>
+        internal const float ToggleChipHeight = 30;
+        internal const float ToggleChipRadius = 8;
+
+        // ---- 分布卡的悬停 / 下钻状态 -------------------------------------------
+        /// <summary>当前悬停的扇区下标(-1 = 没有)。鼠标模式是 0..3,键盘模式是 0..N(含「其他」)。</summary>
+        private int _distributionHoverSlice = -1;
+        /// <summary>上一帧画出来的环几何与数据,供 OnMouseMove 做命中判断(避免在移动时重算排行)。</summary>
+        private RectangleF _distributionRing;
+        private float _distributionRingStroke;
+        private long[] _distributionRingValues;
+        private string[] _distributionRingNames;
+        /// <summary>图例行的可点击矩形,按扇区下标对齐;同时登记进 _chips 供键盘 Tab 使用。</summary>
+        private readonly List<int> _distributionLegendSlices = new List<int>();
+        private readonly List<RectangleF> _distributionLegendRects = new List<RectangleF>();
+        /// <summary>从分布卡下钻到「按键排行」时要高亮的按键显示名(空 = 不高亮)。</summary>
+        private string _selectedKeyName = "";
+
+        // ---- 按键排行的分帧缓存 -------------------------------------------------
+        private sealed class RankCache
+        {
+            public DateTime From = DateTime.MaxValue;
+            public int Days = -1;
+            public long Live = -1;
+            public List<KeyValuePair<string, long>> List;
+        }
+        private readonly RankCache[] _rankCaches = { new RankCache(), new RankCache() };
         private RectangleF _distributionCountRect;
         private readonly RectangleF[] _distributionPeriods=new RectangleF[4];
         private RectangleF _distributionMouseRect, _distributionKeyboardRect;
@@ -260,6 +308,10 @@ namespace KeyMouseStats
         private int _keyView;             // 0 按键排行 1 组合键排行 2 全键热力图
         private int _keyMetric;           // 0 击键次数 1 按住时长(列表与热力图共用)
         private int _hover = -1;          // 图表悬停索引
+        /// <summary>连续段视图正在看的记录日。MinValue = 跟随最新记录日;翻页后固定在所选日(仅内存状态,不落盘)。</summary>
+        private DateTime _hourRecordDate = DateTime.MinValue;
+        /// <summary>连续段柱块的可命中矩形(内容坐标,按段下标排列),供 ComputeHover 定位到具体某一段。</summary>
+        private readonly List<RectangleF> _segmentBars = new List<RectangleF>();
 
         private readonly RectangleF[] _tabRects = new RectangleF[9];
         private readonly List<RectangleF> _chips = new List<RectangleF>();
@@ -306,7 +358,9 @@ namespace KeyMouseStats
         private bool PopCrumb()
         {
             if (_selectedKeyScan >= 0 && ClearSelectedKey()) { _crumb = ""; return true; }
-            if (_crumb.Length == 0) return false;
+            bool hadKey = _selectedKeyName.Length > 0;
+            _selectedKeyName = "";
+            if (_crumb.Length == 0 && !hadKey) return false;
             _crumb = "";
             Invalidate();
             return true;
@@ -509,7 +563,11 @@ namespace KeyMouseStats
 
         private void OpenTrendDistribution()
         {
-            DateTime end = DateTime.Today, start = end.AddDays(-(_trendRange - 1));
+            // 分布口径只含完整日(RangeRules.TryNormalize 会把 end=今天 截到昨天),
+            // 所以标题必须用同一个 CompleteEnd,否则会出现「标题写到 11.15、内容只有 11.14」。
+            DateTime end = RangeRules.CompleteEnd(DateTime.Today);
+            DateTime start = DateTime.Today.AddDays(-(_trendRange - 1));
+            if (end < start) end = start;      // 今天刚过零点时还没有完整日,退化成单日窗口
             OpenDetail(new DistributionReportVisual(start, end), "分布 · " + start.ToString("MM.dd") + "–" + end.ToString("MM.dd"), false, 430);
         }
 
@@ -625,6 +683,7 @@ namespace KeyMouseStats
                 if (next < 0) next = _tabNames.Length - 1;
                 if (next >= _tabNames.Length) next = 0;
                 _tab = (TabId)next; _hover = -1; _chipFocus = -1; _hourlyMenuOpen = false;
+                _selectedKeyName = ""; _crumb = ""; _distributionHoverSlice = -1;
                 Invalidate();
                 e.Handled = true; e.SuppressKeyPress = true;
                 return;
@@ -776,21 +835,15 @@ namespace KeyMouseStats
             if (HandleThemeClick(p)) { Invalidate(); return; }
             if (Hit(_exportRect, p)) { ExportCsv(); return; }
             PointF contentPoint = new PointF(p.X - ContentX, p.Y - ContentY);
-            if(_tab==TabId.Overview && (Hit(_distributionMouseRect,contentPoint)||Hit(_distributionKeyboardRect,contentPoint)))
-            { _overviewKeyboard=Hit(_distributionKeyboardRect,contentPoint);Invalidate();return; }
-            if(_tab==TabId.Overview && _overviewKeyboard && Hit(_distributionCountRect,contentPoint))
+            // 分布卡:点圆环上的任一段 → 下钻到「按键排行」并高亮那个键。
+            // 图例行走下面的 _chips 统一循环(它们登记成 350+i)。
+            if (_tab == TabId.Overview && _overviewKeyboard)
             {
-                ContextMenuStrip choices=PreparePopup(ref _distributionMenu);
-                foreach(int count in new[]{5,8,10})
-                {
-                    int selected=count;
-                    ToolStripMenuItem item=new ToolStripMenuItem("前 "+count+" 个按键");item.Checked=_distributionTop==count;
-                    item.Click+=delegate{_distributionTop=selected;Invalidate();};choices.Items.Add(item);
-                }
-
-                choices.Show(this,e.Location);return;
+                int slice;
+                if (HitDistributionRing(contentPoint, out slice)) { DrillIntoKeys(slice); return; }
             }
-            if(_tab==TabId.Overview && _overviewKeyboard)for(int i=0;i<4;i++)if(Hit(_distributionPeriods[i],contentPoint)){_distributionPeriod=i;Invalidate();return;}
+            // 总览「按键分布」卡上的 7 个胶囊不再在这里手写 if 链分发 —— 它们已经登记进 _chips,
+            // 由下面的统一循环走 ApplyChip。这样 Tab / Enter 也能到达,且命中判断只有一处。
             if (_tab == TabId.Overview && Hit(_activityRect, contentPoint))
             { using (ActivitySettings dialog = new ActivitySettings()) dialog.ShowDialog(this); Invalidate(); return; }
             if (_tab == TabId.Overview && Hit(_sessionsRect, contentPoint))
@@ -807,7 +860,7 @@ namespace KeyMouseStats
             }
             for (int i = 0; i < _tabNames.Length; i++)
             {
-                if (Hit(_tabRects[i], p)) { _tab = (TabId)i; _hover = -1; Invalidate(); return; }
+                if (Hit(_tabRects[i], p)) { _tab = (TabId)i; _hover = -1; _chipFocus = -1; _selectedKeyName = ""; _crumb = ""; _distributionHoverSlice = -1; Invalidate(); return; }
             }
             if (_tab == TabId.Apps && HandleAppClick(new PointF(p.X - ContentX, p.Y - ContentY))) return;
             if (_tab == TabId.Insights && HandleInsightClick(contentPoint)) { Invalidate(); return; }
@@ -847,6 +900,8 @@ namespace KeyMouseStats
             if (id == 45) { OpenReport(); return; }   // 在报告中查看(带当前筛选)
             if (id == 44) { OpenHoldTrend(); return; }
             if (id == 302) { OpenTrendDistribution(); return; }
+            if (id == ExportChipId) { ExportCsv(); return; }   // 页脚「导出 CSV」
+            if (id >= DistributionMouseChipId && id <= DistributionPeriodChipId + 3) { ApplyDistributionChip(id); return; }
             if (id == 518) { _tab = TabId.Heat; _clickActionView = true; _clickRange = 0; _mouseActionCache = null; _mouseActionRange = -1; return; }
             if (id == 519) { _tab = TabId.Heat; _clickActionView = false; return; }
             if (id == 520) { _tab = TabId.Heat; _clickActionView = true; return; }
@@ -890,11 +945,75 @@ namespace KeyMouseStats
             if (_tab == TabId.Keys && id >= 72 && id <= 74) { _keyView = id - 72; _hover = -1; return; }
             if (_tab == TabId.Keys && (id == 78 || id == 79)) { _keyMetric = id - 78; return; }
             if (_tab == TabId.Hours && id >= 30 && id <= 32) { _hourRange = id - 30; _hover = -1; return; }
+            // 连续段是单日时间轴:范围胶囊换成了日期切换器(33 上一日 / 34 下一日 / 35 回到最新记录日),
+            // 必须放在 "id < 70 → ApplyAppChip" 之前认领。
+            if (_tab == TabId.Hours && _hourView == 2 && id >= 33 && id <= 35)
+            {
+                StepHourRecordDay(id == 33 ? -1 : id == 34 ? 1 : 0);
+                return;
+            }
             if (id < 70) { ApplyAppChip(id); return; }
             if (id >= 100) { _trendMetric = id - 100; return; }        // 100..103
-            if (id >= 90) { _trendRange = (id == 91) ? 14 : 30; return; } // 91=14天 92=30天
-            if (id >= 80) { _hourMetric = id - 80; return; }           // 80/81
+            // 换区间会换掉点数与日期,旧悬停索引必须清掉,否则会指到另一天。
+            if (id >= 90) { _trendRange = (id == 91) ? 14 : 30; _hover = -1; return; } // 91=14天 92=30天
+            if (id >= 80) { _hourMetric = id - 80; _hover = -1; return; }   // 80/81
             if (id >= 70) { _keyRange = id - 70; return; }             // 70/71
+        }
+
+        /// <summary>
+        /// 总览「按键分布」卡上的胶囊:鼠标 / 键盘 / Top N ▾ / 今日·本周·本月·本年。
+        /// 抽出来是为了让鼠标点击和键盘 Enter 走同一条路(以前只有 OnMouseClick 里的手写 if)。
+        /// </summary>
+        private void ApplyDistributionChip(int id)
+        {
+            if (id == DistributionMouseChipId) { _overviewKeyboard = false; _distributionHoverSlice = -1; Invalidate(); return; }
+            if (id == DistributionKeyboardChipId) { _overviewKeyboard = true; _distributionHoverSlice = -1; Invalidate(); return; }
+            if (id == DistributionTopChipId) { ShowDistributionTopMenu(); return; }
+            if (id >= DistributionSliceChipId && id < DistributionSliceChipId + 32) { DrillIntoKeys(id - DistributionSliceChipId); return; }
+            int period = id - DistributionPeriodChipId;
+            if (period >= 0 && period < _distributionPeriods.Length)
+            {
+                _distributionPeriod = period;
+                _distributionHoverSlice = -1;
+                Invalidate();
+            }
+        }
+
+        /// <summary>
+        /// 从分布卡下钻到「按键排行」。slice 是扇区下标;等于 Top N 时代表「其他」,
+        /// 只切页不高亮任何单个键(用户想看的是完整榜单)。
+        /// </summary>
+        internal void DrillIntoKeys(int slice)
+        {
+            if (!_overviewKeyboard || _distributionRingNames == null) return;
+            _selectedKeyName = slice >= 0 && slice < _distributionTop && slice < _distributionRingNames.Length
+                ? (_distributionRingNames[slice] ?? "") : "";
+            _selectedKeyScan = -1;          // 下钻来自排行,不是全键热力图,别让旧的热力选中残留
+            _tab = TabId.Keys;
+            _keyView = 0;                   // 按键排行
+            _hover = -1;
+            _chipFocus = -1;
+            PushCrumb(_selectedKeyName.Length > 0 ? "按键排行 · " + _selectedKeyName : "");
+            Motion.Start(PageMotionKey, 150, Ease.OutCubic);
+            RestartEntrance();
+            Invalidate();
+        }
+
+        /// <summary>Top N 下拉:菜单贴着按钮底边弹出,而不是跟着上一次鼠标坐标跑。</summary>
+        private void ShowDistributionTopMenu()
+        {
+            ContextMenuStrip choices = PreparePopup(ref _distributionMenu);
+            foreach (int count in new[] { 5, 8, 10 })
+            {
+                int selected = count;
+                ToolStripMenuItem item = new ToolStripMenuItem("前 " + count + " 个按键");
+                item.Checked = _distributionTop == count;
+                item.Click += delegate { _distributionTop = selected; _distributionHoverSlice = -1; Invalidate(); };
+                choices.Items.Add(item);
+            }
+            Point anchor = new Point((int)Math.Round(_distributionCountRect.X + ContentX),
+                (int)Math.Round(_distributionCountRect.Bottom + ContentY));
+            choices.Show(this, anchor);
         }
 
         protected override void OnMouseMove(MouseEventArgs e)
@@ -913,12 +1032,17 @@ namespace KeyMouseStats
                 if (infoHover != _mouseActionInfoHover) { _mouseActionInfoHover = infoHover; Invalidate(); }
             }
             bool clickable = Hit(_closeRect, p) || Hit(_exportRect, p) || (_tab==TabId.Trend&&!_trendHourly&&h>=0);
-            if (_tab == TabId.Overview) clickable |= Hit(_activityRect, new PointF(p.X - ContentX, p.Y - ContentY))
-                || Hit(_sessionsRect, new PointF(p.X - ContentX, p.Y - ContentY))
-                || Hit(_distributionMouseRect,new PointF(p.X-ContentX,p.Y-ContentY))
-                || Hit(_distributionKeyboardRect,new PointF(p.X-ContentX,p.Y-ContentY));
-            if(_tab==TabId.Overview && _overviewKeyboard)clickable |= Hit(_distributionCountRect,new PointF(p.X-ContentX,p.Y-ContentY));
-            if(_tab==TabId.Overview && _overviewKeyboard)foreach(RectangleF r in _distributionPeriods) clickable |= Hit(r,new PointF(p.X-ContentX,p.Y-ContentY));
+            if (_tab == TabId.Overview)
+            {
+                PointF overviewPoint = new PointF(p.X - ContentX, p.Y - ContentY);
+                clickable |= Hit(_activityRect, overviewPoint) || Hit(_sessionsRect, overviewPoint);
+                // 分布卡:扇区与图例行都是可点的,鼠标移上去要有手型。
+                UpdateDistributionHover(overviewPoint);
+                int slice;
+                if (_overviewKeyboard) clickable |= HitDistributionRing(overviewPoint, out slice);
+            }
+            // 分布卡的鼠标/键盘/Top N/时段胶囊已经登记进 _chips,下面统一的 foreach 会覆盖,
+            // 不再在这里重复写一遍命中判断(重复的副本迟早会和真实控件走偏)。
             if (_tab == TabId.Overview)
                 foreach (RectangleF r in _overviewTiles) clickable |= Hit(r, new PointF(p.X - ContentX, p.Y - ContentY));
             if (_tab == TabId.Keys && _keyView == 2)
@@ -953,6 +1077,7 @@ namespace KeyMouseStats
             base.OnMouseLeave(e);
             _mouse = new Point(-100, -100);
             _hover = -1;
+            _distributionHoverSlice = -1;
             _mouseActionInfoHover = false;
             Cursor = Cursors.Default;
             Invalidate();
@@ -977,6 +1102,13 @@ namespace KeyMouseStats
             }
             else if (_tab == TabId.Hours)
             {
+                // 连续段:柱块代表"段"而不是"小时",按上一帧登记的可命中矩形定位到具体那一段。
+                if (_hourView == 2)
+                {
+                    for (int i = _segmentBars.Count - 1; i >= 0; i--)
+                        if (_segmentBars[i].Contains(p)) return i;
+                    return -1;
+                }
                 RectangleF r = new RectangleF(Cx, 188, Cw, 312);
                 if (r.Contains(p))
                 {
@@ -987,11 +1119,11 @@ namespace KeyMouseStats
             return -1;
         }
 
-        private sealed class AnalysisPt
+        internal sealed class AnalysisPt
         {
             public DateTime Day;
             public double V;
-            /// <summary>这天有没有落盘的记录。false = 应用/电脑没运行过,折线断开并用灰带标出。</summary>
+            /// <summary>这天有没有可用记录。false = 缺失或空壳日:折线断开并用灰带标出。</summary>
             public bool HasData;
         }
 
@@ -1003,7 +1135,9 @@ namespace KeyMouseStats
             {
                 AnalysisPt p = new AnalysisPt();
                 p.Day = r.Date;
-                p.HasData = Store.History.ContainsKey(r.Date);
+                // 与 Analysis.HasRecord / PersonalStats.History 同一判据:有条目且非全 0 空壳。
+                // 只判 ContainsKey 会把空壳日当成"有数据",主折线在那里连到 0 形成假深 V。
+                p.HasData = Store.History.ContainsKey(r.Date) && !r.IsEmpty;
                 switch (_trendMetric)
                 {
                     case 0: p.V = r.Keys; break;
@@ -1014,6 +1148,37 @@ namespace KeyMouseStats
                 pts.Add(p);
             }
             return pts;
+        }
+
+        /// <summary>
+        /// 区间日均:只统计「完整且有有效数据」的天(排除今天、排除缺失/空壳日)。
+        /// 没有样本时返回 NaN,由调用方显示 -- 或不画平均线 —— 卡片与平均线以前各写一套兜底,
+        /// 只有今天有数据时会给出两个互相矛盾的假均值。
+        /// </summary>
+        internal static double TrendAverage(List<AnalysisPt> pts, bool live, out int count)
+        {
+            double sum = 0;
+            count = 0;
+            if (pts == null) return double.NaN;
+            for (int i = 0; i < pts.Count; i++)
+            {
+                if (!pts[i].HasData) continue;
+                if (live && i == pts.Count - 1) continue;
+                sum += pts[i].V;
+                count++;
+            }
+            return count > 0 ? sum / count : double.NaN;
+        }
+
+        /// <summary>
+        /// 主折线段是否应该画:两端都必须有有效数据;今天的最后一段留给虚线,不算实线段。
+        /// 抽成纯函数是为了让「无记录日必须断线」有可回归的断言(见 tests/StatisticsTests.cs)。
+        /// </summary>
+        internal static bool TrendSegmentDrawn(bool leftValid, bool rightValid, bool live, int rightIndex, int count)
+        {
+            if (!leftValid || !rightValid) return false;
+            if (live && rightIndex == count - 1) return false;
+            return true;
         }
 
         // ---------------------------------------------------------------- 绘制总入口
@@ -1070,14 +1235,6 @@ namespace KeyMouseStats
             }
             PaintDetailOverlay(g);
             g.Restore(contentState);
-            // 1.8.0:Tab 选中的 chip 画一圈焦点环。_chips 记的是内容坐标,这里已经恢复成窗口坐标,
-            // 所以要补上 ContentX/ContentY 的偏移。
-            if (_chipFocus >= 0 && _chipFocus < _chips.Count)
-            {
-                RectangleF focus = _chips[_chipFocus];
-                using (GraphicsPath ring = RoundedRect(focus.X + ContentX - 2, focus.Y + ContentY - 2, focus.Width + 4, focus.Height + 4, 9))
-                using (Pen pen = new Pen(Ccyan, 1.8f)) g.DrawPath(pen, ring);
-            }
             if (pageProgress < 1)
             {
                 int alpha = (int)(150 * (1 - pageProgress));
@@ -1090,6 +1247,10 @@ namespace KeyMouseStats
             }
             _loaderVisible=ThemeImages.Loading;
             if (_detailVisual == null) PaintFooter(g);
+            // 焦点环必须画在页脚之后:页脚按钮的命中区是在 PaintFooter 里才登记的,而 _chips 每帧
+            // 会在 PaintHeader 之前清空。旧顺序(页面绘制完就画笔)会让焦点落在页脚按钮时,
+            // 环画到上一个 chip 上、或因为下标越界干脆不画。
+            PaintFocusRing(g);
             if(_loaderVisible)PaintLoading(g);
             PaintThemeFade(g);   // 1.8.0:换主题时最后叠一层旧底色,做成一次交叉淡化
             renderWatch.Stop();
@@ -1245,7 +1406,12 @@ namespace KeyMouseStats
             _chipIds.Add(id);
         }
 
-        private void PaintFooterPrimaryChip(Graphics g, RectangleF windowRect, string text, int id)
+        /// <summary>
+        /// 页脚主按钮(实心 Accent 底 + OnAccent 描边)。downloadGlyph 为 true 时在文字左侧画一个
+        /// 下载箭头,箭头与文字按整体宽度居中;以前「导出 CSV」是自己一份内联绘制,没有描边、
+        /// 文字钉死在 (947,685)、也不进 _chips,和「保存 Markdown」长得不一样且键盘摸不到。
+        /// </summary>
+        private void PaintFooterPrimaryChip(Graphics g, RectangleF windowRect, string text, int id, bool downloadGlyph)
         {
             PointF p = ToBase(_mouse);
             bool hov = windowRect.Contains(p);
@@ -1254,9 +1420,31 @@ namespace KeyMouseStats
                 using (SolidBrush b = new SolidBrush(hov ? ArtTheme.Mix(Cblue, Ctext, 0.18) : Cblue)) g.FillPath(b, path);
                 using (Pen pen = new Pen(ArtTheme.Current.OnAccent, 1.4f)) g.DrawPath(pen, path);
             }
-            using (SolidBrush b = new SolidBrush(ArtTheme.Current.OnAccent))
-            using (StringFormat format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
-                g.DrawString(text, _fChip, b, windowRect, format);
+            Color ink = ArtTheme.Current.OnAccent;
+            if (downloadGlyph)
+            {
+                const float glyphW = 11f, glyphGap = 6f;
+                SizeF textSize = g.MeasureString(text, _fChip);
+                float left = windowRect.X + (windowRect.Width - (glyphW + glyphGap + textSize.Width)) / 2f;
+                float mid = windowRect.Y + windowRect.Height / 2f;
+                float cx = left + glyphW / 2f;
+                using (Pen pen = new Pen(ink, 1.4f))
+                {
+                    g.DrawLine(pen, cx, mid - 7, cx, mid + 2);
+                    g.DrawLine(pen, cx - 3, mid - 1, cx, mid + 2);
+                    g.DrawLine(pen, cx + 3, mid - 1, cx, mid + 2);
+                    g.DrawLine(pen, cx - 5, mid + 5, cx + 5, mid + 5);
+                }
+                using (SolidBrush b = new SolidBrush(ink))
+                using (StringFormat format = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center })
+                    g.DrawString(text, _fChip, b, new RectangleF(left + glyphW + glyphGap, windowRect.Y, textSize.Width + 8f, windowRect.Height), format);
+            }
+            else
+            {
+                using (SolidBrush b = new SolidBrush(ink))
+                using (StringFormat format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+                    g.DrawString(text, _fChip, b, windowRect, format);
+            }
             _chips.Add(new RectangleF(windowRect.X - ContentX, windowRect.Y - ContentY, windowRect.Width, windowRect.Height));
             _chipIds.Add(id);
         }
@@ -1264,8 +1452,11 @@ namespace KeyMouseStats
         private void PaintFooter(Graphics g)
         {
             using (Pen p = new Pen(Cline)) g.DrawLine(p, 200, 666, 1032, 666);
-            _exportRect = new RectangleF(912, 680, 120, 28);
-            RectangleF reportRect = new RectangleF(778, 680, 124, 28);
+            // 命中区只在真的画出「导出 CSV」时才有效。以前这里无条件先写死坐标,而日报/字符内容
+            // 分支又提前 return,于是 _exportRect 会残留成 (912,680,120,28) —— OnMouseClick 里
+            // Hit(_exportRect) 排在 _chips 之前,正好把日报页「保存 Markdown」的 912~1032 抢走。
+            // 先清空,再由导出分支自己赋值,顺序上就不可能再抢。
+            _exportRect = RectangleF.Empty;
             // 字符内容页没有对应的统计报告(那份数据不进 stats.txt),所以不挂这个入口 ——
             if (_tab == TabId.Text)
             {
@@ -1276,7 +1467,7 @@ namespace KeyMouseStats
             {
                 // 日报页:导出换成「复制简报」和蓝色主按钮「保存 Markdown」。
                 PaintFooterChip(g, new RectangleF(792, 680, 108, 28), "复制简报", 424);
-                PaintFooterPrimaryChip(g, new RectangleF(908, 680, 124, 28), "保存 Markdown", 423);
+                PaintFooterPrimaryChip(g, new RectangleF(908, 680, 124, 28), "保存 Markdown", 423, false);
                 if(!_loaderVisible)
                 {
                     string dayPath = Path.Combine(DailyReport.Directory,
@@ -1299,19 +1490,12 @@ namespace KeyMouseStats
                 }
                 return;
             }
-            bool hov = Hit(_exportRect, ToBase(_mouse));
-            using (GraphicsPath p = RoundedRect(_exportRect.X, _exportRect.Y, 120, 28, 8))
-            using (SolidBrush b = new SolidBrush(hov ? ArtTheme.Mix(Cblue, Ctext, 0.18) : Cblue)) g.FillPath(b, p);
-            using (Pen p = new Pen(ArtTheme.Current.OnAccent, 1.4f))
-            {
-                g.DrawLine(p, 928, 687, 928, 696);
-                g.DrawLine(p, 925, 693, 928, 696);
-                g.DrawLine(p, 931, 693, 928, 696);
-                g.DrawLine(p, 923, 701, 933, 701);
-            }
-            using (SolidBrush b = new SolidBrush(ArtTheme.Current.OnAccent)) g.DrawString("导出 CSV", _fChip, b, 947, 685);
+            // 导出 CSV 与「保存 Markdown」是同一类主按钮,走同一个绘制函数:
+            // 补上 OnAccent 描边、图标与文字整体居中,并登记进 _chips 以便 Tab / Enter 触发。
+            _exportRect = new RectangleF(912, 680, 120, 28);
+            PaintFooterPrimaryChip(g, _exportRect, "导出 CSV", ExportChipId, true);
             if(!_loaderVisible)
-                PaintFooterStatus(g, StatusText(FooterHint()), new RectangleF(200, 683, 580, 24));
+                PaintFooterStatus(g, StatusText(FooterHint()), new RectangleF(200, 683, 574, 24));
         }
 
         private void PaintFooterStatus(Graphics g, string text, RectangleF area)
@@ -1345,8 +1529,8 @@ namespace KeyMouseStats
                     : _tab == TabId.Text ? TextFooterHint()
                     : _tab == TabId.Insights ? "活跃不等于专注 · 空白可能未采集 · 导出 " + _insightDay.ToString("yyyy-MM-dd") + " 的时间区间"
                     : _tab == TabId.Trend && _trendHourly ? "均值不含当前小时 · 数值仅为已采集部分 · 本页导出小时明细"
-                    : _tab == TabId.Trend ? "今日仍在累计 · 折线末段为虚线 · 灰色竖带=未运行/无记录，不参与日均与平均线" + (_trendCompare ? " · 已叠加较上期均值" : " · 环比按昨日同时段（已完成整小时）")
-                    : _tab == TabId.Hours ? (_hourView == 2 ? "段高度与颜色=输入强度 · 最近记录日：" + HourRangeName() + " · 底部为专注段分布" : _hourView == 1 ? "行为周一至周日，列为 0–23 点 · " + HourRangeName() + (_hourRange == 0 ? "（进行中）" : " · 按有记录日平均（不含今天）") + " · 悬停看平均值" : "颜色越亮越活跃 · 柱高为数值 · 当前：" + HourRangeName() + " · 悬停看该时段明细")
+                    : _tab == TabId.Trend ? "今日仍在累计 · 折线末段为虚线 · 灰色竖带=未运行（不计入日均）" + (_trendCompare ? " · 已叠加较上期均值" : " · 环比按昨日同时段")
+                    : _tab == TabId.Hours ? (_hourView == 2 ? "单日时间轴 · 段高与颜色=" + HourMetricName() + "强度(按当日峰值归一) · ‹ › 翻记录日 · 底部为短段占比(<5 分钟)" : _hourView == 1 ? "行为周一至周日，列为 0–23 点 · " + HourRangeName() + (_hourRange == 0 ? "（进行中）" : " · 按有记录日平均（不含今天）") + " · 悬停看平均值" : "颜色越亮越活跃 · 柱高为数值 · 当前：" + HourRangeName() + " · 悬停看该时段明细")
                     : _tab == TabId.Keys && _keyView == 2 ? (_keyMetric == 1 ? "物理键位热力 · 按住时长口径:逐键累计,悬停看平均与最长 · 右上角切换配列 · 导出同时包含两种口径" : "物理键位热力 · 长按计一次 · 右上角切换配列 · 导出包含配列外已归位按键")
                     : _tab == TabId.Keys && _keyView == 1 ? "修饰键 + 普通键首次按下计 1 次 · 长按去重 · 左右修饰键合并 · 本页导出组合动作"
                     : _tab == TabId.Keys && _keyMetric == 1 ? "按住时长从 1.7.3 起采集 · 长按只计一次 · 可切换时间范围 · 本页导出按住时长明细"
@@ -1387,6 +1571,21 @@ namespace KeyMouseStats
             ApplyChip(_chipIds[_chipFocus]);
             Invalidate();
             return true;
+        }
+
+        /// <summary>
+        /// Tab 选中的 chip 画一圈焦点环。_chips 记的是内容坐标(页脚按钮也按内容坐标登记),
+        /// 这里已经恢复成窗口坐标,所以要补上 ContentX/ContentY 的偏移。
+        /// 换页/换视图后控件集合变了,下标越界时清掉焦点,避免环压在无关控件上。
+        /// </summary>
+        private void PaintFocusRing(Graphics g)
+        {
+            if (_chipFocus >= _chips.Count) { _chipFocus = -1; return; }
+            if (_chipFocus < 0) return;
+            RectangleF focus = _chips[_chipFocus];
+            using (GraphicsPath ring = RoundedRect(focus.X + ContentX - 2, focus.Y + ContentY - 2,
+                focus.Width + 4, focus.Height + 4, StepChipRadius + 1))
+            using (Pen pen = new Pen(Ccyan, 1.8f)) g.DrawPath(pen, ring);
         }
 
         /// <summary>主题侧栏图标的编号。数组比标签页少一项时夹到末项,不让以后加页变成运行时越界。</summary>
@@ -1456,6 +1655,29 @@ namespace KeyMouseStats
 
         // ---------------------------------------------------------------- 标签页:总览
 
+        /// <summary>
+        /// 带分帧缓存的按键排行。总览页在实时击键时约 25fps 重绘,而「分布环」与「Top5 迷你卡」
+        /// 每帧各要一次全量 KeyCounts 聚合 + 排序 —— 这是 Gen0 抖动的主要来源。
+        /// 失效条件全部 O(1):窗口起点、有记录的天数、今天的击键数。
+        /// 后两者合起来覆盖「跨天翻页 / 导入补数据 / 今天继续敲」三种会改变结果的情形。
+        /// slot 用来区分两个不同窗口的缓存(否则分布环与 Top5 会互相顶掉,永远命中不到)。
+        /// </summary>
+        internal List<KeyValuePair<string, long>> CachedKeyRanking(int slot, DateTime from)
+        {
+            RankCache cache = _rankCaches[slot];
+            int days = Store.History.Count;
+            long live = Store.Today == null ? 0L : Store.Today.Keys;
+            if (cache.List != null && cache.From == from && cache.Days == days && cache.Live == live)
+                return cache.List;
+            List<DayRecord> daysList = new List<DayRecord>();
+            foreach (DayRecord day in Store.History.Values) if (day.Date >= from) daysList.Add(day);
+            cache.List = Analysis.KeyRanking(daysList);
+            cache.From = from;
+            cache.Days = days;
+            cache.Live = live;
+            return cache.List;
+        }
+
         private void PaintOverview(Graphics g)
         {
             DayRecord today = Store.Today;
@@ -1497,19 +1719,18 @@ namespace KeyMouseStats
             float cardY = Cy + 2 * 88 + 16 + 16;   // 306
             float cardH = 234;
 
-            // 左卡:鼠标按键分布(累计)
-            PaintCard(g, Cx, cardY, 404, cardH, _overviewKeyboard?"键盘按键分布":"鼠标按键分布 · 累计");
-            _distributionMouseRect=new RectangleF(Cx+278,cardY+8,52,24);
-            _distributionKeyboardRect=new RectangleF(Cx+336,cardY+8,52,24);
-            PaintChip(g,_distributionMouseRect,"鼠标",!_overviewKeyboard,null);
-            PaintChip(g,_distributionKeyboardRect,"键盘",_overviewKeyboard,null);
-            if(_overviewKeyboard)PaintKeyboardDistribution(g,Cx,cardY);
-            else
-            {
-                PaintDonut(g, Cx + 112, cardY + 126, 78,
-                    Store.Total.Left, Store.Total.Right, Store.Total.Middle, Store.Total.XButtons);
-                PaintMouseLegend(g, Cx + 216, cardY + 42, cardH - 60);
-            }
+            // 左卡:按键分布。绘制顺序 = Tab 顺序:
+            //   Top 10 ▾ → 鼠标 → 键盘 → 今日 / 本周 / 本月 / 本年
+            // 旧顺序把 Top N 放在键盘绘制函数内部、晚于鼠标/键盘两颗,于是按 Tab 会
+            // 「右(鼠标) → 更右(键盘) → 回跳左(Top N) → 甩到最左列(今日)」。
+            PaintCard(g, Cx, cardY, 404, cardH, "按键分布");
+            _distributionLegendSlices.Clear();
+            _distributionLegendRects.Clear();
+            if (_overviewKeyboard) PaintDistributionTopChip(g, Cx, cardY);
+            PaintDistributionModeChips(g, Cx, cardY);
+            PaintDistributionPeriodChips(g, Cx, cardY);
+            if (_overviewKeyboard) PaintKeyboardDistribution(g, Cx, cardY);
+            else PaintMouseDistribution(g, Cx, cardY);
 
             // 右卡:按键 Top5(累计)
             PaintCard(g, Cx + 404 + 17, cardY, Cw - 404 - 17, cardH, "最常按键 Top 5 · 累计");
@@ -1517,6 +1738,32 @@ namespace KeyMouseStats
 
             // 底部洞察
             PaintInsights(g, Cx, cardY + cardH + 14, Cw, 24);
+        }
+
+        /// <summary>分布卡右上角的 Top N 下拉。只在键盘模式出现(鼠标模式没有 Top-N 概念)。</summary>
+        private void PaintDistributionTopChip(Graphics g, float x, float y)
+        {
+            _distributionCountRect = new RectangleF(x + 169, y + 7, 96, ToggleChipHeight);
+            PaintToggleChip(g, _distributionCountRect, "Top " + _distributionTop + " ▾", false, DistributionTopChipId);
+        }
+
+        private void PaintDistributionModeChips(Graphics g, float x, float y)
+        {
+            _distributionMouseRect = new RectangleF(x + 272, y + 7, 56, ToggleChipHeight);
+            _distributionKeyboardRect = new RectangleF(x + 336, y + 7, 56, ToggleChipHeight);
+            PaintToggleChip(g, _distributionMouseRect, "鼠标", !_overviewKeyboard, DistributionMouseChipId);
+            PaintToggleChip(g, _distributionKeyboardRect, "键盘", _overviewKeyboard, DistributionKeyboardChipId);
+        }
+
+        /// <summary>今日 / 本周 / 本月 / 本年。鼠标与键盘两种模式共用同一个时间维度。</summary>
+        private void PaintDistributionPeriodChips(Graphics g, float x, float y)
+        {
+            string[] periods = { "今日", "本周", "本月", "本年" };
+            for (int i = 0; i < 4; i++)
+            {
+                _distributionPeriods[i] = new RectangleF(x + 12, y + 61 + i * 37, 52, ToggleChipHeight);
+                PaintToggleChip(g, _distributionPeriods[i], periods[i], _distributionPeriod == i, DistributionPeriodChipId + i);
+            }
         }
 
         private static string OverviewBaseline(bool keys)
@@ -1561,7 +1808,11 @@ namespace KeyMouseStats
             using (GraphicsPath p = RoundedRect(x, y, w, h, radius))
             {
                 bool portraitGlass=ThemeArt.Active && (ThemeArt.Dark || _tab!=TabId.Overview) && w>400 && h>120;
-                using (LinearGradientBrush b = new LinearGradientBrush(new RectangleF(x, y, w, h), portraitGlass?Color.FromArgb(176,Ccard2):Ccard2, portraitGlass?Color.FromArgb(195,Ccard):Ccard, 90f)) g.FillPath(b, p);
+                // 高反差原画(雪山、夜路高光、车灯)会顺着半透明底板把线条透到数据上。
+                // 暗色美术主题把底板抬到 85%~93%,浅色美术主题(Nikki)保持原来的通透感。
+                int glassTop = ThemeArt.Dark ? 216 : 176;
+                int glassBottom = ThemeArt.Dark ? 236 : 195;
+                using (LinearGradientBrush b = new LinearGradientBrush(new RectangleF(x, y, w, h), portraitGlass?Color.FromArgb(glassTop,Ccard2):Ccard2, portraitGlass?Color.FromArgb(glassBottom,Ccard):Ccard, 90f)) g.FillPath(b, p);
                 using (Pen pen = new Pen(Cline)) g.DrawPath(pen, p);
                 if(NikkiArt.Active)
                 {
@@ -1587,54 +1838,165 @@ namespace KeyMouseStats
                 g.DrawString(title, _fH2, b, x + 18, y + 12);
         }
 
-        private void PaintDonut(Graphics g, float cx, float cy, float r, long left, long right, long mid, long xb, string unit = "次点击")
+        /// <summary>
+        /// 分布环的统一几何。两种模式必须共用同一个外接矩形与笔宽 ——
+        /// 鼠标环原来自己用 Cx+112/cardY+126/r78,在时段胶囊也出现在鼠标模式之后,
+        /// 它的左外沿(50)正好穿过胶囊列(36–88),环被画在胶囊上面。
+        /// </summary>
+        internal static RectangleF DistributionRingRect(float x, float y)
         {
+            // y + 49 → 外沿 = 环心 + 97 = 346,距 Top 10 ▾ 底边 343 留 3px 净空。
+            return new RectangleF(x + 82, y + 49, 176, 176);
+        }
+
+        /// <summary>分布环的笔宽。两种模式一致,切模式时环不换粗细。</summary>
+        internal const float DistributionRingStroke = 18f;
+
+        /// <summary>鼠标分布卡:环 + 图例。</summary>
+        private void PaintMouseDistribution(Graphics g, float x, float y)
+        {
+            long left, right, middle, extra;
+            MousePeriodValues(out left, out right, out middle, out extra);
+            RectangleF ring = DistributionRingRect(x, y);
+            PaintDonut(g, ring.X + ring.Width / 2f, ring.Y + ring.Height / 2f, ring.Width / 2f,
+                left, right, middle, extra);
+            // 图例与键盘模式同一列起点(x+278),两种模式的版式才对得上。
+            PaintMouseLegend(g, x + 278, y + 42, 234 - 60);
+        }
+
+        /// <summary>
+        /// 按 _distributionPeriod 从 Store.History 聚合鼠标四键。
+        /// 旧版这里直接读 Store.Total(建库以来全量、且含已归档月份),而键盘侧是
+        /// DistributionStart 起 ≤365 天的窗口 —— 同一张卡上两个环的时间口径完全不同,
+        /// 切一次模式数字毫无可比性。现在两边共用同一个时间维度。
+        /// </summary>
+        internal void MousePeriodValues(out long left, out long right, out long middle, out long extra)
+        {
+            DateTime today = DateTime.Today;
+            DateTime start = DistributionStart(today, _distributionPeriod);
+            left = 0; right = 0; middle = 0; extra = 0;
+            foreach (DayRecord day in Store.History.Values)
+            {
+                if (day == null || day.Date < start || day.Date > today) continue;
+                left += day.Left; right += day.Right; middle += day.Middle; extra += day.XButtons;
+            }
+        }
+
+        private static readonly string[] MouseSliceNames = { "左键", "右键", "中键", "侧键" };
+
+        /// <summary>鼠标四键的身份色。用方法而不是静态数组:静态字段初始化器在 Dashboard
+        /// 的静态构造期跑,那时去读依赖 ArtTheme 的 Cblue/Cgreen 属性容易踩初始化顺序。</summary>
+        private static Color MouseSliceColor(int index)
+        {
+            switch (index)
+            {
+                case 0: return Cblue;
+                case 1: return Cgreen;
+                case 2: return Corange;
+                default: return Cpurple;
+            }
+        }
+
+        private void PaintDonut(Graphics g, float cx, float cy, float r, long left, long right, long mid, long xb)
+        {
+            long[] vals = { left, right, mid, xb };
             long total = left + right + mid + xb;
             RectangleF rect = new RectangleF(cx - r, cy - r, r * 2, r * 2);
+            _distributionRing = rect;
+            _distributionRingStroke = DistributionRingStroke;
+            _distributionRingValues = vals;
+            _distributionRingNames = MouseSliceNames;
 
             if (total == 0)
             {
-                using (Pen pen = new Pen(Color.FromArgb(40, Ctext), 16f))
+                using (Pen pen = new Pen(Color.FromArgb(40, Ctext), DistributionRingStroke))
                     g.DrawArc(pen, rect, 0, 360);
                 using (SolidBrush b = new SolidBrush(Csub))
                 {
-                    SizeF sz = g.MeasureString("暂无数据", _fBody);
-                    g.DrawString("暂无数据", _fBody, b, cx - sz.Width / 2, cy - sz.Height / 2);
+                    SizeF sz = g.MeasureString("该时段暂无记录", _fBody);
+                    g.DrawString("该时段暂无记录", _fBody, b, cx - sz.Width / 2, cy - sz.Height / 2);
                 }
                 return;
             }
 
-            Pen[] pens = {
-                new Pen(Cblue, 16f), new Pen(Cgreen, 16f),
-                new Pen(Corange, 16f), new Pen(Cpurple, 16f) };
-            long[] vals = { left, right, mid, xb };
-            float start = -90f;
-            // 底环
-            using (Pen pen = new Pen(Color.FromArgb(26, Ctext), 16f))
-                g.DrawArc(pen, rect, 0, 360);
+            float[] draw = SliceSweeps(vals, total, 0.4f);
+            int hovered = _distributionHoverSlice;
+            using (Pen track = new Pen(Color.FromArgb(26, Ctext), DistributionRingStroke))
+                g.DrawArc(track, rect, 0, 360);
             if(GujianArt.Active)GujianArt.RingAura(g,rect);
             else if(OriArt.Active)OriArt.RingAura(g,rect);
+            float start = -90f;
             for (int i = 0; i < 4; i++)
             {
-                if (vals[i] <= 0) continue;
-                float sweep = 360f * vals[i] / total;
-                if (sweep < 0.4f) sweep = 0.4f;
-                g.DrawArc(pens[i], rect, start + Math.Min(1.2f, sweep / 4), Math.Max(0.1f, sweep - Math.Min(2.4f, sweep / 2)));
-                start += 360f * vals[i] / total;
+                if (draw[i] <= 0f) continue;
+                float sweep = draw[i];
+                // 间隙从扇区自身角度里内缩,而 start 累加的是 draw[i] ——
+                // 两者严格守恒,不会再出现「抬到 0.4° 的碎扇区压到下一块身上」。
+                float inset = Math.Min(1.2f, sweep / 4);
+                Color color = i == hovered ? ArtTheme.Mix(MouseSliceColor(i), Ctext, .25f) : MouseSliceColor(i);
+                using (Pen pen = new Pen(color, i == hovered ? DistributionRingStroke + 4 : DistributionRingStroke))
+                    g.DrawArc(pen, rect, start + inset, Math.Max(0.1f, sweep - inset * 2));
+                start += sweep;
             }
-            foreach (Pen p in pens) p.Dispose();
 
-            string v = Analysis.FmtCount(total);
-            using (SolidBrush b = new SolidBrush(Ctext))
+            if (hovered >= 0 && hovered < 4)
             {
-                SizeF sz = g.MeasureString(v, _fNum2);
-                g.DrawString(v, _fNum2, b, cx - sz.Width / 2, cy - 17);
+                int slice = hovered;
+                using (StringFormat center = new StringFormat { Alignment = StringAlignment.Center })
+                using (SolidBrush text = new SolidBrush(Ctext))
+                using (SolidBrush sub = new SolidBrush(Csub))
+                {
+                    g.DrawString(MouseSliceNames[slice], _fBody, text, new RectangleF(cx - 53, cy - 46, 106, 24), center);
+                    g.DrawString(Analysis.FmtCount(vals[slice]) + " 次", _fNum2, text, new RectangleF(cx - 60, cy - 20, 120, 32), center);
+                    g.DrawString("占比 " + (100.0 * vals[slice] / total).ToString("0.0", CultureInfo.InvariantCulture) + "%",
+                        _fSmall, sub, new RectangleF(cx - 53, cy + 13, 106, 22), center);
+                }
             }
-            using (SolidBrush b = new SolidBrush(Csub))
+            else
             {
-                    SizeF sz = g.MeasureString(unit, _fSmall);
-                    g.DrawString(unit, _fSmall, b, cx - sz.Width / 2, cy + 7);
+                using (SolidBrush b = new SolidBrush(Ctext))
+                {
+                    string v = Analysis.FmtCount(total);
+                    SizeF sz = g.MeasureString(v, _fNum2);
+                    g.DrawString(v, _fNum2, b, cx - sz.Width / 2, cy - 17);
+                }
+                using (SolidBrush b = new SolidBrush(Csub))
+                {
+                    SizeF sz = g.MeasureString("次点击", _fSmall);
+                    g.DrawString("次点击", _fSmall, b, cx - sz.Width / 2, cy + 7);
+                }
             }
+        }
+
+        /// <summary>
+        /// 把各扇区的角度算好:先按真实比例,再把小于 minSweep 的抬到 minSweep,
+        /// 最后把「多出来的角度」从宽扇区里按比例扣回,保证 Σdraw == 360。
+        /// 守恒是必须的 —— 旧实现把 sweep 抬到 0.4° 却让 start 按真值累加,
+        /// 碎扇区画出来比它占的角度宽,于是盖在下一块身上。
+        /// </summary>
+        internal static float[] SliceSweeps(long[] values, long total, float minSweep)
+        {
+            float[] draw = new float[values.Length];
+            if (total <= 0) return draw;
+            float sum = 0f;
+            for (int i = 0; i < values.Length; i++)
+            {
+                draw[i] = values[i] > 0 ? 360f * values[i] / total : 0f;
+                sum += draw[i];
+            }
+            if (minSweep <= 0f) return draw;
+            for (int i = 0; i < draw.Length; i++) if (draw[i] > 0f && draw[i] < minSweep) draw[i] = minSweep;
+            float deficit = 0f;
+            for (int i = 0; i < draw.Length; i++) deficit += draw[i];
+            deficit -= sum;
+            if (deficit <= 0.0001f) return draw;
+            float pool = 0f;
+            for (int i = 0; i < draw.Length; i++) if (draw[i] > minSweep) pool += draw[i];
+            if (pool <= 0.0001f) return draw;
+            float take = Math.Min(deficit, pool * 0.98f);
+            for (int i = 0; i < draw.Length; i++)
+                if (draw[i] > minSweep) draw[i] -= take * (draw[i] / pool);
+            return draw;
         }
 
         internal static DateTime DistributionStart(DateTime today,int period)
@@ -1652,88 +2014,176 @@ namespace KeyMouseStats
             if(distance<radius-width/2 || distance>radius+width/2)return -1;
             long total=0;foreach(long value in values)total+=value;
             if(total<=0)return -1;
+            // 0° 对应 12 点方向,顺时针增长,与 DrawArc 的 start=-90 + 正 sweep 完全一致。
+            // 浮点累加的末端可能停在 359.9999,此时回退到"最后一个有值的扇区",
+            // 而不是返回一个零值下标或 -1,免得 12 点方向出现一条点不中的死缝。
             double angle=(Math.Atan2(dy,dx)*180/Math.PI+450)%360,end=0;
             for(int i=0;i<values.Length;i++){end+=360.0*values[i]/total;if(values[i]>0 && angle<end)return i;}
+            for (int i = values.Length - 1; i >= 0; i--) if (values[i] > 0) return i;
             return -1;
+        }
+
+        /// <summary>上一帧画出来的环是否命中;命中时给出扇区下标。</summary>
+        internal bool HitDistributionRing(PointF contentPoint, out int slice)
+        {
+            slice = -1;
+            if (_distributionRingValues == null || _distributionRingValues.Length == 0) return false;
+            if (_distributionRingStroke <= 0f || _distributionRing.Width <= 0f) return false;
+            slice = DistributionHit(contentPoint, _distributionRing, _distributionRingStroke, _distributionRingValues);
+            return slice >= 0;
+        }
+
+        /// <summary>
+        /// 双向悬停:圆环扇区命中和右侧图例行命中都归到同一个 _distributionHoverSlice,
+        /// 这样环与图例永远同步高亮。几何取自上一帧的绘制结果,移动鼠标不会重算排行。
+        /// </summary>
+        private void UpdateDistributionHover(PointF contentPoint)
+        {
+            int hover = -1;
+            if (HitDistributionRing(contentPoint, out hover)) { }
+            else
+            {
+                hover = -1;
+                for (int i = 0; i < _distributionLegendRects.Count && i < _distributionLegendSlices.Count; i++)
+                    if (_distributionLegendRects[i].Contains(contentPoint)) { hover = _distributionLegendSlices[i]; break; }
+            }
+            if (hover != _distributionHoverSlice)
+            {
+                _distributionHoverSlice = hover;
+                Invalidate();
+            }
         }
         private void PaintKeyboardDistribution(Graphics g,float x,float y)
         {
-            _distributionCountRect=new RectangleF(x+169,y+8,94,24);
-            PaintChip(g,_distributionCountRect,"Top "+_distributionTop+" ▾",false,null);
-            string[] periods={"今日","本周","本月","本年"};
-            for(int i=0;i<4;i++)
+            DateTime today = DateTime.Today;
+            DateTime start = DistributionStart(today, _distributionPeriod);
+            // 排行走分帧缓存:实时击键时每帧都做一次全量聚合 + 排序是掉帧的主因。
+            List<KeyValuePair<string, long>> rank = CachedKeyRanking(0, start);
+            int slices = _distributionTop + 1;
+            long[] values = new long[slices];
+            string[] names = new string[slices];
+            names[_distributionTop] = "其他";
+            long total = 0;
+            for (int i = 0; i < rank.Count; i++)
             {
-                _distributionPeriods[i]=new RectangleF(x+12,y+61+i*37,50,28);
-                PaintChip(g,_distributionPeriods[i],periods[i],_distributionPeriod==i,null);
+                total += rank[i].Value;
+                if (i < _distributionTop) { values[i] = rank[i].Value; names[i] = rank[i].Key; }
+                else values[_distributionTop] += rank[i].Value;
             }
-            DateTime today=DateTime.Today,start=DistributionStart(today,_distributionPeriod);
-            List<DayRecord> days=new List<DayRecord>();
-            foreach(DayRecord day in Store.History.Values)if(day.Date>=start && day.Date<=today)days.Add(day);
-            List<KeyValuePair<string,long>> rank=Analysis.KeyRanking(days);
-            long[] values=new long[_distributionTop+1];string[] names=new string[_distributionTop+1];names[_distributionTop]="其他";long total=0;
-            for(int i=0;i<rank.Count;i++)
+            // 小于 0.35° 的碎块并入「其他」:18px 笔宽下这种角度只会画出一个孤立圆点,
+            // 既看不清也点不中。合并后各扇区角度仍然是真实占比(分母 total 不变)。
+            if (total > 0)
             {
-                total+=rank[i].Value;
-                if(i<_distributionTop){values[i]=rank[i].Value;names[i]=rank[i].Key;}
-                else values[_distributionTop]+=rank[i].Value;
-            }
-            // 1.8.0:扇区颜色绑按键名,不绑扇区顺序。切区间后同一个键的颜色不变。
-            List<string> sliceNames = new List<string>();
-            for (int i = 0; i < _distributionTop; i++) sliceNames.Add(names[i]);
-            Color[] colors = new Color[_distributionTop + 1];
-            Color[] rankColors = KeyPalette.ForRanking(sliceNames);
-            for (int i = 0; i < _distributionTop; i++) colors[i] = rankColors[i];
-            colors[_distributionTop] = Csub;   // 「其他」始终是中性灰,不参与身份色
-            RectangleF ring=new RectangleF(x+82,y+43,176,176);
-            PointF pointer=ToBase(_mouse);pointer.X-=ContentX;pointer.Y-=ContentY;
-            int hovered=DistributionHit(pointer,ring,18,values);
-            using(Pen pen=new Pen(Color.FromArgb(26,Ctext),18))g.DrawEllipse(pen,ring);
-            if(total>0)
-            {
-                float angle=-90;
-                for(int i=0;i<values.Length;i++)if(values[i]>0)
+                long moved = 0;
+                for (int i = 0; i < _distributionTop; i++)
                 {
-                    float sweep=(float)(360.0*values[i]/total);
-                    using(Pen pen=new Pen(i==hovered?ArtTheme.Mix(colors[i],Ctext,.25):colors[i],i==hovered?22:18))g.DrawArc(pen,ring,angle,sweep);
-                    angle+=sweep;
+                    if (values[i] <= 0) continue;
+                    if (360.0 * values[i] / total < 0.35) { moved += values[i]; values[i] = 0; names[i] = null; }
+                }
+                if (moved > 0) values[_distributionTop] += moved;
+            }
+
+            // 扇区颜色绑按键名,不绑扇区顺序。零值/被合并的档位不占色板槽位。
+            List<string> sliceNames = new List<string>();
+            for (int i = 0; i < _distributionTop; i++)
+                if (values[i] > 0 && !string.IsNullOrEmpty(names[i])) sliceNames.Add(names[i]);
+            Color[] rankColors = KeyPalette.ForRanking(sliceNames);
+            Color[] colors = new Color[slices];
+            int colorIndex = 0;
+            for (int i = 0; i < _distributionTop; i++)
+                colors[i] = (values[i] > 0 && !string.IsNullOrEmpty(names[i])) ? rankColors[colorIndex++] : Csub;
+            colors[_distributionTop] = Csub;   // 「其他」始终是中性灰,不参与身份色
+
+            // 环外接矩形与笔宽走统一常量:两种模式共用一个环,切模式时不位移也不换粗细。
+            RectangleF ring = DistributionRingRect(x, y);
+            float cx = ring.X + ring.Width / 2f, cy = ring.Y + ring.Height / 2f;
+            _distributionRing = ring;
+            _distributionRingStroke = DistributionRingStroke;
+            _distributionRingValues = values;
+            _distributionRingNames = names;
+
+            int hovered = _distributionHoverSlice;
+            using (Pen pen = new Pen(Color.FromArgb(26, Ctext), DistributionRingStroke)) g.DrawEllipse(pen, ring);
+            if (total > 0)
+            {
+                float[] draw = SliceSweeps(values, total, 0f);
+                float angle = -90;
+                for (int i = 0; i < values.Length; i++)
+                {
+                    if (draw[i] <= 0f) continue;
+                    Color color = i == hovered ? ArtTheme.Mix(colors[i], Ctext, .25) : colors[i];
+                    using (Pen pen = new Pen(color, i == hovered ? DistributionRingStroke + 4 : DistributionRingStroke))
+                        g.DrawArc(pen, ring, angle, draw[i]);
+                    angle += draw[i];
                 }
             }
-            using(StringFormat center=new StringFormat{Alignment=StringAlignment.Center})
-            using(SolidBrush text=new SolidBrush(Ctext))using(SolidBrush sub=new SolidBrush(Csub))
+
+            // 环心文字全部由 (cx, cy) 派生 —— 旧版是 5 个硬编码矩形,环一挪就全歪。
+            using (StringFormat center = new StringFormat { Alignment = StringAlignment.Center })
+            using (SolidBrush text = new SolidBrush(Ctext))
+            using (SolidBrush sub = new SolidBrush(Csub))
             {
-                if(hovered>=0)
+                if (hovered >= 0 && hovered < values.Length)
                 {
-                    g.DrawString(names[hovered],_fBody,text,new RectangleF(x+117,y+91,106,24),center);
-                    g.DrawString(Analysis.FmtCount(values[hovered])+" 次",_fNum2,text,new RectangleF(x+110,y+117,120,32),center);
-                    g.DrawString("占比 "+(100.0*values[hovered]/total).ToString("0.0",CultureInfo.InvariantCulture)+"%",_fSmall,sub,new RectangleF(x+117,y+150,106,22),center);
+                    g.DrawString(string.IsNullOrEmpty(names[hovered]) ? "其他" : names[hovered],
+                        _fBody, text, new RectangleF(cx - 53, cy - 46, 106, 24), center);
+                    g.DrawString(Analysis.FmtCount(values[hovered]) + " 次", _fNum2, text,
+                        new RectangleF(cx - 60, cy - 20, 120, 32), center);
+                    g.DrawString("占比 " + (100.0 * values[hovered] / total).ToString("0.0", CultureInfo.InvariantCulture) + "%",
+                        _fSmall, sub, new RectangleF(cx - 53, cy + 13, 106, 22), center);
                 }
                 else
                 {
-                    g.DrawString(total>0?Analysis.FmtCount(total):"暂无数据",_fNum2,text,new RectangleF(x+110,y+110,120,32),center);
-                    g.DrawString("次已记录击键",_fAxis,sub,new RectangleF(x+114,y+144,112,19),center);
+                    g.DrawString(total > 0 ? Analysis.FmtCount(total) : "暂无数据", _fNum2, text,
+                        new RectangleF(cx - 60, cy - 27, 120, 32), center);
+                    g.DrawString(total > 0 ? "次已记录击键" : "该时段暂无记录", _fSmall, sub,
+                        new RectangleF(cx - 56, cy + 7, 112, 19), center);
                 }
             }
-            int rows=(_distributionTop+1)/2;
-            for(int i=0;i<Math.Min(_distributionTop,rank.Count);i++)
+
+            // 图例:「其他」在 values[Top] > 0 时也要出现,否则那块最大的灰扇区没有任何文字解释。
+            int visible = 0;
+            for (int i = 0; i < values.Length; i++) if (values[i] > 0) visible++;
+            int rows = Math.Max(1, (visible + 1) / 2);
+            int slot = 0;
+            for (int i = 0; i < values.Length; i++)
             {
-                float row=y+66+(i%rows)*29,column=x+278+(i/rows)*60;
-                using(SolidBrush brush=new SolidBrush(colors[i]))g.FillEllipse(brush,column,row+5,9,9);
-                AppText(g,names[i],_fTab,i==hovered?colors[i]:Ctext,new RectangleF(column+13,row,46,24),false);
+                if (values[i] <= 0) continue;
+                float row = y + 66 + (slot % rows) * 28;
+                float column = x + 278 + (slot / rows) * 60;
+                RectangleF hit = new RectangleF(column - 2, row - 2, 60, 26);
+                _chips.Add(hit); _chipIds.Add(DistributionSliceChipId + i);
+                _distributionLegendRects.Add(hit);
+                _distributionLegendSlices.Add(i);
+                using (SolidBrush brush = new SolidBrush(colors[i])) g.FillEllipse(brush, column, row + 5, 9, 9);
+                // 字号统一 _fChip(12px):旧版图例用 _fTab(14px,一级导航字号),层级是错的。
+                Color ink = i == hovered ? (i >= _distributionTop ? Cblue : colors[i]) : Ctext;
+                AppText(g, string.IsNullOrEmpty(names[i]) ? "其他" : names[i], _fChip, ink,
+                    new RectangleF(column + 13, row, 46, 24), false);
+                slot++;
             }
         }
+        /// <summary>鼠标图例。数值必须与 PaintDonut 同源(同一时间段),否则环和图例会各说各话。</summary>
         private void PaintMouseLegend(Graphics g, float x, float y, float h)
         {
-            long[] vals = { Store.Total.Left, Store.Total.Right, Store.Total.Middle, Store.Total.XButtons };
+            long left, right, middle, extra;
+            MousePeriodValues(out left, out right, out middle, out extra);
+            long[] vals = { left, right, middle, extra };
             string[] names = { "左键", "右键", "中键", "侧键" };
-            Color[] cols = { Cblue, Cgreen, Corange, Cpurple };
-            long total = vals[0] + vals[1] + vals[2] + vals[3];
+            long total = left + right + middle + extra;
+            int hovered = _distributionHoverSlice;
 
             float rowY = y;
             for (int i = 0; i < 4; i++)
             {
-                using (SolidBrush b = new SolidBrush(cols[i]))
+                // 鼠标图例只参与悬停高亮,不登记进 _chips —— 点它没有下钻动作,
+                // 多出来的 Tab 停靠点只会让键盘遍历变长。
+                RectangleF row = new RectangleF(x - 2, rowY - 2, 120, 40);
+                _distributionLegendRects.Add(row);
+                _distributionLegendSlices.Add(i);
+                using (SolidBrush b = new SolidBrush(MouseSliceColor(i)))
                     g.FillEllipse(b, x, rowY + 5, 9, 9);
-                using (SolidBrush b = new SolidBrush(Ctext))
+                using (SolidBrush b = new SolidBrush(i == hovered ? MouseSliceColor(i) : Ctext))
                     g.DrawString(names[i], _fBody, b, x + 17, rowY);
                 string pct = total > 0 ? (100f * vals[i] / total).ToString("0.0", CultureInfo.InvariantCulture) + "%" : "--";
                 string txt = Analysis.FmtCount(vals[i]) + "  ·  " + pct;
@@ -1745,7 +2195,8 @@ namespace KeyMouseStats
 
         private void PaintTopKeysMini(Graphics g, float x, float y, float w, float h)
         {
-            List<KeyValuePair<string, long>> rank = Analysis.KeyRanking(Store.History.Values);
+            // 与分布环共用同一套缓存机制(独立槽位):每帧重排全量历史在 25fps 下是最贵的一步。
+            List<KeyValuePair<string, long>> rank = CachedKeyRanking(1, DateTime.MinValue);
             if (rank.Count == 0)
             {
                 using (SolidBrush b = new SolidBrush(Csub))
@@ -1860,18 +2311,19 @@ namespace KeyMouseStats
 
             List<AnalysisPt> pts = TrendPoints();
             PaintLineChart(g, new RectangleF(Cx, 150, Cw, 360), pts);
-            AppChip(g, 302, Cx + 88, 154, 58, "分布", false);
+            AppChip(g, 302, Cx + 100, 154, 58, "分布", false);
             // 汇总卡:今天仍在累计,所以「日均」只算完整且有记录的天,「较昨日」改成「较昨日同期」。
             bool live = pts.Count > 0 && pts[pts.Count - 1].Day == DateTime.Today;
-            double sum = 0, max = 0, completeSum = 0;
-            int completeCount = 0;
+            double sum = 0, max = 0;
             foreach (AnalysisPt p in pts)
             {
                 sum += p.V;
                 if (p.V > max) max = p.V;
-                if (p.HasData && (!live || p.Day != DateTime.Today)) { completeSum += p.V; completeCount++; }
             }
-            double avg = completeCount > 0 ? completeSum / completeCount : (pts.Count > 0 ? sum / pts.Count : 0);
+            // 日均与图上平均线共用同一函数、同一兜底:没有完整日时给 NaN(卡片显示 --、不画平均线),
+            // 不再退化成 sum/pts.Count 这种把区间总天数当分母的假均值。
+            int completeCount;
+            double avg = TrendAverage(pts, live, out completeCount);
             if (_trendCompare) PaintTrendCompare(g, new RectangleF(Cx, 150, Cw, 360), avg);
             TrendCutoff.Comparison compare = live
                 ? TrendCutoff.Compare(Store.Today, Analysis.GetDay(DateTime.Today.AddDays(-1)), _trendMetric, DateTime.Now)
@@ -1890,7 +2342,7 @@ namespace KeyMouseStats
             string[] sTitles = { "期间合计", "日均·有记录日", "最高单日", "较昨日同期" };
             string[] sVals = {
                 _trendMetric == 3 ? Analysis.FmtMeters(sum) : Analysis.FmtCount((long)sum),
-                _trendMetric == 3 ? Analysis.FmtMeters(avg) : Analysis.FmtCount((long)avg),
+                double.IsNaN(avg) ? "--" : _trendMetric == 3 ? Analysis.FmtMeters(avg) : Analysis.FmtCount((long)avg),
                 _trendMetric == 3 ? Analysis.FmtMeters(max) : Analysis.FmtCount((long)max),
                 delta };
 
@@ -1903,12 +2355,27 @@ namespace KeyMouseStats
                     g.DrawString(sTitles[i], _fSmall, b, x + 16, 532);
                 Color ink = Ctext;
                 if (i == 3 && compare != null)
-                    ink = compare.Available ? (compare.Percent.HasValue && compare.Percent.Value < 0 ? Cred : Cgreen) : Csub;
+                {
+                    // 颜色跟着"显示出来的值"走:四舍五入成 0% 的极小波动不该染成红色。
+                    double percent = compare.Percent.HasValue ? compare.Percent.Value : 0;
+                    double shown = Math.Round(percent, MidpointRounding.AwayFromZero);
+                    ink = !compare.Available || compare.NoInputToday || shown == 0 ? Csub : percent < 0 ? Cred : Cgreen;
+                }
                 using (SolidBrush b = new SolidBrush(ink))
-                    g.DrawString(sVals[i], _fNum2, b, x + 16, 548);
+                    g.DrawString(sVals[i], i == 3 ? DeltaValueFont(sVals[i]) : _fNum2, b, x + 16, 548);
                 if (i == 3 && compare != null)
                     AppText(g, TrendCutoff.NoteText(compare), _fAxis, Csub, new RectangleF(x + 16, 571, tileW - 28, 12), false);
             }
+        }
+
+        /// <summary>
+        /// 第 4 张卡的数值字体。19px 的数字墨迹低,不会压到下面那行说明;但「累计中 / 新增 /
+        /// 今日尚无输入」这类中文会填满 19px 的字框,和说明叠在一起,所以状态词改用正文字号。
+        /// </summary>
+        private Font DeltaValueFont(string text)
+        {
+            if (text != null) for (int i = 0; i < text.Length; i++) if (text[i] > 0x2E80) return _fBody;
+            return _fNum2;
         }
 
         private void PaintTrendCompare(Graphics g, RectangleF rect, double currentAverage)
@@ -1922,13 +2389,16 @@ namespace KeyMouseStats
                 sum += TrendMetricValue(record); count++;
             }
             string text = count == 0 ? "较上期：无样本" : "较上期 " + PersonalStats.Change(currentAverage, sum / count);
-            Color color = count == 0 ? Csub : currentAverage >= sum / count ? Cgreen : Cred;
-            RectangleF r = new RectangleF(rect.Right - 196, rect.Y + 11, 184, 24);
+            bool neutral = count == 0 || double.IsNaN(currentAverage);
+            Color color = neutral ? Csub : currentAverage >= sum / count ? Cgreen : Cred;
+            // 胶囊放在图例左侧同一行:原来贴在 rect.Right-196,不透明白底正好盖住右上角的
+            // 「虚线：前 7 日均值」图例。不下移到绘图区,是为了不压住纵轴顶部与「今日截至」标签。
+            RectangleF r = new RectangleF(rect.Right - 354, rect.Y + 11, 184, 24);
             using (GraphicsPath path = RoundedRect(r.X, r.Y, r.Width, r.Height, 12))
             using (SolidBrush fill = new SolidBrush(Ccard2)) g.FillPath(fill, path);
             using (Pen edge = new Pen(Cline))
             using (GraphicsPath path = RoundedRect(r.X, r.Y, r.Width, r.Height, 12)) g.DrawPath(edge, path);
-            AppText(g, text, _fSmall, color, r, true);
+            AppText(g, text, _fSmall, color, new RectangleF(r.X + 9, r.Y, r.Width - 18, r.Height), true);
         }
         private double TrendMetricValue(DayRecord day)
         {
@@ -1940,6 +2410,45 @@ namespace KeyMouseStats
                 default: return day.Keys;
             }
         }
+        /// <summary>选中态胶囊的实际底色:美术主题自绘的是深色渐变底板,通用主题填 Accent。</summary>
+        internal static Color ChipSelectedBackdrop()
+        {
+            if (EuroTruckArt.Active) return Color.FromArgb(74, 52, 22);
+            if (GujianArt.Active) return Color.FromArgb(17, 68, 73);
+            if (OriArt.Active) return Color.FromArgb(17, 74, 96);
+            if (WuxiaArt.Active) return Color.FromArgb(93, 31, 27);
+            return Cblue;
+        }
+
+        /// <summary>
+        /// 在给定底色上挑对比度最高的字色。
+        /// 旧实现用「简单亮度 ≥0.55 就取 OnAccent」这种固定阈值去猜,在边界主题上必翻车:
+        /// 「生化危机」的 Accent #DA7773 简单亮度是 0.5481,差 0.0019 判成亮底,近白字压上去
+        /// 只有 2.85:1。这里改成把 OnAccent / 近白 / 近黑三个候选各算一次真实 WCAG 对比度,
+        /// 取最高者 —— 阈值没有了,边界也就不存在了。
+        /// </summary>
+        internal static Color BestInkOn(Color backdrop)
+        {
+            Color best = ArtTheme.Current.OnAccent;
+            double bestRatio = ArtTheme.ContrastRatio(best, backdrop);
+            Color[] candidates = { Color.FromArgb(245, 247, 250), Color.FromArgb(12, 14, 18) };
+            foreach (Color candidate in candidates)
+            {
+                double ratio = ArtTheme.ContrastRatio(candidate, backdrop);
+                if (ratio > bestRatio + 0.0001) { bestRatio = ratio; best = candidate; }
+            }
+            return best;
+        }
+
+        /// <summary>
+        /// 选中态胶囊的字色:按真实底色择优,保证 13 套主题都 ≥4.5:1
+        /// (见 tests/SegmentTrayTests 的全主题断言)。
+        /// </summary>
+        internal static Color ChipSelectedInk()
+        {
+            return BestInkOn(ChipSelectedBackdrop());
+        }
+
         private void PaintChip(Graphics g, RectangleF r, string text, bool sel, string extra)
         {
             PointF mouse = ToBase(_mouse);
@@ -1949,22 +2458,85 @@ namespace KeyMouseStats
             else if(EuroTruckArt.Active)EuroTruckArt.Button(g,r,sel,hov);
             else if(WuxiaArt.Active)WuxiaArt.Button(g,r,sel,hov);
             else
-            using (GraphicsPath p = RoundedRect(r.X, r.Y, r.Width, r.Height, 8))
+            using (GraphicsPath p = RoundedRect(r.X, r.Y, r.Width, r.Height, ToggleChipRadius))
             {
                 using (SolidBrush b = new SolidBrush(sel ? Cblue : hov ? Ccard2 : Ccard)) g.FillPath(b, p);
                 using (Pen pen = new Pen(sel ? Cblue : Cline)) g.DrawPath(pen, p);
             }
-            using (SolidBrush b = new SolidBrush(sel ? ArtTheme.Current.OnAccent : hov ? Ctext : Csub))
+            // 未选中字色统一走 FilterInkColor():纯色主题下它就是 Csub(与旧版逐像素一致),
+            // 美术主题下自动抬到 214/255 的 Ctext —— 否则 Csub 压在美术底板上只有 1.3~1.9:1。
+            using (SolidBrush b = new SolidBrush(sel ? ChipSelectedInk() : hov ? Ctext : FilterInkColor()))
             using (StringFormat format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
                 g.DrawString(text, _fChip, b, r, format);
         }
 
+        /// <summary>
+        /// 标准 ToggleChip:独立一颗、h30、r8、Ccard 底板 + Cline 描边,选中用 ChipSelectedInk()。
+        /// 统一走这里 = 同时解决「形状不一致」和「键盘 Tab 摸不到」两件事:登记命中区在绘制处完成。
+        /// </summary>
+        internal void PaintToggleChip(Graphics g, RectangleF r, string text, bool selected, int id)
+        {
+            _chips.Add(r);
+            _chipIds.Add(id);
+            PaintChip(g, r, text, selected, null);
+        }
+
+        /// <summary>步进按钮到端点/边界时的字色。与时段分布连续段箭头同一档灰。</summary>
+        internal static Color StepDisabledInk { get { return Color.FromArgb(84, Csub); } }
+
+        /// <summary>
+        /// 文字步进按钮(前一天 / 回今天 / 后一天 / 上一页 / 下一页)的统一画法:
+        /// 与 ToggleChip 同一套几何(h30 / r8 / Ccard / Cline)。唯一的区别是多一个禁用态 ——
+        /// 到边界时灰字且【不登记命中区】,不会出现「看起来能点、点了安静地什么都不发生」。
+        /// </summary>
+        internal void PaintStepChip(Graphics g, RectangleF r, string text, bool enabled, int id)
+        {
+            bool hover = enabled && Hit(r, ContentMouse());
+            if (enabled) { _chips.Add(r); _chipIds.Add(id); }
+            using (GraphicsPath path = RoundedRect(r.X, r.Y, r.Width, r.Height, StepChipRadius))
+            {
+                using (SolidBrush fill = new SolidBrush(hover ? Ccard2 : Ccard)) g.FillPath(fill, path);
+                using (Pen edge = new Pen(Cline)) g.DrawPath(edge, path);
+            }
+            Color ink = !enabled ? StepDisabledInk : hover ? Ctext : FilterInkColor();
+            using (SolidBrush brush = new SolidBrush(ink))
+            using (StringFormat format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+                g.DrawString(text, _fChip, brush, r, format);
+        }
+
+        /// <summary>
+        /// 箭头步进按钮(日报 &lt; &gt;):与文字步进同一几何、同一禁用语义,只画雪佛龙。
+        /// 返回是否登记了命中区,方便调用方断言。
+        /// </summary>
+        internal bool PaintStepArrow(Graphics g, RectangleF r, bool right, bool enabled, int id)
+        {
+            bool hover = enabled && Hit(r, ContentMouse());
+            if (enabled) { _chips.Add(r); _chipIds.Add(id); }
+            using (GraphicsPath path = RoundedRect(r.X, r.Y, r.Width, r.Height, StepChipRadius))
+            {
+                using (SolidBrush fill = new SolidBrush(hover ? Ccard2 : Ccard)) g.FillPath(fill, path);
+                using (Pen edge = new Pen(Cline)) g.DrawPath(edge, path);
+            }
+            Color ink = !enabled ? StepDisabledInk : hover ? Ctext : FilterInkColor();
+            float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f;
+            using (Pen pen = new Pen(ink, 1.6f) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
+            {
+                if (right)
+                    g.DrawLines(pen, new[] { new PointF(cx - 2, cy - 5), new PointF(cx + 3, cy), new PointF(cx - 2, cy + 5) });
+                else
+                    g.DrawLines(pen, new[] { new PointF(cx + 2, cy - 5), new PointF(cx - 3, cy), new PointF(cx + 2, cy + 5) });
+            }
+            return enabled;
+        }
+
         private void PaintLineChart(Graphics g, RectangleF rect, List<AnalysisPt> pts)
         {
+            // 标题固定 4 字(与「分布」chip 不打架);鼠标路程的估算口径与单位挪到副标题行。
             PaintCard(g, rect.X, rect.Y, rect.Width, rect.Height,
-                _trendMetric == 3 ? "每日鼠标路程（估算，纵轴单位 m）" :
+                _trendMetric == 3 ? "每日鼠标路程" :
                 string.Format("每日{0}", _trendMetric == 0 ? "击键" : _trendMetric == 1 ? "点击" : "滚轮"));
-            if(_trendMetric==0)AppText(g,"橙圈：历史高值 ≥2σ · 今日不标异常",_fSmall,Corange,new RectangleF(rect.X+164,rect.Y+12,400,22),false);
+            if(_trendMetric==0)AppText(g,"橙圈：历史高值 ≥2σ · 今日不标异常",_fSmall,Corange,new RectangleF(rect.X+190,rect.Y+12,400,22),false);
+            else if(_trendMetric==3)AppText(g,"估算 · 纵轴单位 m",_fSmall,Csub,new RectangleF(rect.X+190,rect.Y+12,400,22),false);
 
             float left = rect.X + 56, right = rect.X + rect.Width - 16;
             float top = rect.Y + 44, bottom = rect.Y + rect.Height - 30;
@@ -1972,7 +2544,9 @@ namespace KeyMouseStats
 
             double rawMax = 10;
             foreach (AnalysisPt p in pts) if (p.V > rawMax) rawMax = p.V;
-            foreach (AnalysisPt p in pts) { double moving = PersonalStats.MovingAverage(p.Day, _trendMetric); if (!double.IsNaN(moving) && moving > rawMax) rawMax = moving; }
+            // 7 日均线取 [d-7, d-1],与 Tooltip 的「较前 7 日均值」同一窗口;
+            // 坐标上限也必须用同一条曲线,否则会为了一个画不出来的点抬高纵轴。
+            foreach (AnalysisPt p in pts) { double moving = PersonalStats.MovingAverage(p.Day.AddDays(-1), _trendMetric); if (!double.IsNaN(moving) && moving > rawMax) rawMax = moving; }
             double max, stepY;
             AxisScale.Nice(rawMax, 4, _trendMetric != 3, out max, out stepY);
 
@@ -2032,25 +2606,21 @@ namespace KeyMouseStats
                 missingStart = -1;
             }
 
-            // 平均线:只算完整且有记录的天。
-            double sum = 0;
-            int avgCount = 0;
-            for (int i = 0; i < pts.Count; i++)
+            // 平均线:与「日均·有记录日」卡片共用 TrendAverage;没有完整日就直接不画,
+            // 不再退化成 pts[0].V 这种把第一天当均值的假线。
+            int avgCount;
+            double avg = TrendAverage(pts, live, out avgCount);
+            if (!double.IsNaN(avg))
             {
-                if (!pts[i].HasData) continue;
-                if (live && i == pts.Count - 1) continue;
-                sum += pts[i].V;
-                avgCount++;
+                using (Pen pen = new Pen(Color.FromArgb(90, Ctext)))
+                {
+                    pen.DashStyle = DashStyle.Dash;
+                    g.DrawLine(pen, left, py(avg), right, py(avg));
+                }
+                using (SolidBrush b = new SolidBrush(Color.FromArgb(140, Csub)))
+                    g.DrawString("平均 " + (_trendMetric == 3 ? Analysis.FmtMeters(avg) : Analysis.FmtAxis(avg)),
+                        _fAxis, b, right - 70, py(avg) - 16);
             }
-            double avg = avgCount > 0 ? sum / avgCount : (pts.Count > 0 ? pts[0].V : 0);
-            using (Pen pen = new Pen(Color.FromArgb(90, Ctext)))
-            {
-                pen.DashStyle = DashStyle.Dash;
-                g.DrawLine(pen, left, py(avg), right, py(avg));
-            }
-            using (SolidBrush b = new SolidBrush(Color.FromArgb(140, Csub)))
-                g.DrawString("平均 " + (_trendMetric == 3 ? Analysis.FmtMeters(avg) : Analysis.FmtAxis(avg)),
-                    _fAxis, b, right - 70, py(avg) - 16);
 
             // 面积:只铺完整日,并按「有记录」的连续段切开,未运行的日子不填充。
             if (lastComplete >= 0)
@@ -2086,15 +2656,14 @@ namespace KeyMouseStats
             }
 
             // 折线。1.8.0:入场时从基线生长(悬停与坐标轴仍用真实位置)。
-            // 未运行的日子两侧不连线;今天的最后一段单独用虚线。
+            // 缺失/空壳日两侧不连线;今天的最后一段单独用虚线。
             double grow = Entrance();
             using (Pen pen = new Pen(main, 2f))
             {
                 pen.LineJoin = LineJoin.Round;
                 for (int i = 0; i < pts.Count - 1; i++)
                 {
-                    if (!pts[i].HasData || !pts[i + 1].HasData) continue;
-                    if (live && i + 1 == pts.Count - 1) continue;
+                    if (!TrendSegmentDrawn(pts[i].HasData, pts[i + 1].HasData, live, i + 1, pts.Count)) continue;
                     g.DrawLine(pen, px(i), py(pts[i].V) + (bottom - py(pts[i].V)) * (float)(1 - grow),
                         px(i + 1), py(pts[i + 1].V) + (bottom - py(pts[i + 1].V)) * (float)(1 - grow));
                 }
@@ -2107,18 +2676,19 @@ namespace KeyMouseStats
                     px(pts.Count - 1), py(pts[pts.Count - 1].V));
             }
 
-            // Trailing seven-day mean needs seven observed days; missing dates break the overlay.
+            // 前 7 日均值:[d-7, d-1] 七个完整日,与 Tooltip 的「较前 7 日均值」同一窗口,
+            // 也不会把今天未完成的半天算进末点。缺失日仍然整点断开(History 只收 7/7 齐的天)。
             using (Pen movingPen = new Pen(Ccyan, 2f) { DashStyle = DashStyle.Dash })
             {
                 double previousMean = double.NaN;
                 for (int i = 0; i < pts.Count; i++)
                 {
-                    double moving = PersonalStats.MovingAverage(pts[i].Day, _trendMetric);
+                    double moving = PersonalStats.MovingAverage(pts[i].Day.AddDays(-1), _trendMetric);
                     if (i > 0 && !double.IsNaN(previousMean) && !double.IsNaN(moving)) g.DrawLine(movingPen, px(i - 1), py(previousMean), px(i), py(moving));
                     previousMean = moving;
                 }
             }
-            using (SolidBrush legend = new SolidBrush(Ccyan)) g.DrawString("虚线：7 日移动均值", _fSmall, legend, rect.Right - 162, rect.Y + 12);
+            using (SolidBrush legend = new SolidBrush(Ccyan)) g.DrawString("虚线：前 7 日均值", _fSmall, legend, rect.Right - 162, rect.Y + 12);
 
             // x 轴日期:从最后一个点往回按步长取,保证今天一定有标签,又不会出现两个相邻标签叠字。
             int step = Math.Max(1, (int)Math.Ceiling(pts.Count / 8.0));
@@ -2180,9 +2750,13 @@ namespace KeyMouseStats
                     pen.DashStyle = DashStyle.Dot;
                     g.DrawLine(pen, hx, top, hx, bottom);
                 }
-                using(Pen ring=new Pen(Ctext,2))g.DrawEllipse(ring,hx-8,hy-8,16,16);
-                using (SolidBrush b = new SolidBrush(main))
-                    g.FillEllipse(b, hx - 4.5f, hy - 4.5f, 9, 9);
+                // 无记录日只保留竖向参考线:以前还会在基线画空心圈+实心点,看起来像「这天是 0」。
+                if (hp.HasData)
+                {
+                    using(Pen ring=new Pen(Ctext,2))g.DrawEllipse(ring,hx-8,hy-8,16,16);
+                    using (SolidBrush b = new SolidBrush(main))
+                        g.FillEllipse(b, hx - 4.5f, hy - 4.5f, 9, 9);
+                }
 
                 string l1 = hp.Day.ToString("MM-dd") + (hoverToday ? " · 进行中" : hp.HasData ? " · 点击查看日报" : " · 未运行");
                 string l2 = !hp.HasData
@@ -2193,7 +2767,9 @@ namespace KeyMouseStats
                 string l3 = hoverToday
                     ? "截至 " + DateTime.Now.ToString("HH:mm") + "，不要与整日比较"
                     : !hp.HasData
-                        ? "应用或电脑没有运行，这一天没有落盘记录"
+                        ? (Store.History.ContainsKey(hp.Day)
+                            ? "这天有条目但没有任何输入，按无记录处理"
+                            : "应用或电脑没有运行，这一天没有落盘记录")
                         : hp.V <= 0
                             ? "这天有记录，但没有" + (_trendMetric == 0 ? "击键" : _trendMetric == 1 ? "点击" : _trendMetric == 2 ? "滚轮" : "鼠标移动")
                             : (_trendMetric == 0 ? DailySignal.Get(hp.Day).Note : "");
@@ -2227,6 +2803,17 @@ namespace KeyMouseStats
             string[] ranges = { "今日", "近 7 天", "历史" };
             PaintSegmentGroup(g, Cx, 98, 216, metrics, new[] { 80, 81, 82 }, _hourMetric, false);
             PaintSegmentGroup(g, Cx + 232, 98, 288, views, new[] { 203, 204, 205 }, _hourView, true);
+            // 连续段画的是 00:00–24:00 的单日时间轴:「今日 / 近 7 天 / 历史」在这里只会误导
+            // (三档最终都落到"最新记录日",切了也不动)。换成日期切换器,把"看哪一天"变成
+            // 显式、可翻页的选择,同时这一步先走掉,省下 24 小时柱子的无用计算。
+            if (_hourView == 2)
+            {
+                List<DayRecord> records = IntensityDays();
+                int index = IntensityIndex(records);
+                PaintHourDaySwitcher(g, records, index);
+                PaintHourIntensity(g, index < 0 ? null : records[index]);
+                return;
+            }
             PaintSegmentGroup(g, Cx + Cw - 210, 98, 210, ranges, new[] { 30, 31, 32 }, _hourRange, false);
 
             IEnumerable<DayRecord> days = HourDays();
@@ -2243,11 +2830,6 @@ namespace KeyMouseStats
             // 柱子与矩阵二选一:原来柱子图上方还有一条 24 格热力条,和柱子表达同一份一维数据,
             // 既没有刻度又稀释信息密度;热力配色直接融进柱高,矩阵换成「周 × 24 小时」才有新信息。
             HourProfile.Result profile = null;
-            if (_hourView == 2)
-            {
-                PaintHourIntensity(g, days);
-                return;
-            }
             if (_hourView == 1)
             {
                 DateTime first, last;
@@ -2317,18 +2899,155 @@ namespace KeyMouseStats
             PaintHourStatCards(g, t1, t2);
         }
 
-        private void PaintHourIntensity(Graphics g, IEnumerable<DayRecord> days)
+        // ---------------------------------------------------------------- 连续段:单日翻页
+
+        /// <summary>筛选胶囊未选中时的字色。美术主题下 Csub 是按深色底调的中灰,压在亮原画上只有
+        /// 1.3~1.9:1;换成同色相的 214/255 亮色后,叠在近不透明底板上实测最差 6.3:1(暖暖),
+        /// 其余美术主题 ≥7.3:1(见 tests/SegmentTrayTests)。</summary>
+        internal static Color FilterInkColor()
         {
-            DayRecord record = null;
-            foreach (DayRecord day in days) if (day != null && !day.IsEmpty && (record == null || day.Date > record.Date)) record = day;
+            int alpha = ArtTheme.FilterInkAlpha;
+            return alpha >= 255 ? Csub : Color.FromArgb(alpha, Ctext);
+        }
+
+        /// <summary>鼠标在内容坐标系里的位置。胶囊与图表的命中测试统一走这里,别再各写一遍减法。</summary>
+        private PointF ContentMouse()
+        {
+            PointF p = ToBase(_mouse);
+            return new PointF(p.X - ContentX, p.Y - ContentY);
+        }
+
+        /// <summary>当前时段指标的中文叫法:标题、页脚、悬停气泡共用一套词。</summary>
+        private string HourMetricName()
+        {
+            return _hourMetric == 2 ? "活跃时长" : _hourMetric == 1 ? "点击" : "击键";
+        }
+
+        /// <summary>日期标签:跨年时补年份,否则历史档里 2025-12-03 和 2026-12-03 长得一样。</summary>
+        private static string HourRecordLabel(DateTime date)
+        {
+            return date.Year == DateTime.Today.Year ? date.ToString("MM-dd") : date.ToString("yyyy-MM-dd");
+        }
+
+        /// <summary>
+        /// 连续段可翻页的记录日(升序)。优先只收"确实有连续段"的日子:有键鼠但没段的老格式日
+        /// 会让翻页停在空图上;一天都没有段时才退回"非空日",至少还能看到日期。
+        /// </summary>
+        internal static List<DayRecord> IntensityDays()
+        {
+            List<DayRecord> all = new List<DayRecord>();
+            List<DayRecord> withSessions = new List<DayRecord>();
+            foreach (DayRecord day in Store.History.Values)
+            {
+                if (day == null || day.IsEmpty) continue;
+                all.Add(day);
+                if (day.Sessions != null && day.Sessions.Count > 0) withSessions.Add(day);
+            }
+            List<DayRecord> list = withSessions.Count > 0 ? withSessions : all;
+            list.Sort(delegate(DayRecord a, DayRecord b) { return a.Date.CompareTo(b.Date); });
+            return list;
+        }
+
+        /// <summary>当前记录日在列表里的下标;-1 表示一天可画的都没有。
+        /// _hourRecordDate 为 MinValue 时跟随最新记录日(默认),翻页后固定在所选日。</summary>
+        private int IntensityIndex(List<DayRecord> days)
+        {
+            if (days == null || days.Count == 0) return -1;
+            List<DateTime> dates = new List<DateTime>(days.Count);
+            foreach (DayRecord day in days) dates.Add(day.Date.Date);
+            return ResolveIntensityIndex(dates, _hourRecordDate);
+        }
+
+        /// <summary>
+        /// 纯函数版:在升序记录日里定位"当前该画哪一天"。抽出来是为了让翻页边界
+        /// (默认最新 / 翻到最早 / 钉住的日期被裁掉之后退回最新)有可回归的断言。
+        /// </summary>
+        internal static int ResolveIntensityIndex(IList<DateTime> dates, DateTime pinned)
+        {
+            if (dates == null || dates.Count == 0) return -1;
+            if (pinned != DateTime.MinValue)
+                for (int i = dates.Count - 1; i >= 0; i--)
+                    if (dates[i].Date == pinned.Date) return i;
+            return dates.Count - 1;
+        }
+
+        /// <summary>连续段翻页:-1 前一天 / +1 后一天 / 0 回到最新记录日。</summary>
+        private void StepHourRecordDay(int delta)
+        {
+            List<DayRecord> days = IntensityDays();
+            int index = IntensityIndex(days);
+            _hover = -1;
+            if (index < 0 || delta == 0) { _hourRecordDate = DateTime.MinValue; return; }
+            index = Math.Max(0, Math.Min(days.Count - 1, index + delta));
+            _hourRecordDate = days[index].Date.Date;
+        }
+
+        /// <summary>连续段的日期切换器:‹ 上一日 | MM-dd | 下一日 ›;点中间的日期回到最新记录日。
+        /// 已经是「跟随最新」时中间那颗不登记命中区,与端点箭头同一原则:不能点了没有任何反应。</summary>
+        private void PaintHourDaySwitcher(Graphics g, List<DayRecord> days, int index)
+        {
+            DayRecord record = index < 0 ? null : days[index];
+            float x = Cx + Cw - 210, y = 98, width = 210, height = 32, pad = 3, gap = 3;
+            float chipH = height - pad * 2, arrow = 30;
+            float label = width - pad * 2 - gap * 2 - arrow * 2;
+            PaintSegmentTray(g, x, y, width);
+            RectangleF prev = new RectangleF(x + pad, y + pad, arrow, chipH);
+            RectangleF pick = new RectangleF(prev.Right + gap, y + pad, label, chipH);
+            RectangleF next = new RectangleF(pick.Right + gap, y + pad, arrow, chipH);
+            PaintHourDayArrow(g, prev, -1, index > 0, 33);
+            PaintHourDayArrow(g, next, 1, index >= 0 && index < days.Count - 1, 34);
+
+            bool pinned = record != null && _hourRecordDate != DateTime.MinValue;
+            bool hover = pinned && Hit(pick, ContentMouse());
+            if (hover)
+            {
+                using (GraphicsPath path = RoundedRect(pick.X, pick.Y, pick.Width, pick.Height, 7))
+                using (SolidBrush fill = new SolidBrush(Ccard2)) g.FillPath(fill, path);
+            }
+            if (pinned) { _chips.Add(pick); _chipIds.Add(35); }
+            using (StringFormat format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+            using (SolidBrush brush = new SolidBrush(record == null ? Csub : hover ? Ctext : FilterInkColor()))
+                g.DrawString(record == null ? "无记录" : HourRecordLabel(record.Date), _fChip, brush, pick, format);
+        }
+
+        /// <summary>切换器箭头。到端点时灰化且不登记命中区,不会"点了安静地什么都不发生"。</summary>
+        private void PaintHourDayArrow(Graphics g, RectangleF chip, int direction, bool enabled, int id)
+        {
+            bool hover = enabled && Hit(chip, ContentMouse());
+            if (enabled) { _chips.Add(chip); _chipIds.Add(id); }
+            if (hover)
+            {
+                using (GraphicsPath path = RoundedRect(chip.X, chip.Y, chip.Width, chip.Height, 7))
+                using (SolidBrush fill = new SolidBrush(Ccard2)) g.FillPath(fill, path);
+            }
+            Color ink = !enabled ? StepDisabledInk : hover ? Ctext : FilterInkColor();
+            float cx = chip.X + chip.Width / 2f, cy = chip.Y + chip.Height / 2f;
+            using (Pen pen = new Pen(ink, 1.6f) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
+            {
+                if (direction < 0)
+                    g.DrawLines(pen, new[] { new PointF(cx + 2, cy - 5), new PointF(cx - 3, cy), new PointF(cx + 2, cy + 5) });
+                else
+                    g.DrawLines(pen, new[] { new PointF(cx - 2, cy - 5), new PointF(cx + 3, cy), new PointF(cx - 2, cy + 5) });
+            }
+        }
+
+        /// <summary>
+        /// 单日连续段强度:横轴 00:00–24:00,每段一根柱;柱高与颜色 = 该段的输入强度,按**当日**最强段归一
+        /// (不跨日比较)。强度口径跟随顶部指标:击键 APM / 点击 CPM / 活跃时长(段长分钟)。
+        /// </summary>
+        private void PaintHourIntensity(Graphics g, DayRecord record)
+        {
+            _segmentBars.Clear();
+            _hoverDetail = "";
             if (record == null)
             {
-                PaintCard(g, Cx, 150, Cw, 350, "连续段强度 · 最近记录日");
-                AppText(g, "暂无连续使用段", _fBody, Csub, new RectangleF(Cx + 24, 220, Cw - 48, 24), false);
-                PaintHourStatCards(g, new[] { "连续段", "平均段长", "最长段", "碎片占比" }, new[] { "--", "--", "--", "--" });
+                PaintCard(g, Cx, 150, Cw, 350, "连续段强度 · 单日时间轴");
+                AppText(g, "还没有任何连续使用段记录", _fBody, Csub, new RectangleF(Cx + 24, 220, Cw - 48, 24), false);
+                PaintHourStatCards(g, new[] { "连续段", "平均段长", "最长段", "短段占比 (<5m)" }, new[] { "--", "--", "--", "--" });
                 return;
             }
-            PaintCard(g, Cx, 150, Cw, 350, "连续段强度 · " + record.Date.ToString("MM-dd") + " · 高度与颜色表示输入强度");
+            PaintCard(g, Cx, 150, Cw, 350,
+                "连续段强度 · " + HourRecordLabel(record.Date) + " · " + HourMetricName() + "强度 · 柱高按当日峰值归一");
             float left = Cx + 36, right = Cx + Cw - 18, top = 196, bottom = 352, track = right - left;
             using (Pen grid = new Pen(Color.FromArgb(24, Ctext), 1f) { DashStyle = DashStyle.Dash })
             {
@@ -2345,34 +3064,58 @@ namespace KeyMouseStats
             double[] rates = new double[sessions.Count];
             double[] keys = new double[sessions.Count];
             double[] clicks = new double[sessions.Count];
-            double maxRate = 1;
+            // 归一化下限跟随指标单位:击键/点击用 1 次/分兜底;活跃时长用"1 秒"折成分钟兜底,
+            // 否则当天最长段不足 1 分钟时,柱高永远顶不满,"按当日峰值归一"就失真了。
+            double maxRate = _hourMetric == 2 ? 1.0 / 60.0 : 1;
             for (int i = 0; i < sessions.Count; i++)
             {
                 ActiveSession session = sessions[i];
-                for (int h = 0; h < 24; h++)
+                // 活跃时长口径不需要击键/点击摊派,直接跳过 24 次重叠计算。
+                if (_hourMetric != 2)
                 {
-                    DateTime hs = record.Date.AddHours(h), he = hs.AddHours(1);
-                    DateTime from = session.Start > hs ? session.Start : hs, to = session.End < he ? session.End : he;
-                    double overlap = (to - from).TotalSeconds; if (overlap <= 0) continue;
-                    if (record.ActiveHours[h] > 0)
+                    for (int h = 0; h < 24; h++)
                     {
-                        keys[i] += record.HourKeys[h] * overlap / record.ActiveHours[h];
-                        clicks[i] += record.HourClicks[h] * overlap / record.ActiveHours[h];
+                        DateTime hs = record.Date.AddHours(h), he = hs.AddHours(1);
+                        DateTime from = session.Start > hs ? session.Start : hs, to = session.End < he ? session.End : he;
+                        double overlap = (to - from).TotalSeconds; if (overlap <= 0) continue;
+                        if (record.ActiveHours[h] > 0)
+                        {
+                            keys[i] += record.HourKeys[h] * overlap / record.ActiveHours[h];
+                            clicks[i] += record.HourClicks[h] * overlap / record.ActiveHours[h];
+                        }
                     }
                 }
-                rates[i] = session.Seconds > 0 ? (keys[i] + clicks[i]) / session.Seconds * 60 : 0;
+                // 指标分流:0 击键 APM / 1 点击 CPM / 2 活跃时长(段长分钟数本身就是强度)。
+                rates[i] = _hourMetric == 2
+                    ? session.Seconds / 60.0
+                    : session.Seconds > 0 ? (_hourMetric == 1 ? clicks[i] : keys[i]) / session.Seconds * 60 : 0;
                 maxRate = Math.Max(maxRate, rates[i]);
             }
+            RectangleF[] bars = new RectangleF[sessions.Count];
             for (int i = 0; i < sessions.Count; i++)
             {
                 ActiveSession session = sessions[i];
-                float x = left + (float)(Math.Max(0, (session.Start - record.Date).TotalSeconds) / 86400 * track);
-                float w = Math.Max(2, (float)(Math.Min(86400, (session.End - record.Date).TotalSeconds) / 86400 * track) - (float)(Math.Max(0, (session.Start - record.Date).TotalSeconds) / 86400 * track));
-                float ratio = (float)(rates[i] / maxRate);
-                float height = 12 + ratio * 70;
-                Color color = ratio >= .7 ? Ccyan : ratio >= .36 ? Cblue : Cpurple;
+                double startSeconds = Math.Max(0, (session.Start - record.Date).TotalSeconds);
+                double endSeconds = Math.Min(86400, (session.End - record.Date).TotalSeconds);
+                float x = left + (float)(startSeconds / 86400 * track);
+                float w = Math.Max(2, (float)(endSeconds / 86400 * track) - (float)(startSeconds / 86400 * track));
+                float ratio = (float)Math.Max(0, Math.Min(1, rates[i] / maxRate));
+                // 零强度段只留 4px 的"占位尾巴":原来的 12px 底座会让"这段没输入"看起来像有活动。
+                float height = ratio <= 0 ? 4 : 6 + ratio * 76;
+                // 颜色从"贴近卡片底色的暗青"连续插值到主题青:强度越高越饱和、越亮。
+                // 起点用 Composite(Ccyan, 64, Ccard) 而不是带 alpha 的 FromArgb(90, Csub) ——
+                // Mix 只取 RGB、会丢掉 alpha,那样写等于直接把 Csub 当起点(浅色主题下低强度反而更亮)。
+                Color low = ArtTheme.Composite(Ccyan, 64, Ccard);
+                Color color = ArtTheme.Mix(low, Ccyan, (float)Math.Sqrt(ratio));
+                bars[i] = new RectangleF(x, bottom - height, w, height);
                 using (GraphicsPath path = RoundedRect(x, bottom - height, w, height, 3))
-                using (SolidBrush fill = new SolidBrush(Color.FromArgb(200, color))) g.FillPath(fill, path);
+                using (SolidBrush fill = new SolidBrush(Color.FromArgb(i == _hover ? 250 : 215, color))) g.FillPath(fill, path);
+                if (i == _hover)
+                    using (Pen edge = new Pen(Color.FromArgb(200, Ctext), 1f))
+                    using (GraphicsPath path = RoundedRect(x, bottom - height, w, height, 3)) g.DrawPath(edge, path);
+                // 命中区至少 8px 宽:2~3px 的短段否则几乎悬停不到。
+                float hitW = Math.Max(w, 8f);
+                _segmentBars.Add(new RectangleF(x + w / 2 - hitW / 2, bottom - height, hitW, height));
             }
             if (record.Date == DateTime.Today)
             {
@@ -2390,16 +3133,20 @@ namespace KeyMouseStats
                 AppText(g, clock, _fAxis, Cred, stamp, false);
             }
 
+            // 悬停气泡:段的起止、持续时长与当前口径的强度。
+            if (_hover >= 0 && _hover < sessions.Count)
+                PaintHourSegmentTip(g, new RectangleF(left, top, track, bottom - top), sessions[_hover], bars[_hover], rates[_hover], maxRate);
+
             // 底部四个微胶囊:分段标签、加粗次数和嵌入进度条组成稳定的托底结构。
-            int[] bins = new int[4];
+            // 分档阈值与"短段占比"公式与报告页共用 ReportDesign,不再两处各写一套。
+            int[] bins = ReportDesign.SegmentBins(sessions);
             double maxSeconds = 0, totalSeconds = 0;
             foreach (ActiveSession session in sessions)
             {
                 totalSeconds += session.Seconds; maxSeconds = Math.Max(maxSeconds, session.Seconds);
-                if (session.Seconds < 300) bins[0]++; else if (session.Seconds < 1800) bins[1]++; else if (session.Seconds < 3600) bins[2]++; else bins[3]++;
             }
             int binMax = 1; foreach (int value in bins) binMax = Math.Max(binMax, value);
-            string[] names = { "< 5 分钟", "5–30 分钟", "30–60 分钟", "> 60 分钟" };
+            string[] names = ReportDesign.SegmentBinNames;
             float gap = 8, cardW = (track - gap * 3) / 4f, cardY = 382, cardH = 84;
             for (int i = 0; i < 4; i++)
             {
@@ -2416,25 +3163,64 @@ namespace KeyMouseStats
                 using (SolidBrush fill = new SolidBrush(i == 3 ? Corange : Cblue)) g.FillRectangle(fill, barX, cardY + cardH - 15, barW * bins[i] / binMax, 4);
             }
             PaintHourStatCards(g,
-                new[] { "连续段", "平均段长", "最长段", "碎片占比" },
-                new[] { sessions.Count + " 段", ActivityMonitor.FormatDuration(sessions.Count > 0 ? totalSeconds / sessions.Count : 0), ActivityMonitor.FormatDuration(maxSeconds), sessions.Count > 0 ? (100.0 * (bins[0] + bins[1]) / sessions.Count).ToString("0", CultureInfo.InvariantCulture) + "%" : "--" });
+                new[] { "连续段", "平均段长", "最长段", "短段占比 (<5m)" },
+                new[] { sessions.Count + " 段", ActivityMonitor.FormatDuration(sessions.Count > 0 ? totalSeconds / sessions.Count : 0), ActivityMonitor.FormatDuration(maxSeconds), ReportDesign.ShortShare(bins[0], sessions.Count) });
         }
+
+        /// <summary>连续段的悬停气泡:起止时间、持续时长、当前口径的强度。</summary>
+        private void PaintHourSegmentTip(Graphics g, RectangleF plot, ActiveSession session, RectangleF bar, double rate, double maxRate)
+        {
+            string span = session.Start.ToString("HH:mm") + "–" + session.End.ToString("HH:mm");
+            string duration = ActivityMonitor.FormatDuration(session.Seconds);
+            string strength = _hourMetric == 2
+                ? "占当日最长段 " + (maxRate > 0 ? (100.0 * rate / maxRate).ToString("0", CultureInfo.InvariantCulture) + "%" : "--")
+                : (int)Math.Round(rate) + (_hourMetric == 1 ? " 点击/分" : " 击键/分");
+            _hoverDetail = span + " · 持续 " + duration + " · " + strength;
+            float bubbleW = 176, bubbleH = 46;
+            float bx = bar.X + bar.Width / 2 - bubbleW / 2;
+            bx = Math.Max(plot.X + 4, Math.Min(bx, plot.Right - bubbleW - 4));
+            float by = Math.Max(plot.Y + 2, bar.Y - bubbleH - 6);
+            using (GraphicsPath path = RoundedRect(bx, by, bubbleW, bubbleH, 8))
+            {
+                using (SolidBrush fill = new SolidBrush(Color.FromArgb(244, Ccard2))) g.FillPath(fill, path);
+                using (Pen edge = new Pen(Color.FromArgb(64, Ctext))) g.DrawPath(edge, path);
+            }
+            AppText(g, span, _fSmall, Csub, new RectangleF(bx + 10, by + 4, bubbleW - 20, 16), false);
+            AppText(g, duration + " · " + strength, _fBody, Ctext, new RectangleF(bx + 10, by + 20, bubbleW - 20, 20), false);
+        }
+
+        /// <summary>
+        /// 筛选胶囊的托盘底板。纯色主题背景是平的,7% 的近白雾足够;美术主题的原画会从这个 alpha
+        /// 里透上来(亮部合成后 Δ&lt;1.5/255,等于没画),所以抬到与卡片同一档的近不透明底
+        /// (PaintCardBase 用 216~236,这里 232)。
+        /// 抽成 internal static 是为了让 tests/SegmentTrayTests 真的在离屏位图上画一次:
+        /// 只断言常量的话,把这里改回旧配方测试也不会红。
+        /// </summary>
+        internal static void PaintSegmentTray(Graphics g, float x, float y, float width)
+        {
+            const float height = 32;
+            using (GraphicsPath outer = RoundedRect(x, y, width, height, 10))
+            {
+                using (SolidBrush fill = new SolidBrush(Color.FromArgb(ArtTheme.FilterPlateAlpha, ArtTheme.FilterPlateColor))) g.FillPath(fill, outer);
+                Color edge = ThemeArt.Active ? ArtTheme.Mix(Cline, Ctext, 0.18) : Cline;
+                using (Pen pen = new Pen(edge)) g.DrawPath(pen, outer);
+            }
+        }
+
         private void PaintSegmentGroup(Graphics g, float x, float y, float width, string[] labels, int[] ids, int selected, bool icons)
         {
             float gap = 3, pad = 3, height = 32;
-            using (GraphicsPath outer = RoundedRect(x, y, width, height, 10))
-            {
-                using (SolidBrush fill = new SolidBrush(Color.FromArgb(18, Ctext))) g.FillPath(fill, outer);
-                using (Pen edge = new Pen(Cline)) g.DrawPath(edge, outer);
-            }
+            PaintSegmentTray(g, x, y, width);
             float segment = (width - pad * 2 - gap * (labels.Length - 1)) / labels.Length;
+            PointF mouse = ContentMouse();
+            Color idle = FilterInkColor();
             for (int i = 0; i < labels.Length; i++)
             {
                 float sx = x + pad + i * (segment + gap);
                 RectangleF r = new RectangleF(sx, y + pad, segment, height - pad * 2);
                 _chips.Add(r); _chipIds.Add(ids[i]);
-                bool hover = Hit(r, new PointF(ToBase(_mouse).X - ContentX, ToBase(_mouse).Y - ContentY));
-                Color ink = selected == i ? ArtTheme.Current.OnAccent : hover ? Ctext : Csub;
+                bool hover = Hit(r, mouse);
+                Color ink = selected == i ? ArtTheme.Current.OnAccent : hover ? Ctext : idle;
                 if (selected == i || hover)
                 {
                     using (GraphicsPath path = RoundedRect(r.X, r.Y, r.Width, r.Height, 7))
@@ -2529,6 +3315,8 @@ namespace KeyMouseStats
 
         private void PaintHourBars(Graphics g, RectangleF rect, long[] vals)
         {
+            // 柱子视图没有自己的悬停明细;不清空的话从连续段切过来后 Ctrl+C 会复制上一段旧明细。
+            _hoverDetail = "";
             float left = rect.X + 50, right = rect.X + rect.Width - 16;
             float top = rect.Y + 38, bottom = rect.Y + rect.Height - 28;
             float ph = bottom - top, pw = right - left;
@@ -2846,9 +3634,21 @@ namespace KeyMouseStats
             {
                 int n = Math.Min(10, rank.Count);
                 long max = rank[0].Value;
+                // 从总览分布卡下钻过来时高亮那一行(按显示名匹配,与 KeyRanking 的归并口径一致)。
+                int highlighted = -1;
+                if (!combos && _selectedKeyName.Length > 0)
+                    for (int i = 0; i < n; i++) if (rank[i].Key == _selectedKeyName) { highlighted = i; break; }
                 for (int i = 0; i < n; i++)
                 {
                     float ry = 176 + i * 37;
+                    if (i == highlighted)
+                        using (GraphicsPath band = RoundedRect(Cx + 8, ry - 4, 538, 30, 8))
+                        using (SolidBrush fill = new SolidBrush(Color.FromArgb(34, Cblue)))
+                        using (Pen edge = new Pen(Color.FromArgb(120, Cblue)))
+                        {
+                            g.FillPath(fill, band);
+                            g.DrawPath(edge, band);
+                        }
                     using (SolidBrush b = new SolidBrush(i < 3 ? Color.FromArgb(70, Cblue) : Color.FromArgb(26, Ctext)))
                         g.FillEllipse(b, xRank, ry + 3, 18, 18);
                     using (SolidBrush b = new SolidBrush(i < 3 ? Ctext : Csub))
@@ -2857,7 +3657,7 @@ namespace KeyMouseStats
                         SizeF sz = g.MeasureString(t, _fSmall);
                         g.DrawString(t, _fSmall, b, xRank + 9 - sz.Width / 2, ry + 5);
                     }
-                    PaintKeycap(g, rank[i].Key, new RectangleF(xKey, ry + 2, 110, 22), i < 3);
+                    PaintKeycap(g, rank[i].Key, new RectangleF(xKey, ry + 2, 110, 22), i < 3 || i == highlighted);
                     AppText(g, Analysis.FmtCount(rank[i].Value), _fBody, Ctext,
                         new RectangleF(xCount, ry, 60, 22), true);
                     if (!combos) PaintHoldCell(g, rank[i].Key, new RectangleF(xHold, ry + 2, 68, 20));
@@ -3073,12 +3873,22 @@ namespace KeyMouseStats
 
                 StringBuilder sb = new StringBuilder();
                 sb.AppendLine("日期,击键,点击,左键,右键,中键,侧键,滚轮,鼠标路程估算(m;设置DPI后累计),光标路程(px;含旧版数据),有效使用秒数,观测空闲秒数,连续使用段数");
-                List<DateTime> days = new List<DateTime>(Store.History.Keys);
-                days.Sort();
+                List<DateTime> days = new List<DateTime>();
+                if (_tab == TabId.Trend)
+                {
+                    // 按天视图导出跟随页面所选区间,不再无视 _trendRange 直接倒全部历史。
+                    DateTime from = DateTime.Today.AddDays(-(_trendRange - 1));
+                    for (DateTime d = from; d <= DateTime.Today; d = d.AddDays(1)) days.Add(d);
+                }
+                else
+                {
+                    days.AddRange(Store.History.Keys);
+                    days.Sort();
+                }
                 foreach (DateTime d in days)
                 {
-                    DayRecord r = Store.History[d];
-                    if (r.IsEmpty) continue;
+                    DayRecord r;
+                    if (!Store.History.TryGetValue(d, out r) || r.IsEmpty) continue;
                     sb.Append(d.ToString("yyyy-MM-dd")).Append(',');
                     sb.Append(r.Keys).Append(',');
                     sb.Append(r.Clicks).Append(',');

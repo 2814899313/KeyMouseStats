@@ -141,6 +141,17 @@ namespace KeyMouseStats
     internal static class KeySemantics
     {
         public static readonly string[] Names={"移动类键位","数字 / 技能栏","交互类键位","功能 / 修饰键","文字及其他","未归位记录"};
+        /// <summary>通用/办公标签(桶 0..5)。默认口径:把打字用的数字/空格说成「技能栏」会误导。</summary>
+        public static readonly string[] LabelsGeneric={"WASD/方向","数字","空格/Shift","功能/修饰","主字符/编辑","未归位"};
+        /// <summary>游戏语义标签(桶 0..5)。仅当应用用途分类为「游戏」时用于行内明细。</summary>
+        public static readonly string[] LabelsGame={"移动","技能栏","交互","功能","其他","未归位"};
+        /// <summary>图例与堆叠条的有效桶数。第 6 桶(未归位)在应用维度结构性恒为 0,不参与绘制。</summary>
+        public const int VisibleBuckets=5;
+        /// <summary>按应用用途分类挑标签:游戏(AppActivity.Categories[1])用游戏语义,其余(含混合分类 -1)用通用标签。</summary>
+        public static string[] LabelsFor(int category)
+        {
+            return category==1?LabelsGame:LabelsGeneric;
+        }
         public static int Group(int vk)
         {
             if(vk==65||vk==68||vk==83||vk==87||vk>=37&&vk<=40)return 0;

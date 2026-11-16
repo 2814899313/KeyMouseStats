@@ -20,6 +20,14 @@ namespace KeyMouseStats
         /// <summary>本页区间的四个选项。0 今日 / 1 近7天 / 2 近30天 / 3 全部。</summary>
         private static readonly string[] TextRangeNames = { "今日", "近 7 天", "近 30 天", "全部" };
         private static readonly int[] TextRangeDays = { 1, 7, 30, 0 };
+        /// <summary>
+        /// 顶部区间筛选的托盘宽度。4 段 + 2×3 内边距 + 3×3 段间距 = 248,
+        /// 每段 58.25 —— 与「时段分布」页的分段托盘同一套几何(托盘 32 高 / r10,段 26 高 / r7)。
+        /// </summary>
+        private const float TextRangeTrayWidth = 248;
+        /// <summary>卡片内 ToggleChip 的宽度(高度统一取 ToggleChipHeight=30)。</summary>
+        private const float TextModeChipWidth = 46;
+        private const float TextChartChipWidth = 46;
 
         private int _textRange = 1;
         /// <summary>0 = 每日柱状图 / 1 = 24 小时时段分布。</summary>
@@ -242,9 +250,12 @@ namespace KeyMouseStats
             _textBars.Clear();
             _textBarKeys.Clear();
 
-            // 日期筛选作用于全页，独立放在指标上方。
-            AppText(g, "统计区间", _fSmall, Csub, new RectangleF(Cx, Cy - 28, 70, 24), false);
-            PaintTextRangeChips(g, Cx, Cy - 37, Cw);
+            // 日期筛选作用于全页,独立放在指标上方。
+            // 标签与分段托盘共用同一条 32 高的基线:旧版标签画在 Cy-28(70~94)、胶囊画在
+            // Cy-37(61~85),两者中心差 9px,肉眼可见地不齐。
+            float filterY = Cy - 44;                     // 托盘/标签同顶边,中心 = Cy-28
+            AppText(g, "统计区间", _fSmall, FilterInkColor(), new RectangleF(Cx, filterY, 70, 32), false);
+            PaintTextRangeChips(g, Cx, filterY, Cw);
             // ---- 第一行:五张数字卡 ----
             float gap = 12;
             float tileW = (Cw - 4 * gap) / 5f;
@@ -312,31 +323,26 @@ namespace KeyMouseStats
                 AppText(g, "ⓘ", _fAxis, Csub, info, false);
                 AddTextHit(info, 6, 0);
             }
+            // 卡片内所有切换器统一成标准 ToggleChip(h30 / r8 / Ccard + Cline),
+            // 定位在标题行垂直居中,不再用 24 高的私有小方块。
+            float textChipY = Cy + 324;
             if (_textWordTab == 0)
             {
-                PaintTextControl(g, new RectangleF(Cx + 250, Cy + 329, 48, 24), "汉字", _textCharFilter == 0);
-                _chips.Add(new RectangleF(Cx + 250, Cy + 329, 48, 24)); _chipIds.Add(413);
-                PaintTextControl(g, new RectangleF(Cx + 302, Cy + 329, 48, 24), "标点", _textCharFilter == 1);
-                _chips.Add(new RectangleF(Cx + 302, Cy + 329, 48, 24)); _chipIds.Add(414);
+                PaintTextToggleChip(g, new RectangleF(Cx + 250, textChipY, 48, ToggleChipHeight), "汉字", _textCharFilter == 0, 413);
+                PaintTextToggleChip(g, new RectangleF(Cx + 302, textChipY, 48, ToggleChipHeight), "标点", _textCharFilter == 1, 414);
             }
-            PaintTextControl(g, new RectangleF(Cx + 358, Cy + 329, 46, 24), "单字", _textWordTab == 0);
-            _chips.Add(new RectangleF(Cx + 358, Cy + 329, 46, 24)); _chipIds.Add(415);
-            PaintTextControl(g, new RectangleF(Cx + 408, Cy + 329, 46, 24), "词组", _textWordTab == 1);
-            _chips.Add(new RectangleF(Cx + 408, Cy + 329, 46, 24)); _chipIds.Add(416);
-            PaintTextControl(g, new RectangleF(Cx + 458, Cy + 329, 46, 24), "应用", _textWordTab == 2);
-            _chips.Add(new RectangleF(Cx + 458, Cy + 329, 46, 24)); _chipIds.Add(418);
+            PaintTextToggleChip(g, new RectangleF(Cx + 358, textChipY, 46, ToggleChipHeight), "单字", _textWordTab == 0, 415);
+            PaintTextToggleChip(g, new RectangleF(Cx + 408, textChipY, 46, ToggleChipHeight), "词组", _textWordTab == 1, 416);
+            PaintTextToggleChip(g, new RectangleF(Cx + 458, textChipY, 46, ToggleChipHeight), "应用", _textWordTab == 2, 418);
             PaintTextTopChars(g, Cx + 18, Cy + 320 + 40, 520 - 36, 168 - 50, slice);
 
             // ---- 右下:最近上屏 ----
             PaintCard(g, Cx + 537, Cy + 320, 295, 168, "最近上屏");
-            RectangleF blurRect = new RectangleF(Cx + Cw - 16 - 172, Cy + 320 + 9, 56, 24);
-            _chips.Add(blurRect); _chipIds.Add(408);
-            PaintTextControl(g, blurRect, _textBlurRecent ? "明文" : "模糊", _textBlurRecent);
-            _textRefreshRect = new RectangleF(Cx + Cw - 16 - 108, Cy + 320 + 9, 108, 24);
-            _chips.Add(_textRefreshRect);
-            _chipIds.Add(405);
+            PaintTextToggleChip(g, new RectangleF(Cx + Cw - 16 - 172, textChipY, 56, ToggleChipHeight),
+                _textBlurRecent ? "明文" : "模糊", _textBlurRecent, 408);
+            _textRefreshRect = new RectangleF(Cx + Cw - 16 - 108, textChipY, 108, ToggleChipHeight);
+            PaintTextToggleChip(g, _textRefreshRect, "刷新 " + RimeTextStats.RefreshLabel(Store.TextRefreshSeconds) + " ▾", false, 405);
             AddTextHit(_textRefreshRect, 7, 0);
-            PaintTextControl(g, _textRefreshRect, "刷新 " + RimeTextStats.RefreshLabel(Store.TextRefreshSeconds) + " ▾", false);
             PaintTextRecent(g, Cx + 537 + 18, Cy + 320 + 40, 295 - 36, 168 - 50, slice);
 
             // ---- 悬停:高亮 + 浮层,同时把明细交给 Ctrl+C ----
@@ -359,30 +365,27 @@ namespace KeyMouseStats
             AppText(g, note, _fAxis, Csub, new RectangleF(x + 18, y + 66, w - 36, 16), false);
         }
 
-        private void PaintTextControl(Graphics g, RectangleF r, string label, bool selected)
+        /// <summary>
+        /// 卡片内切换器:标准 ToggleChip(h30 / r8 / Ccard 底板 + Cline 描边)。
+        /// 旧实现是 h24 / r7 / 无描边的私有小方块,字色还直接取 Cblue —— 在大侠主题下
+        /// 是暗红字压深棕底(实测 2.58:1)。现在统一走 PaintToggleChip:
+        /// 选中用 ChipSelectedInk() 按真实底色择优,未选中用 FilterInkColor()。
+        /// </summary>
+        private void PaintTextToggleChip(Graphics g, RectangleF r, string label, bool selected, int id)
         {
-            PointF mouse = ToBase(_mouse);
-            bool hover = r.Contains(new PointF(mouse.X - ContentX, mouse.Y - ContentY));
-            using (GraphicsPath path = RoundedRect(r.X, r.Y, r.Width, r.Height, 7))
-            using (SolidBrush fill = new SolidBrush(selected ? ArtTheme.Mix(Ccard, Cblue, 0.22) : hover ? Ccard2 : Ccard))
-                g.FillPath(fill, path);
-            using (SolidBrush ink = new SolidBrush(selected ? Cblue : Csub))
-            using (StringFormat format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
-                g.DrawString(label, _fSmall, ink, r, format);
+            PaintToggleChip(g, r, label, selected, id);
         }
 
-        /// <summary>卡片右上角的一组模式 chip。baseId 起头,按顺序 +0/+1/…。</summary>
+        /// <summary>卡片右上角的一组模式 chip。ids 按顺序对应 names。</summary>
         private void PaintTextModeChips(Graphics g, float x, float y, float w, int[] ids, int selected, string[] names)
         {
-            const float chipW = 44, chipH = 24, chipGap = 6;
+            float chipW = TextModeChipWidth, chipH = ToggleChipHeight, chipGap = 6;
             float groupWidth = chipW * names.Length + chipGap * (names.Length - 1);
             float left = x + w - 8 - groupWidth;
             for (int i = 0; i < names.Length; i++)
             {
                 RectangleF rect = new RectangleF(left + i * (chipW + chipGap), y + 9, chipW, chipH);
-                _chips.Add(rect);
-                _chipIds.Add(ids[Math.Min(i, ids.Length - 1)]);
-                PaintTextControl(g, rect, names[i], selected == i);
+                PaintTextToggleChip(g, rect, names[i], selected == i, ids[Math.Min(i, ids.Length - 1)]);
             }
         }
 
@@ -413,32 +416,30 @@ namespace KeyMouseStats
             return previous.HasData ? previous : null;
         }
 
-        /// <summary>区间筛选 chip:画在「每日字数」卡片右上角。</summary>
+        /// <summary>
+        /// 顶部时间区间筛选(今日 / 近 7 天 / 近 30 天 / 全部)。
+        /// 以前这里是自己画 4 颗 56×24、r7、无描边的小方块,直接压在页面原画上:
+        /// 既没有 PaintSegmentTray 的近不透明底板(亮部原画会透上来),选中字色又直接取 Cblue ——
+        /// 大侠主题下是暗红字压深棕底,实测 2.58:1。现在整组交给标准 PaintSegmentGroup:
+        /// 托盘底板、段圆角、未选中字色(FilterInkColor)、选中字色(ChipSelectedInk)全部复用同一套。
+        /// </summary>
         private void PaintTextRangeChips(Graphics g, float x, float y, float w)
         {
-            const float chipW = 56, chipH = 24, chipGap = 6;
-            float left = x + w - 8 - (chipW * TextRangeNames.Length + chipGap * (TextRangeNames.Length - 1));
-            for (int i = 0; i < TextRangeNames.Length; i++)
-            {
-                RectangleF rect = new RectangleF(left + i * (chipW + chipGap), y + 9, chipW, chipH);
-                _chips.Add(rect);
-                _chipIds.Add(400 + i);
-                PaintTextControl(g, rect, TextRangeNames[i], _textRange == i);
-            }
+            int[] ids = new int[TextRangeNames.Length];
+            for (int i = 0; i < ids.Length; i++) ids[i] = 400 + i;
+            PaintSegmentGroup(g, x + w - TextRangeTrayWidth, y, TextRangeTrayWidth, TextRangeNames, ids, _textRange, false);
         }
 
         /// <summary>图表切换 chip:每日 / 时段。放在区间筛选左边。</summary>
         private void PaintTextChartChips(Graphics g, float x, float y, float w)
         {
-            const float chipW = 44, chipH = 24, chipGap = 6;
-            // 区间 chip 占右侧:4 个 56 宽 + 3 个间隙。图表切换排在它们左边,留 10 px 间隔。
-            float left = x + w - 16 - (chipW * 2 + chipGap);
+            float chipGap = 6;
+            // 区间托盘占右侧 248 宽。图表切换排在它们左边,留 16 px 间隔。
+            float left = x + w - 16 - (TextChartChipWidth * 2 + chipGap);
             for (int i = 0; i < 2; i++)
             {
-                RectangleF rect = new RectangleF(left + i * (chipW + chipGap), y + 9, chipW, chipH);
-                _chips.Add(rect);
-                _chipIds.Add(406 + i);
-                PaintTextControl(g, rect, i == 0 ? "每日" : "时段", _textChart == i);
+                RectangleF rect = new RectangleF(left + i * (TextChartChipWidth + chipGap), y + 9, TextChartChipWidth, ToggleChipHeight);
+                PaintTextToggleChip(g, rect, i == 0 ? "每日" : "时段", _textChart == i, 406 + i);
             }
         }
 
@@ -881,7 +882,7 @@ namespace KeyMouseStats
             AppText(g, "字符内容更敏感，所以它不进入 stats.txt、不参与导出合并、也不与应用或窗口关联。",
                 _fSmall, Csub, new RectangleF(x, y + 172, w, 20), false);
 
-            RectangleF refresh = new RectangleF(Cx + Cw - 132, Cy + 14, 108, 26);
+            RectangleF refresh = new RectangleF(Cx + Cw - 132, Cy + 12, 108, ToggleChipHeight);
             _chips.Add(refresh);
             _chipIds.Add(404);
             AddTextHit(refresh, 7, 0);

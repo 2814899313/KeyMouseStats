@@ -132,6 +132,50 @@ namespace KeyMouseStats
             amount = Math.Max(0, Math.Min(1, amount));
             return Color.FromArgb((int)(a.R + (b.R - a.R) * amount), (int)(a.G + (b.G - a.G) * amount), (int)(a.B + (b.B - a.B) * amount));
         }
+
+        // ---- 对比度工具(供筛选胶囊底板/测试共用) ------------------------------------
+        // 美术主题的原画是任意像素,任何"看起来很淡"的底板都必须按最坏情况(全白亮部)
+        // 算一次对比度,否则就会出现「深色主题下勉强能看、压到灯笼上就消失」的问题。
+
+        /// <summary>把前景色按 alpha(0-255)叠到不透明背景色上,返回合成后的颜色。</summary>
+        public static Color Composite(Color foreground, int alpha, Color background)
+        {
+            int a = Math.Max(0, Math.Min(255, alpha));
+            return Color.FromArgb((foreground.R * a + background.R * (255 - a)) / 255,
+                (foreground.G * a + background.G * (255 - a)) / 255,
+                (foreground.B * a + background.B * (255 - a)) / 255);
+        }
+
+        /// <summary>WCAG 2.1 相对亮度(0 全黑 ~ 1 全白)。与简单的 R/G/B 加权平均不同,含 sRGB 线性化。</summary>
+        public static double RelativeLuminance(Color c)
+        {
+            return 0.2126 * LinearChannel(c.R) + 0.7152 * LinearChannel(c.G) + 0.0722 * LinearChannel(c.B);
+        }
+
+        private static double LinearChannel(int value)
+        {
+            double v = value / 255.0;
+            return v <= 0.04045 ? v / 12.92 : Math.Pow((v + 0.055) / 1.055, 2.4);
+        }
+
+        /// <summary>两色对比度(1~21)。正文小字按 WCAG AA 需 ≥ 4.5:1。</summary>
+        public static double ContrastRatio(Color a, Color b)
+        {
+            double la = RelativeLuminance(a), lb = RelativeLuminance(b);
+            return (Math.Max(la, lb) + 0.05) / (Math.Min(la, lb) + 0.05);
+        }
+
+        /// <summary>
+        /// 筛选胶囊托盘的不透明度。纯色主题的背景是平的,7% 的近白雾足够;
+        /// 美术主题的原画会从这个 alpha 里透上来,必须抬到与卡片(216~236)同一档的近不透明。
+        /// </summary>
+        public static int FilterPlateAlpha { get { return ThemeArt.Active ? 232 : 18; } }
+
+        /// <summary>滤镜托盘用的底色:纯色主题沿用近白的 Ctext(轻雾),美术主题改用卡片底色。</summary>
+        public static Color FilterPlateColor { get { return ThemeArt.Active ? Current.Card : Current.Text; } }
+
+        /// <summary>美术主题下未选中胶囊的字色透明度。Csub 是按深色底调的中灰,压在亮原画上只有 1.3~1.9:1。</summary>
+        public static int FilterInkAlpha { get { return ThemeArt.Active ? 214 : 255; } }
     }
 
     internal sealed partial class Dashboard
@@ -216,6 +260,23 @@ namespace KeyMouseStats
                 {
                     for (int x = ContentX; x < BW; x += 24) g.DrawLine(p, x, 0, x, BH);
                     for (int y = 0; y < BH; y += 24) g.DrawLine(p, ContentX, y, BW, y);
+                }
+            }
+            // 页脚说明栏底衬:高山/雪地/车灯这类高光原画会把底部提示文字淹掉。
+            // 在内容区底部压一段向下加深的渐变(画在卡片之前,卡片仍按自己的不透明度盖上去),
+            // 给页脚文字一个稳定的深色底,同时把卡片背后的原画线条再压暗一层。
+            if (ThemeArt.Dark)
+            {
+                Color shade = ArtTheme.Current.Background;
+                float top = ContentY + Cb - 74;
+                RectangleF band = new RectangleF(ContentX, top, BW - ContentX, BH - top);
+                using (LinearGradientBrush scrim = new LinearGradientBrush(band, Color.FromArgb(0, shade), Color.FromArgb(196, shade), 90f))
+                {
+                    ColorBlend blend = new ColorBlend(3);
+                    blend.Colors = new[] { Color.FromArgb(0, shade), Color.FromArgb(132, shade), Color.FromArgb(196, shade) };
+                    blend.Positions = new[] { 0f, 0.62f, 1f };
+                    scrim.InterpolationColors = blend;
+                    g.FillRectangle(scrim, band);
                 }
             }
         }

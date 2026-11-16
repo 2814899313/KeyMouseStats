@@ -29,10 +29,34 @@ internal static class StatisticsTests
         Near(PersonalStats.Metric(day, 2), 60, "clicks per active minute"); Near(PersonalStats.Metric(day, 3), .1, "meters per operation");
         Near(PersonalStats.Metric(day, 4), 30, "wheel intensity"); Near(PersonalStats.Metric(day, 5), 10, "combo percentage");
         for (int i = 1; i <= 7; i++) Store.History[DateTime.Today.AddDays(-i)] = new DayRecord { Date = DateTime.Today.AddDays(-i), Keys = i };
-        Near(PersonalStats.MovingAverage(DateTime.Today.AddDays(-1), 0), 4, "7 day mean excludes candidate day");
+        // 窗口 [d-7, d-1] 含候选日自己:今天-1 的 7 个完整日是 today-7..today-1(1..7),均值 4。
+        Near(PersonalStats.MovingAverage(DateTime.Today.AddDays(-1), 0), 4, "7 day mean includes the candidate day");
         Store.History.Remove(DateTime.Today.AddDays(-4));
         Check(double.IsNaN(PersonalStats.MovingAverage(DateTime.Today.AddDays(-1), 0)), "missing day breaks moving mean");
         Check(PersonalStats.History(DateTime.Today.AddDays(-1), 7, delegate(DayRecord d) { return d.Keys; }).Count == 6, "coverage excludes missing days");
+        // 趋势页「有效数据日」:缺失日与"有条目但全 0"的空壳日都不算,有内容的才算。
+        DateTime shell = DateTime.Today.AddDays(-2);
+        Store.History[shell] = new DayRecord { Date = shell };
+        Check(!Analysis.HasRecord(shell), "empty shell day is not a valid trend day");
+        Check(!Analysis.HasRecord(DateTime.Today.AddDays(-4)), "missing day is not a valid trend day");
+        Check(Analysis.HasRecord(DateTime.Today.AddDays(-1)), "non-empty day is a valid trend day");
+        // 主折线断线:任一端无有效数据就不画;今天的最后一段留给虚线。
+        Check(!Dashboard.TrendSegmentDrawn(false, true, true, 1, 5), "a missing left endpoint breaks the polyline");
+        Check(!Dashboard.TrendSegmentDrawn(true, false, true, 2, 5), "a missing right endpoint breaks the polyline");
+        Check(Dashboard.TrendSegmentDrawn(true, true, true, 2, 5), "segments between two valid days are drawn");
+        Check(!Dashboard.TrendSegmentDrawn(true, true, true, 4, 5), "today's last segment is dashed, not solid");
+        // 区间日均:只有今天有数据时不得编造均值;空壳日不得进分母。
+        List<Dashboard.AnalysisPt> trend = new List<Dashboard.AnalysisPt>();
+        trend.Add(new Dashboard.AnalysisPt { Day = DateTime.Today, V = 500, HasData = true });
+        int trendCount;
+        Check(double.IsNaN(Dashboard.TrendAverage(trend, true, out trendCount)) && trendCount == 0,
+            "only today has data, so the daily average is missing instead of fabricated");
+        trend.Insert(0, new Dashboard.AnalysisPt { Day = DateTime.Today.AddDays(-1), V = 0, HasData = false });
+        Check(double.IsNaN(Dashboard.TrendAverage(trend, true, out trendCount)) && trendCount == 0,
+            "an empty shell day never enters the average denominator");
+        trend.Insert(0, new Dashboard.AnalysisPt { Day = DateTime.Today.AddDays(-2), V = 300, HasData = true });
+        Near(Dashboard.TrendAverage(trend, true, out trendCount), 300, "a valid complete day drives the average");
+        Check(trendCount == 1, "the average counts only valid complete days");
         day.ActiveHours[12] = 60; day.HourKeys[12] = 120; day.HourClicks[12] = 10;
         Near(Dashboard.HourlyValues(day, DateTime.Today, 2, DateTime.Today.AddHours(13))[12], 1, "hourly active minutes");
         Near(Dashboard.HourlyValues(day, DateTime.Today, 3, DateTime.Today.AddHours(13))[12], 120, "hourly key intensity per active minute");

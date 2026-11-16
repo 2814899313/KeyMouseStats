@@ -35,7 +35,11 @@ namespace KeyMouseStats
 
         private void ApplyDayChip(int id)
         {
-            if (id == 420) { _dayShown = _dayShown.AddDays(-1); _dayReport = null; Motion.Start(EnterMotionKey, 240, Ease.OutCubic); return; }
+            if (id == 420)
+            {
+                if (!CanStepDay(-1)) return;      // 到 364 天下界就停,不再翻进没有数据的年份
+                _dayShown = _dayShown.AddDays(-1); _dayReport = null; Motion.Start(EnterMotionKey, 240, Ease.OutCubic); return;
+            }
             if (id == 421)
             {
                 DateTime next = _dayShown.AddDays(1);
@@ -109,11 +113,12 @@ namespace KeyMouseStats
                 g.FillPath(fill, path);
             AppText(g, status, _fAxis, r.HasData ? Cgreen : Csub, pill, true);
 
-            // 前后一天
-            _dayPrevRect = new RectangleF(x + w - 76, y + 9, 26, 22);
-            _dayNextRect = new RectangleF(x + w - 44, y + 9, 26, 22);
-            PaintDayArrow(g, _dayPrevRect, false);
-            PaintDayArrow(g, _dayNextRect, true);
+            // 前后一天:与全站步进器同一套几何(h30 / r8),基于 Cx+Cw 相对定位。
+            // 旧版是 26×22 的私有小方块、radius 7、无描边,而且左箭头永远 enable —— 可以一直翻到没有数据的年份。
+            _dayPrevRect = new RectangleF(x + w - 78, y + 8, StepChipHeight, StepChipHeight);
+            _dayNextRect = new RectangleF(x + w - 40, y + 8, StepChipHeight, StepChipHeight);
+            PaintStepArrow(g, _dayPrevRect, false, CanStepDay(-1), 420);
+            PaintStepArrow(g, _dayNextRect, true, CanStepDay(1), 421);
 
             // 对比口径放在标题行，摘要与数字各自占用固定区域。
             AppText(g, r.BaseDays > 0 ? "较" + r.BaselineLabel : "暂无对比基准", _fAxis, Csub,
@@ -136,23 +141,14 @@ namespace KeyMouseStats
             DrawDayMetric(g, x + 18 + metricW * 3, metricY, metricW, "上屏", r.HasChars ? Analysis.FmtCount(r.Chars) + " 字" : "—", r.Chars, r.BaseChars);
         }
 
-        private void PaintDayArrow(Graphics g, RectangleF rect, bool right)
+        /// <summary>日报能翻到的最早一天:与「使用洞察」的 364 天窗口、页脚「本地记录 365 天」对齐。</summary>
+        internal const int DayHistoryDays = 364;
+
+        /// <summary>这一天是否可翻。到边界时按钮灰化且不登记命中区,不会再出现「点了没反应」。</summary>
+        internal bool CanStepDay(int delta)
         {
-            PointF p = ToBase(_mouse);
-            bool enabled = !right || _dayShown < DateTime.Today;
-            bool hov = enabled && rect.Contains(new PointF(p.X - ContentX, p.Y - ContentY));
-            using (GraphicsPath path = RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, 7))
-            using (SolidBrush fill = new SolidBrush(hov ? Ccard2 : Color.FromArgb(20, Ctext))) g.FillPath(fill, path);
-            using (Pen pen = new Pen(enabled ? (hov ? Ctext : Csub) : Color.FromArgb(65, Csub), 1.6f))
-            {
-                float cx = rect.X + rect.Width / 2, cy = rect.Y + rect.Height / 2;
-                float dir = right ? 1 : -1;
-                g.DrawLine(pen, cx - 3 * dir, cy - 5, cx + 2 * dir, cy);
-                g.DrawLine(pen, cx + 2 * dir, cy, cx - 3 * dir, cy + 5);
-            }
-            if (!enabled) return;
-            _chips.Add(rect);
-            _chipIds.Add(right ? 421 : 420);
+            DateTime next = _dayShown.AddDays(delta);
+            return next >= DateTime.Today.AddDays(-DayHistoryDays) && next <= DateTime.Today;
         }
 
         private void DrawDayMetric(Graphics g, float x, float y, float w, string label, string value, double current, double baseValue)

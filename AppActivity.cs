@@ -104,11 +104,35 @@ namespace KeyMouseStats
 
     internal static class AppActivity
     {
+        /// <summary>友好名缓存(进程路径 → 显示名)。列表每帧重绘都要取名字,FileVersionInfo 读盘只能发生一次。</summary>
+        private static readonly Dictionary<string, string> FriendlyNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly object FriendlyNameLock = new object();
+        /// <summary>上限只防异常输入把缓存撑爆;正常机器上的应用数量远小于它。</summary>
+        private const int FriendlyNameCacheLimit = 512;
+
         /// <summary>
         /// 统一的友好应用名：优先文件描述，其次常见进程映射，最后去掉 .exe 的进程名。
         /// 日报、应用统计、提示文案都从这里取，避免同一程序在不同页面显示不同名字。
+        /// 结果按路径缓存在内存里：GDI+ 每帧重绘都会取一次名字，不能每次都去读文件版本信息。
         /// </summary>
         public static string FriendlyName(string processPath)
+        {
+            string key = processPath ?? "";
+            lock (FriendlyNameLock)
+            {
+                string cached;
+                if (FriendlyNames.TryGetValue(key, out cached)) return cached;
+            }
+            string name = ComputeFriendlyName(key);
+            lock (FriendlyNameLock)
+            {
+                // 两帧同时首次命中同一路径最多各算一次,结果一致;这里只管别让缓存无限长。
+                if (FriendlyNames.Count < FriendlyNameCacheLimit) FriendlyNames[key] = name;
+            }
+            return name;
+        }
+
+        private static string ComputeFriendlyName(string processPath)
         {
             string baseName = ProcessBaseName(processPath);
             if (baseName.Length == 0) return "未识别应用";
@@ -355,7 +379,8 @@ namespace KeyMouseStats
                     Row row;
                     if (!rows.TryGetValue(id, out row))
                     {
-                        row = new Row { Id = id, Name = byWindow ? app.Title : app.AppName,
+                        // 列表与详情抽屉/日报共用同一套友好名:按应用时不再显示 chrome.exe 这种进程名。
+                        row = new Row { Id = id, Name = byWindow ? app.Title : FriendlyName(app.ProcessPath),
                             Detail = byWindow ? app.AppName : app.ProcessPath, ProcessPath = app.ProcessPath,
                             Window = byWindow ? app : null, Category = category, Source = classification.Source, Reason = classification.Reason };
                         rows[id] = row;

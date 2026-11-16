@@ -89,7 +89,7 @@ namespace KeyMouseStats
         };
 
         /// <summary>槽位号 → 颜色。槽位由主题决定,所以九套主题各自成立。</summary>
-        private static Color Slot(int slot)
+        internal static Color Slot(int slot)
         {
             ArtTheme t = ArtTheme.Current;
             switch (((slot % Slots) + Slots) % Slots)
@@ -100,13 +100,105 @@ namespace KeyMouseStats
                 case 3: return t.Green;
                 case 4: return t.Red;
                 case 5: return t.Accent;
-                // 6–9 用主题色两两混合:六个槽位不够把实测的高频键分开,
-                // 混合出来的中间色与六个基色距离足够远,肉眼可区分。
-                case 6: return ArtTheme.Mix(t.Purple, t.Cyan, 0.5);
-                case 7: return ArtTheme.Mix(t.Orange, t.Red, 0.5);
-                case 8: return ArtTheme.Mix(t.Green, t.Cyan, 0.45);
-                default: return ArtTheme.Mix(t.Accent, t.Purple, 0.5);
+                // 6–9 是「色相环空隙填充」而不是基色两两插值。
+                // 旧写法 Mix(Purple,Cyan,.5) 这类插值必然落在两个基色的色相之间,而基色本身
+                // 已经在用 —— 10 槽里有 4 槽是「插值再插值」,撞色是数学必然而不是调参失误。
+                // 实测撞得最惨的两对:槽 1 Cyan #4CC9F0 与槽 8 Mix(Green,Cyan,.45) #4BCEC8
+                // 只差 ΔB=40(9px 图例点肉眼难辨);槽 5 Accent #729BFF 与槽 9 只差 ΔG=1。
+                default: return Overflow()[((slot % Slots) + Slots) % Slots - 6];
             }
+        }
+
+        private static int overflowTheme = -1;
+        private static Color[] overflow;
+
+        /// <summary>
+        /// 槽位 6–9:把 6 个基色投到色相环上,取最大的 4 个空隙,把新色相放在空隙中点。
+        /// 这样新色与任何基色的色相距离都有几何下界,不会因为主题换色而撞车。
+        /// 结果按主题缓存 —— 同一主题任何时候都返回同一组颜色,跨会话稳定。
+        /// </summary>
+        private static Color[] Overflow()
+        {
+            int id = ArtTheme.Validate(Store.ThemeId);
+            if (overflow != null && overflowTheme == id) return overflow;
+            ArtTheme t = ArtTheme.Current;
+            Color[] bases = { t.Purple, t.Cyan, t.Orange, t.Green, t.Red, t.Accent };
+            double[] hues = new double[bases.Length];
+            double sumSaturation = 0, sumLight = 0;
+            for (int i = 0; i < bases.Length; i++)
+            {
+                double h, s, l;
+                ToHsl(bases[i], out h, out s, out l);
+                hues[i] = h;
+                sumSaturation += s;
+                sumLight += l;
+            }
+            double saturation = Math.Min(0.88, Math.Max(0.42, sumSaturation / bases.Length));
+            double light = Math.Min(0.74, Math.Max(0.44, sumLight / bases.Length));
+
+            // 按色相排序(下标一起动),再算 6 个环形空隙与中点。
+            double[] sorted = (double[])hues.Clone();
+            Array.Sort(sorted);
+            double[] gapSize = new double[sorted.Length];
+            double[] gapMid = new double[sorted.Length];
+            for (int i = 0; i < sorted.Length; i++)
+            {
+                double next = i + 1 < sorted.Length ? sorted[i + 1] : sorted[0] + 360.0;
+                gapSize[i] = next - sorted[i];
+                gapMid[i] = sorted[i] + gapSize[i] / 2.0;
+            }
+            // 取最大的 4 个空隙;空隙大小相同时按下标稳定排序,保证结果确定。
+            int[] order = new int[gapSize.Length];
+            for (int i = 0; i < order.Length; i++) order[i] = i;
+            Array.Sort(order, delegate (int a, int b)
+            {
+                int byGap = gapSize[b].CompareTo(gapSize[a]);
+                return byGap != 0 ? byGap : a.CompareTo(b);
+            });
+            Color[] result = new Color[4];
+            for (int i = 0; i < result.Length; i++)
+                result[i] = FromHsl(gapMid[order[i]] % 360.0, saturation, light);
+            overflow = result;
+            overflowTheme = id;
+            return result;
+        }
+
+        private static void ToHsl(Color color, out double hue, out double saturation, out double light)
+        {
+            double r = color.R / 255.0, g = color.G / 255.0, b = color.B / 255.0;
+            double max = Math.Max(r, Math.Max(g, b)), min = Math.Min(r, Math.Min(g, b));
+            double delta = max - min;
+            light = (max + min) / 2.0;
+            if (delta <= 1e-9) { hue = 0; saturation = 0; return; }
+            saturation = light > 0.5 ? delta / (2.0 - max - min) : delta / (max + min);
+            if (max == r) hue = (g - b) / delta + (g < b ? 6.0 : 0.0);
+            else if (max == g) hue = (b - r) / delta + 2.0;
+            else hue = (r - g) / delta + 4.0;
+            hue *= 60.0;
+        }
+
+        private static Color FromHsl(double hue, double saturation, double light)
+        {
+            hue = ((hue % 360.0) + 360.0) % 360.0;
+            if (saturation <= 1e-9)
+            {
+                int gray = (int)Math.Round(Math.Max(0, Math.Min(1, light)) * 255);
+                return Color.FromArgb(gray, gray, gray);
+            }
+            double c = (1 - Math.Abs(2 * light - 1)) * saturation;
+            double x = c * (1 - Math.Abs((hue / 60.0) % 2 - 1));
+            double m = light - c / 2;
+            double r, g, b;
+            if (hue < 60) { r = c; g = x; b = 0; }
+            else if (hue < 120) { r = x; g = c; b = 0; }
+            else if (hue < 180) { r = 0; g = c; b = x; }
+            else if (hue < 240) { r = 0; g = x; b = c; }
+            else if (hue < 300) { r = x; g = 0; b = c; }
+            else { r = c; g = 0; b = x; }
+            return Color.FromArgb(
+                Math.Max(0, Math.Min(255, (int)Math.Round((r + m) * 255))),
+                Math.Max(0, Math.Min(255, (int)Math.Round((g + m) * 255))),
+                Math.Max(0, Math.Min(255, (int)Math.Round((b + m) * 255))));
         }
 
         /// <summary>长尾键的稳定取色:同一按键名在任何区间、任何一次运行都得到同一颜色。</summary>

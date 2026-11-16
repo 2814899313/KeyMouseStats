@@ -41,6 +41,45 @@ namespace KeyMouseStats
         {using(GraphicsPath path=Round(rect,Math.Min(12,Math.Max(3,ArtTheme.Current.Radius)))){using(SolidBrush b=new SolidBrush(fill))g.FillPath(b,path);using(Pen p=new Pen(line))g.DrawPath(p,path);}}
         public static void Text(Graphics g,string text,Font font,Color color,RectangleF rect)
         {using(SolidBrush b=new SolidBrush(color))using(StringFormat f=new StringFormat{Trimming=StringTrimming.EllipsisCharacter,FormatFlags=StringFormatFlags.NoWrap})g.DrawString(text,font,b,rect,f);}
+
+        // ---- 连续段(专注段)口径:面板与报告共用同一套阈值和公式 ----------------------
+        // 以前两处各写一遍,面板按浮点算成 98%、报告按整数除法算成 97%;
+        // 而且分子把 5–30 分钟的段也算成"碎片",和左侧四档分布卡的第一档语义打架。
+
+        /// <summary>四档段长分布的边界(秒):5 / 30 / 60 分钟。标签与阈值必须一起看。</summary>
+        public static readonly string[] SegmentBinNames={"< 5 分钟","5–30 分钟","30–60 分钟","≥ 60 分钟"};
+        /// <summary>短段(旧称碎片)阈值:短于 5 分钟的段,同时是四档分布第一档的上界。</summary>
+        public const double ShortSegmentSeconds=300;
+        /// <summary>第二档上界:30 分钟。</summary>
+        public const double MediumSegmentSeconds=1800;
+        /// <summary>第三档上界:60 分钟。恰好 3600 秒归入最后一档(标签是「≥ 60 分钟」)。</summary>
+        public const double LongSegmentSeconds=3600;
+        /// <summary>段长落在第几档:0 &lt;5 分钟 / 1 5–30 分钟 / 2 30–60 分钟 / 3 ≥60 分钟。</summary>
+        public static int SegmentBin(double seconds)
+        {
+            if(seconds<ShortSegmentSeconds)return 0;
+            if(seconds<MediumSegmentSeconds)return 1;
+            if(seconds<LongSegmentSeconds)return 2;
+            return 3;
+        }
+        /// <summary>把一组段按四档计数。空值与非正时长不计入,与面板的 sessions 过滤一致。</summary>
+        public static int[] SegmentBins(IEnumerable<ActiveSession> sessions)
+        {
+            int[] bins=new int[4];
+            if(sessions==null)return bins;
+            foreach(ActiveSession session in sessions)
+                if(session!=null&&session.Seconds>0)bins[SegmentBin(session.Seconds)]++;
+            return bins;
+        }
+        /// <summary>
+        /// 短段占比 = 短于 5 分钟的段数 ÷ 总段数。只把第一档算碎片,与左侧「&lt; 5 分钟」卡对齐;
+        /// 按段数加权而不是时长:它描述"有多少段是短的",不描述"多少时间被切碎"。
+        /// </summary>
+        public static string ShortShare(int shortCount,int total)
+        {
+            if(total<=0)return "--";
+            return (100.0*shortCount/total).ToString("0",CultureInfo.InvariantCulture)+"%";
+        }
     }
     internal sealed class ReportPage : Panel
     {

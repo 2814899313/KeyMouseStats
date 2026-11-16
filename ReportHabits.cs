@@ -426,9 +426,11 @@ namespace KeyMouseStats
         {
             ReportDesign.Surface(g,r,ArtTheme.Mix(t.Background,t.Card,.35f),Color.FromArgb(20,t.Text));
             TextAt(g,"专注段分布",small,t.Text,r.X+14,r.Y+12,r.Width-28);
-            int[] bins=new int[4];foreach(ActiveSession session in sessions){if(session.Seconds<300)bins[0]++;else if(session.Seconds<1800)bins[1]++;else if(session.Seconds<3600)bins[2]++;else bins[3]++;}
+            // 阈值与"短段占比"公式与主面板共用 ReportDesign,避免两页各算一套(以前 47/48 在这里是 97%、在面板是 98%)。
+            int[] bins=ReportDesign.SegmentBins(sessions);
+            string[] names=ReportDesign.SegmentBinNames;
             int max=1;foreach(int value in bins)max=Math.Max(max,value);
-            string[] names={"< 5 分钟","5 - 30 分钟","30 - 60 分钟","> 60 分钟"};            for(int i=0;i<4;i++)
+            for(int i=0;i<4;i++)
             {
                 float y=r.Y+44+i*32;TextAt(g,names[i],tiny,t.Muted,r.X+14,y,r.Width-80);
                 float barW=(r.Width-130)*(float)bins[i]/max;
@@ -436,8 +438,8 @@ namespace KeyMouseStats
                 if(bins[i]>0)Fill(g,i==3?t.Orange:t.Accent,r.X+112,y+3,Math.Max(3,barW),9);
                 TextAt(g,bins[i]+" 次",tiny,t.Text,r.Right-60,y,r.Width-64);
             }
-            int total=sessions.Count,shortCount=bins[0]+bins[1];
-            string summary=total==0?"暂无样本":"碎片占比 "+(shortCount*100/total)+"% · 长段占比 "+(bins[3]*100/total)+"%";
+            int total=sessions.Count;
+            string summary=total==0?"暂无样本":"短段占比 (<5m) "+ReportDesign.ShortShare(bins[0],total)+" · 长段占比 "+ReportDesign.ShortShare(bins[3],total);
             TextAt(g,summary,tiny,t.Muted,r.X+14,r.Bottom-26,r.Width-28);
         }
         private void LiveMouseMove(MouseEventArgs e)

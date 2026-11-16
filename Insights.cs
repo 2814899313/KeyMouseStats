@@ -51,6 +51,15 @@ namespace KeyMouseStats
         private int _calendarSpan = -1;   // 0 近3个月 1 近半年 2 全年,-1 按数据量自动
         private DateTime _insightDay = DateTime.Today;
         private readonly Dictionary<RectangleF, DateTime> _insightDates = new Dictionary<RectangleF, DateTime>();
+        /// <summary>洞察页能回看的最早一天,与「本地记录 365 天」一致。</summary>
+        internal const int InsightHistoryDays = 364;
+
+        /// <summary>这一天是否可翻。抽出来给按钮判禁用:边界处灰化且不登记命中区。</summary>
+        internal bool CanStepInsight(int delta)
+        {
+            DateTime next = _insightDay.AddDays(delta);
+            return next >= DateTime.Today.AddDays(-InsightHistoryDays) && next <= DateTime.Today;
+        }
 
         private void ApplyInsightChip(int id)
         {
@@ -61,7 +70,7 @@ namespace KeyMouseStats
             if (id == 220) _insightDay = _insightDay.AddDays(-1);
             if (id == 221) _insightDay = _insightDay.AddDays(1);
             if (id == 222) _insightDay = DateTime.Today;
-            if (_insightDay < DateTime.Today.AddDays(-364)) _insightDay = DateTime.Today.AddDays(-364);
+            if (_insightDay < DateTime.Today.AddDays(-InsightHistoryDays)) _insightDay = DateTime.Today.AddDays(-InsightHistoryDays);
             if (_insightDay > DateTime.Today) _insightDay = DateTime.Today;
             if (id == 230) _sessionPage = Math.Max(0, _sessionPage - 1);
             else if (id == 231) _sessionPage++;
@@ -232,9 +241,14 @@ namespace KeyMouseStats
 
         private void PaintSessionTimeline(Graphics g)
         {
-            AppChip(g, 220, 602, 98, 72, "前一天", false);
-            AppChip(g, 222, 684, 98, 80, "回今天", false);
-            AppChip(g, 221, 774, 98, 82, "后一天", false);
+            // 前一天 / 回今天 / 后一天:三个等长标签用同一个宽度,整组右对齐到 Cx+Cw。
+            // 旧版把 x 写死成 602 / 684 / 774(与窗口宽度无关,缩放必错位),宽度还是 72/80/82
+            // 三个不同的值;而且到边界时按钮照样是"可用"的外观,点了静默无反应。
+            float stepW = 80, stepGap = 8;
+            float stepLeft = Cx + Cw - (stepW * 3 + stepGap * 2);
+            PaintStepChip(g, new RectangleF(stepLeft, 98, stepW, StepChipHeight), "前一天", CanStepInsight(-1), 220);
+            PaintStepChip(g, new RectangleF(stepLeft + stepW + stepGap, 98, stepW, StepChipHeight), "回今天", _insightDay != DateTime.Today, 222);
+            PaintStepChip(g, new RectangleF(stepLeft + (stepW + stepGap) * 2, 98, stepW, StepChipHeight), "后一天", CanStepInsight(1), 221);
             DayRecord day = Analysis.GetDay(_insightDay);
             bool known = TimeInsights.HasTime(day);
             List<ActiveSession> gaps = TimeInsights.LongGaps(day, 15 * 60);

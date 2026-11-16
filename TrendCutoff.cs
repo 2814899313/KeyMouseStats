@@ -25,6 +25,8 @@ namespace KeyMouseStats
             public double? Percent;
             /// <summary>不可用原因或补充说明。</summary>
             public string Note = "";
+            /// <summary>今日同期一个输入都没有,但昨日同期有量:页面应给中性提示,而不是 -100% 红字。</summary>
+            public bool NoInputToday { get { return Available && Today <= 0; } }
         }
 
         /// <summary>
@@ -70,7 +72,7 @@ namespace KeyMouseStats
             return comparison;
         }
 
-        /// <summary>指标卡上的值:百分比 / 新增 / 累计中 / --。</summary>
+        /// <summary>指标卡上的值:百分比 / 今日尚无输入 / 新增 / 累计中 / --。</summary>
         public static string DeltaText(Comparison comparison)
         {
             if (comparison == null) return "--";
@@ -80,8 +82,13 @@ namespace KeyMouseStats
                 if (comparison.Today > 0) return "新增";
                 return "--";
             }
+            // 昨天有量、今天同期还是 0:这是"今天还没开始",不是 -100% 的暴跌。
+            if (comparison.NoInputToday) return "今日尚无输入";
             double percent = comparison.Percent.HasValue ? comparison.Percent.Value : 0;
-            return (percent >= 0 ? "+" : "") + percent.ToString("0", CultureInfo.InvariantCulture) + "%";
+            // 先按整数位四舍五入再定符号:-0.4% 以前会打成 "-0%",看起来像渲染错误。
+            double rounded = Math.Round(percent, MidpointRounding.AwayFromZero);
+            if (rounded == 0 && percent < 0) return "0%";
+            return (percent >= 0 ? "+" : "") + rounded.ToString("0", CultureInfo.InvariantCulture) + "%";
         }
 
         /// <summary>指标卡下方的小字:比较窗口 / 昨日同期基数 / 不可用原因。</summary>

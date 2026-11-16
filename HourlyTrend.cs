@@ -57,10 +57,20 @@ namespace KeyMouseStats
         private bool _trendHourly;
         private int _hourlyTrendMetric;
         private DateTime _hourlyTrendDay = DateTime.Today;
+        private DateTime _hourlyTodaySeen = DateTime.Today;
         private int _hourlyCompareMode = 1; // 0=关闭 1=昨天 2=上周同日 3=近N天 4=本周
         private int _hourlyCompareDays = 3;
         private bool _hourlyMenuOpen;
         private readonly List<RectangleF> _hourlyMenuRects = new List<RectangleF>();
+        /// <summary>小时趋势能回看的最早一天,与「本地记录 365 天」一致。</summary>
+        internal const int HourlyTrendHistoryDays = 364;
+
+        /// <summary>这一天是否可翻。抽出来给按钮判禁用:边界处灰化且不登记命中区。</summary>
+        internal bool CanStepHourlyTrend(int delta)
+        {
+            DateTime next = _hourlyTrendDay.AddDays(delta);
+            return next >= DateTime.Today.AddDays(-HourlyTrendHistoryDays) && next <= DateTime.Today;
+        }
 
         private void ApplyHourlyTrendChip(int id)
         {
@@ -90,7 +100,7 @@ namespace KeyMouseStats
                     if (dialog.ShowDialog(this) == DialogResult.OK) _hourlyTrendDay = date.Value.Date;
                 }
             }
-            if (_hourlyTrendDay < DateTime.Today.AddDays(-364)) _hourlyTrendDay = DateTime.Today.AddDays(-364);
+            if (_hourlyTrendDay < DateTime.Today.AddDays(-HourlyTrendHistoryDays)) _hourlyTrendDay = DateTime.Today.AddDays(-HourlyTrendHistoryDays);
             if (_hourlyTrendDay > DateTime.Today) _hourlyTrendDay = DateTime.Today;
         }
 
@@ -201,16 +211,24 @@ namespace KeyMouseStats
 
         private void PaintHourlyTrend(Graphics g)
         {
+            // 跨午夜时只有“正在看今天”才跟随滚动,手动选的历史日不动。
+            DateTime today = DateTime.Today;
+            if (today != _hourlyTodaySeen && _hourlyTrendDay == _hourlyTodaySeen) _hourlyTrendDay = today;
+            _hourlyTodaySeen = today;
             string[] names = { "击键", "点击", "活跃时长", "击键/分", "点击/分" };
             for (int i = 0; i < names.Length; i++) AppChip(g, 310 + i, Cx + i * 78, 98, 70, names[i], _hourlyTrendMetric == i);
             string compareButton = _hourlyCompareMode == 0 ? "曲线：仅所选日 ▾" : _hourlyCompareMode == 1 ? "曲线：昨天 ▾" :
                 _hourlyCompareMode == 2 ? "曲线：上周同日 ▾" : _hourlyCompareMode == 4 ? "曲线：本周 7 天 ▾" : "曲线：近" + _hourlyCompareDays + "天 ▾";
             AppChip(g, 326, Cx + 540, 98, 190, compareButton, _hourlyCompareMode > 0);
-            AppChip(g, 322, Cx + Cw - 88, 98, 88, "回今天", false);
+            PaintStepChip(g, new RectangleF(Cx + Cw - 88, 98, 88, StepChipHeight), "回今天", _hourlyTrendDay != DateTime.Today, 322);
             PaintCardBase(g, Cx, 150, Cw, 360);
             AppChip(g, 323, Cx + 16, 160, 170, _hourlyTrendDay.ToString("yyyy-MM-dd ddd"), false);
-            AppChip(g, 320, Cx + Cw - 180, 160, 76, "前一天", false);
-            AppChip(g, 321, Cx + Cw - 94, 160, 76, "后一天", false);
+            // 前一天 / 后一天:与全站步进器同一套几何,右对齐到 Cx+Cw,到边界时灰化且不登记命中区。
+            // 旧版宽度 76/76 且右边缘停在 838(不是 856),也没有禁用态 —— 点了会静默被 clamp 回来。
+            float dayStepW = 80, dayStepGap = 8;
+            float dayStepLeft = Cx + Cw - (dayStepW * 2 + dayStepGap);
+            PaintStepChip(g, new RectangleF(dayStepLeft, 160, dayStepW, StepChipHeight), "前一天", CanStepHourlyTrend(-1), 320);
+            PaintStepChip(g, new RectangleF(dayStepLeft + dayStepW + dayStepGap, 160, dayStepW, StepChipHeight), "后一天", CanStepHourlyTrend(1), 321);
             AppText(g, "每小时" + names[_hourlyTrendMetric] + (_hourlyTrendMetric >= 3 ? " · 按活跃分钟归一化" : _hourlyTrendMetric == 2 ? " · 单位：分钟（纵轴 0–60）" : " · 单位：次"),
                 _fH2, Ctext, new RectangleF(Cx + 208, 160, 340, 30), false);
 
@@ -276,12 +294,23 @@ namespace KeyMouseStats
             }
             using (Pen linePen = new Pen(selectedColor, 2.6f))
             using (SolidBrush dot = new SolidBrush(selectedColor))
+            using (Pen livePen = new Pen(selectedColor, 1.6f) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dot })
                 for (int h = 0; h < 24; h++)
                 {
                     if (double.IsNaN(values[h])) continue;
                     if (h > 0 && !double.IsNaN(values[h - 1])) g.DrawLine(linePen, px(h - 1), py(values[h - 1]), px(h), py(values[h]));
-                    float radius = _hourlyTrendDay == now.Date && h == now.Hour ? 4.5f : 2.7f;
-                    g.FillEllipse(dot, px(h) - radius, py(values[h]) - radius, radius * 2, radius * 2);
+                    if (_hourlyTrendDay == now.Date && h == now.Hour)
+                    {
+                        // 当前小时只走了一部分:空心虚线环表示“进行中”,不再用加大实心点,避免曲线末端像断崖。
+                        float cx = px(h), cy = py(values[h]);
+                        g.DrawEllipse(livePen, cx - 4.5f, cy - 4.5f, 9f, 9f);
+                        float labelY = cy - 20 >= top ? cy - 20 : cy + 8;
+                        labelY = Math.Max(top, Math.Min(bottom - 16, labelY));
+                        AppText(g, "进行中", _fSmall, Csub,
+                            new RectangleF(Math.Max(left, Math.Min(right - 56, cx + 7)), labelY, 56, 16), false);
+                        continue;
+                    }
+                    g.FillEllipse(dot, px(h) - 2.7f, py(values[h]) - 2.7f, 5.4f, 5.4f);
                 }
             if (ThemeArt.Active && peak >= 0) ThemeArt.Sticker(g, 2, new RectangleF(Math.Max(left, Math.Min(right - 30, px(peak) - 15)), Math.Max(top - 10, py(selectedMax) - 32), 30, 30));
 
@@ -294,7 +323,7 @@ namespace KeyMouseStats
             }
 
             string detail = count == 0 ? "所选日期没有此指标的小时记录。" : lines.Count == 1
-                ? "当前小时使用加大圆点，阴影区域尚未来到。" : "每个日期一条曲线；所选日加粗，摘要以其余日期的同期均值为基准。";
+                ? "当前小时未走完，以空心环标注「进行中」；阴影区域尚未来到。" : "每个日期一条曲线；所选日加粗，摘要以其余日期的同期均值为基准。";
             PointF mouse = ToBase(_mouse); mouse = new PointF(mouse.X - ContentX, mouse.Y - ContentY);
             if (new RectangleF(left - 8, top, right - left + 16, bottom - top + 24).Contains(mouse))
             {

@@ -26,7 +26,7 @@ set "RES=%RES% @"%~dp0theme-extra-resources.rsp""
 set "OUT=%TEMP%\KeyMouseStatsTests"
 if not exist "%OUT%" mkdir "%OUT%"
 set "FAIL=0"
-set "TESTS=DistanceTests SaveReliabilityTests PersistenceGuardTests DataManagementTests WellbeingTests PressDurationTests MotionTests KeyPaletteTests RangeStatsTests RangeReportTests ActivityTimeTests AppActivityTests AppFlowTests HourProfileTests RimePhraseTests StorageUsageTests TrendCutoffTests AxisScaleTests ShortcutTests StatisticsTests HourlyCompareTests KeyboardHeatTests ClickHeatTests LiveRateTests PopupLifetimeTests ReportVisualTests Report110Tests KeyRangeTests Release120Tests ThemeLoadingTests ThemeOwnershipTests WuxiaThemeTests OriThemeTests GujianThemeTests Release100Tests AnomalyRenderTests RimeLogTests AutoStartTests DailyReportTests HookWatchdogTests RawInputTests MonthlyStorageTests"
+set "TESTS=DistanceTests SaveReliabilityTests PersistenceGuardTests DataManagementTests WellbeingTests PressDurationTests MotionTests KeyPaletteTests RangeStatsTests RangeReportTests ActivityTimeTests AppActivityTests AppFlowTests HourProfileTests RimePhraseTests StorageUsageTests TrendCutoffTests AxisScaleTests ShortcutTests StatisticsTests HourlyCompareTests KeyboardHeatTests ClickHeatTests LiveRateTests PopupLifetimeTests ReportVisualTests Report110Tests KeyRangeTests Release120Tests ThemeLoadingTests ThemeOwnershipTests WuxiaThemeTests OriThemeTests GujianThemeTests Release100Tests AnomalyRenderTests RimeLogTests AutoStartTests DailyReportTests HookWatchdogTests RawInputTests MonthlyStorageTests SegmentTrayTests"
 if defined THEME_ONLY set "TESTS=ThemeLoadingTests WuxiaThemeTests OriThemeTests GujianThemeTests"
 
 for %%T in (%TESTS%) do (
@@ -73,6 +73,24 @@ if !ERRORLEVEL! neq 0 (
         set "FAIL=1"
     ) else (
         echo [PASS] RenderDashboard
+    )
+)
+
+echo [Render] DashboardAdditionsRender (dashboard-hours-intensity-*.png 等)
+"%CSC%" /nologo /target:exe /optimize+ /main:DashboardAdditionsRender /out:"%OUT%\DashboardAdditionsRender.exe" %RES% %SRC% "%~dp0tests\DashboardAdditionsRender.cs"
+if !ERRORLEVEL! neq 0 (
+    echo [COMPILE FAIL] DashboardAdditionsRender
+    set "FAIL=1"
+) else (
+    pushd "%~dp0"
+    "%OUT%\DashboardAdditionsRender.exe"
+    set "RC=!ERRORLEVEL!"
+    popd
+    if !RC! neq 0 (
+        echo [RUN FAIL] DashboardAdditionsRender
+        set "FAIL=1"
+    ) else (
+        echo [PASS] DashboardAdditionsRender
     )
 )
 

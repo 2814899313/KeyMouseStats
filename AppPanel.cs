@@ -435,18 +435,26 @@ namespace KeyMouseStats
 
         private void PaintAppsTable(Graphics g, List<AppActivity.Row> rows, Dictionary<string, long[]> keyGroups)
         {
-            Color[] colors = { Cblue, Cpurple, Corange, Cgreen, Csub, Ccyan };
-            string[] headings = _appKeyGroups ? new[] { "移动", "技能", "交互", "功能", "文字", "未归位" } : new[] { "分类", "击键", "点击", "滚轮" };
+            Color[] colors = { Cblue, Cpurple, Corange, Cgreen, Csub, Ccyan };   // 应用用途分类:保持原样
+            Color[] keyColors = AppKeyBucketColors();                             // 键位 5 桶:第 4 桶改用主题主色
+            int keyBuckets = KeySemantics.VisibleBuckets;
+            string[] keyLabels = KeySemantics.LabelsGeneric;
+            string[] headings = _appKeyGroups ? keyLabels : new[] { "分类", "击键", "点击", "滚轮" };
             float[] columnX = { 349, 446, 552, 648 };
             const float keyBarX = 430f, keyBarW = 318f;
             if (_appKeyGroups)
             {
-                for (int i = 0; i < headings.Length; i++)
+                // 只画前 5 个有效桶:第 6 桶「未归位」在应用维度结构性恒为 0(采集侧只会写 0~4 号桶),
+                // 画出来就是一条永远为零的死图例。历史残差只在行明细气泡里按需出现。
+                AppText(g, "通用标签 · 游戏类应用悬停显示游戏语义", _fAxis, Csub, new RectangleF(Cx + 18, 274, 340, 20), false);
+                float legendX = keyBarX;
+                for (int i = 0; i < keyBuckets; i++)
                 {
-                    float legendX = keyBarX + i * (keyBarW / headings.Length);
-                    using (SolidBrush brush = new SolidBrush(colors[i]))
+                    if (legendX + 12 > Cx + Cw - 8) break;   // 主题字体偏宽时宁可少画一项,也不压出面板
+                    using (SolidBrush brush = new SolidBrush(keyColors[i]))
                         g.FillRectangle(brush, legendX, 278, 8, 8);
-                    AppText(g, headings[i], _fSmall, Csub, new RectangleF(legendX + 12, 274, 60, 20), false);
+                    AppText(g, keyLabels[i], _fSmall, Csub, new RectangleF(legendX + 12, 274, 110, 20), false);
+                    legendX += 12 + g.MeasureString(keyLabels[i], _fSmall).Width + 16;
                 }
             }
             else
@@ -468,6 +476,12 @@ namespace KeyMouseStats
             }
             string reason = "点击“手动分类”直接选用途；高级规则支持标题关键词。APM 页可看各应用的输入效率。";
             PointF mouse = ToBase(_mouse); mouse = new PointF(mouse.X - ContentX, mouse.Y - ContentY);
+            // 键位构成:记录悬停命中的行与分段,统一在行循环之后画浮动气泡(不再占用页脚)。
+            AppActivity.Row keyHoverRow = null;
+            long[] keyHoverGroups = null;
+            long keyHoverTotal = 0;
+            int keyHoverSeg = -1;
+            RectangleF keyHoverBar = RectangleF.Empty;
             for (int i = 0; i < pageSize && _appPage * pageSize + i < rows.Count; i++)
             {
                 AppActivity.Row row = rows[_appPage * pageSize + i];
@@ -501,38 +515,63 @@ namespace KeyMouseStats
                 if (new RectangleF(349, y, 90, 33).Contains(mouse)) reason = row.Reason;
                 if (_appKeyGroups)
                 {
-                    long[] groups = null;
-                    long groupTotal = 0;
-                    if (keyGroups != null) keyGroups.TryGetValue(row.ProcessPath ?? "", out groups);
-                    if (groups != null)
-                        foreach (long value in groups) groupTotal += value;
-                    if (groupTotal > 0)
+                    // 按窗口视图下键位桶只按进程聚合,整列不画条,循环结束后统一给一次提示。
+                    if (!_appsByWindow)
                     {
-                        RectangleF bar = new RectangleF(keyBarX, y + 9, keyBarW, 13);
-                        using (SolidBrush track = new SolidBrush(Color.FromArgb(28, Ctext))) g.FillRectangle(track, bar);
-                        float cursor = bar.X;
-                        for (int j = 0; j < 6; j++)
+                        long[] groups = null;
+                        long groupTotal = 0;
+                        if (keyGroups != null) keyGroups.TryGetValue(row.ProcessPath ?? "", out groups);
+                        if (groups != null)
+                            for (int j = 0; j < keyBuckets && j < groups.Length; j++) groupTotal += groups[j];
+                        if (groupTotal > 0)
                         {
-                            float segment = (float)(bar.Width * groups[j] / (double)groupTotal);
-                            if (segment <= 0) continue;
-                            using (SolidBrush brush = new SolidBrush(colors[j])) g.FillRectangle(brush, cursor, bar.Y, segment, bar.Height);
-                            cursor += segment;
-                        }
-                        using (Pen pen = new Pen(Color.FromArgb(60, Ctext))) g.DrawRectangle(pen, bar.X, bar.Y, bar.Width, bar.Height);
-                        if (bar.Contains(mouse))
-                        {
-                            StringBuilder detail = new StringBuilder();
-                            detail.Append(row.Name).Append("：");
-                            for (int j = 0; j < 6; j++)
+                            RectangleF bar = new RectangleF(keyBarX, y + 9, keyBarW, 13);
+                            int hoverSeg = -1, lastSeg = -1;
+                            if (bar.Contains(mouse))
                             {
-                                if (j > 0) detail.Append(" · ");
-                                detail.Append(headings[j]).Append(' ')
-                                    .Append((groups[j] * 100.0 / groupTotal).ToString("0.#", CultureInfo.InvariantCulture)).Append('%');
+                                // 先按累计宽度判定命中的桶;落在 1px 缝隙里就归给相邻的有效段。
+                                float probe = bar.X;
+                                for (int j = 0; j < keyBuckets; j++)
+                                {
+                                    float span = (float)(bar.Width * groups[j] / (double)groupTotal);
+                                    if (span <= 0) continue;
+                                    lastSeg = j;
+                                    if (hoverSeg < 0 && mouse.X >= probe && mouse.X < probe + span) hoverSeg = j;
+                                    probe += span;
+                                }
+                                if (hoverSeg < 0) hoverSeg = lastSeg;
                             }
-                            reason = detail.ToString();
+                            using (SolidBrush track = new SolidBrush(Color.FromArgb(46, 0, 0, 0))) g.FillRectangle(track, bar);
+                            float cursor = bar.X;
+                            for (int j = 0; j < keyBuckets; j++)
+                            {
+                                float segment = (float)(bar.Width * groups[j] / (double)groupTotal);
+                                if (segment <= 0) continue;
+                                // 命中段向文字色混 28%:深色主题提亮、浅色主题压深,两个方向都在拉开对比。
+                                Color fill = j == hoverSeg ? ArtTheme.Mix(keyColors[j], Ctext, 0.28) : keyColors[j];
+                                using (SolidBrush brush = new SolidBrush(fill)) g.FillRectangle(brush, cursor, bar.Y, segment, bar.Height);
+                                cursor += segment;
+                            }
+                            // 段与段之间 1px 深色缝隙:相邻色相接近时靠它把边界钉住。
+                            cursor = bar.X;
+                            for (int j = 0; j < keyBuckets - 1; j++)
+                            {
+                                float segment = (float)(bar.Width * groups[j] / (double)groupTotal);
+                                if (segment <= 0) continue;
+                                cursor += segment;
+                                if (cursor <= bar.X + 0.5f || cursor >= bar.Right - 0.5f) continue;
+                                using (SolidBrush seam = new SolidBrush(Color.FromArgb(190, 8, 10, 14)))
+                                    g.FillRectangle(seam, (float)Math.Floor(cursor), bar.Y, 1f, bar.Height);
+                            }
+                            using (Pen pen = new Pen(Color.FromArgb(60, Ctext))) g.DrawRectangle(pen, bar.X, bar.Y, bar.Width, bar.Height);
+                            if (hoverSeg >= 0)
+                            {
+                                keyHoverRow = row; keyHoverGroups = groups; keyHoverTotal = groupTotal;
+                                keyHoverSeg = hoverSeg; keyHoverBar = bar;
+                            }
                         }
+                        else AppText(g, "该区间无此维度", _fSmall, Csub, new RectangleF(keyBarX, y + 6, 220, 22), false);
                     }
-                    else AppText(g, "该区间无此维度", _fSmall, Csub, new RectangleF(keyBarX, y + 6, 220, 22), false);
                 }
                 else
                 {
@@ -554,6 +593,15 @@ namespace KeyMouseStats
                     }
                 }
             }
+            // 按窗口视图:键位桶只按进程聚合,七行画同一根条是误导;整列只给一次浅灰提示。
+            if (_appKeyGroups && _appsByWindow)
+            {
+                int shown = Math.Min(pageSize, rows.Count);
+                using (SolidBrush hint = new SolidBrush(Csub))
+                using (StringFormat centered = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+                    g.DrawString("按进程统计（请切至「按应用」查看）", _fSmall, hint,
+                        new RectangleF(keyBarX, 300, keyBarW, Math.Max(33, shown * 33)), centered);
+            }
             string summary = CompareSummary();
             _appCompareClearRect = RectangleF.Empty;
             if (summary != null)
@@ -569,6 +617,91 @@ namespace KeyMouseStats
                 _fSmall, Csub, new RectangleF(Cx + 18, 558, 600, 24), false);
             AppChip(g, 40, Cx + Cw - 186, 547, 80, "上一页", false);
             AppChip(g, 41, Cx + Cw - 96, 547, 80, "下一页", false);
+            // 气泡最后画:盖在行与页脚之上,不抢占页脚说明位,对比摘要占着页脚时也能看比例。
+            if (keyHoverRow != null)
+                PaintKeyBucketPopover(g, keyHoverRow, keyHoverGroups, keyHoverTotal, keyHoverSeg, keyHoverBar, mouse);
+        }
+
+        /// <summary>
+        /// 键位 5 桶配色:第 4 桶(主字符/编辑,通常是最长段)固定用主题主色,替代原来的低对比灰;
+        /// 其余四桶按紫/橙/绿/青/红顺序挑,跳过与已选颜色过近的候选——有些主题的主色本身就接近青或红,
+        /// 写死一个数组会在那些主题下出现两段同色。
+        /// </summary>
+        private Color[] AppKeyBucketColors()
+        {
+            Color[] colors = new Color[KeySemantics.VisibleBuckets];
+            colors[4] = Cblue;
+            Color[] candidates = { Cpurple, Corange, Cgreen, Ccyan, Cred };
+            int slot = 0;
+            for (int i = 0; i < candidates.Length && slot < 4; i++)
+            {
+                Color candidate = candidates[i];
+                bool clash = ColorGap(colors[4], candidate) < 45;
+                for (int j = 0; j < slot && !clash; j++)
+                    if (ColorGap(colors[j], candidate) < 45) clash = true;
+                if (clash) continue;
+                colors[slot++] = candidate;
+            }
+            while (slot < 4) colors[slot++] = Csub;   // 极端自定主题的兜底:颜色不理想,但条仍然画得出来
+            return colors;
+        }
+
+        private static double ColorGap(Color a, Color b)
+        {
+            int dr = a.R - b.R, dg = a.G - b.G, db = a.B - b.B;
+            return Math.Sqrt(dr * dr + dg * dg + db * db);
+        }
+
+        /// <summary>
+        /// 键位构成的浮动气泡:第一行应用名,后面是全部有效桶的占比。
+        /// 标签按应用用途分类切换(游戏用「技能栏/移动」,其余用「数字/主字符/编辑」),
+        /// 第 6 桶只在真的存在历史残差时才补一行,不再把百分比塞进页脚。
+        /// </summary>
+        private void PaintKeyBucketPopover(Graphics g, AppActivity.Row row, long[] groups, long total, int hoverSeg, RectangleF bar, PointF mouse)
+        {
+            if (row == null || groups == null || total <= 0) return;
+            string[] labels = KeySemantics.LabelsFor(row.Category);
+            int visible = Math.Min(KeySemantics.VisibleBuckets, labels.Length);
+            List<string> parts = new List<string>(visible + 1);
+            for (int j = 0; j < visible && j < groups.Length; j++)
+                parts.Add(labels[j] + " " + (groups[j] * 100.0 / total).ToString("0.#", CultureInfo.InvariantCulture) + "%");
+            if (groups.Length > visible && groups[visible] > 0)
+                parts.Add(labels[visible] + " " + (groups[visible] * 100.0 / total).ToString("0.#", CultureInfo.InvariantCulture) + "%");
+            const float pad = 10f, titleHeight = 18f, lineHeight = 16f;
+            List<string> lines = new List<string>(2);
+            string whole = string.Join("  ·  ", parts.ToArray());
+            if (g.MeasureString(whole, _fAxis).Width <= Cw - 40) lines.Add(whole);
+            else
+            {
+                int first = (parts.Count + 1) / 2;
+                lines.Add(string.Join("  ·  ", parts.GetRange(0, first).ToArray()));
+                lines.Add(string.Join("  ·  ", parts.GetRange(first, parts.Count - first).ToArray()));
+            }
+            float width = g.MeasureString(row.Name ?? "", _fSmall).Width;
+            foreach (string line in lines) width = Math.Max(width, g.MeasureString(line, _fAxis).Width);
+            // +12 是测量余量:DrawString 的字形边界比 MeasureString 略宽,不留余量会被省略号截掉尾巴。
+            width = Math.Max(120f, Math.Min(Cw - 16f, width + pad * 2 + 12f));
+            float height = pad * 2 + titleHeight + lines.Count * lineHeight;
+            float x = Math.Max(Cx + 6, Math.Min(Cx + Cw - width - 6, mouse.X - width / 2f));
+            float y = bar.Y - height - 10;
+            if (y < Cy + 6) y = bar.Bottom + 10;   // 上方放不下就翻到指针下方
+            y = Math.Max(Cy + 6, Math.Min(Cy + Cb - height - 6, y));
+            using (GraphicsPath path = RoundedRect(x, y, width, height, 10))
+            {
+                using (SolidBrush fill = new SolidBrush(Color.FromArgb(238, 17, 20, 27))) g.FillPath(fill, path);
+                using (Pen edge = new Pen(Color.FromArgb(64, 255, 255, 255))) g.DrawPath(edge, path);
+            }
+            if (hoverSeg >= 0 && hoverSeg < KeySemantics.VisibleBuckets)
+            {
+                using (GraphicsPath stripe = RoundedRect(x + 3, y + 8, 3, height - 16, 1.5f))
+                using (SolidBrush fill = new SolidBrush(AppKeyBucketColors()[hoverSeg])) g.FillPath(fill, stripe);
+            }
+            // 文字一律走 AppText 的裁剪框:应用名再长也不会溢出卡片。
+            AppText(g, row.Name ?? "", _fSmall, Color.FromArgb(246, 233, 238, 248),
+                new RectangleF(x + pad + 4, y + pad - 3, width - pad * 2 - 4, titleHeight + 2), false);
+            for (int i = 0; i < lines.Count; i++)
+                AppText(g, lines[i], _fAxis, Color.FromArgb(240, 176, 188, 208),
+                    new RectangleF(x + pad + 4, y + pad + titleHeight + i * lineHeight, width - pad * 2 - 4, lineHeight + 2), false);
         }
 
         /// <summary>
