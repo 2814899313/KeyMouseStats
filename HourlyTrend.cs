@@ -221,7 +221,10 @@ namespace KeyMouseStats
                 _hourlyCompareMode == 2 ? "曲线：上周同日 ▾" : _hourlyCompareMode == 4 ? "曲线：本周 7 天 ▾" : "曲线：近" + _hourlyCompareDays + "天 ▾";
             AppChip(g, 326, Cx + 540, 98, 190, compareButton, _hourlyCompareMode > 0);
             PaintStepChip(g, new RectangleF(Cx + Cw - 88, 98, 88, StepChipHeight), "回今天", _hourlyTrendDay != DateTime.Today, 322);
-            PaintCardBase(g, Cx, 150, Cw, 360);
+            // 主卡高度随 ElasticH 生长;下面的绘图区底边、说明行与四张摘要卡全部以 cardBottom
+            // 为锚,不再各自写死 451 / 482 / 540 —— 2K 上折线不会只占卡片顶部三分之一。
+            float cardBottom = 150f + 344f + ElasticH;
+            PaintCardBase(g, Cx, 150, Cw, 344f + ElasticH);
             AppChip(g, 323, Cx + 16, 160, 170, _hourlyTrendDay.ToString("yyyy-MM-dd ddd"), false);
             // 前一天 / 后一天:与全站步进器同一套几何,右对齐到 Cx+Cw,到边界时灰化且不登记命中区。
             // 旧版宽度 76/76 且右边缘停在 838(不是 856),也没有禁用态 —— 点了会静默被 clamp 回来。
@@ -250,7 +253,11 @@ namespace KeyMouseStats
             }
             double ceiling, axisStep;
             HourlyAxis.Compute(_hourlyTrendMetric, axisMax, out ceiling, out axisStep);
-            float left = Cx + 56, right = Cx + Cw - 28, top = 222, bottom = 451;
+            // 绘图区纵向铺满主卡:基准仍是 222..451,2K 上底边跟着卡片一起长到 cardBottom-44,
+            // 再夹回基准线以上,折线不再挤在 1060 高的卡片顶部三分之一。
+            float plotBottom = Math.Min(cardBottom - 44f, 451f + ElasticH);
+            plotBottom = LayoutFrame.Clamp(plotBottom, 451f, 451f + ElasticH);
+            float left = Cx + 56, right = Cx + Cw - 28, top = 222, bottom = plotBottom;
             Func<int, float> px = delegate(int h) { return left + (right - left) * h / 23; };
             Func<double, float> py = delegate(double v) { return bottom - (float)(HourlyAxis.Clamp(_hourlyTrendMetric, v, ceiling) / ceiling) * (bottom - top); };
             for (int i = 0; i <= 4; i++)
@@ -343,7 +350,8 @@ namespace KeyMouseStats
                     AppText(g, HourlyValue(lines[i].Values[h]), _fAxis, i == 0 ? Ctext : Csub, new RectangleF(boxX + 102, boxY + 25 + i * 18, 66, 18), true);
                 }
             }
-            AppText(g, detail, _fSmall, Csub, new RectangleF(Cx + 18, 482, Cw - 36, 22), false);
+            // 说明行贴到卡片底边内侧:基准 cardBottom-26 = 468(旧版 482 已经溢出到卡外)。
+            AppText(g, detail, _fSmall, Csub, new RectangleF(Cx + 18, cardBottom - 26f, Cw - 36, 22), false);
 
             double baselineSum = 0; int baselineCount = 0;
             for (int h = 0; h < 24; h++) if (!double.IsNaN(values[h]) && !double.IsNaN(baseline[h])) { baselineSum += baseline[h]; baselineCount++; }
@@ -361,12 +369,21 @@ namespace KeyMouseStats
             string[] numbers = { count == 0 ? "--" : HourlyValue(sum), lines.Count == 1 ? (completeCount == 0 ? "--" : HourlyValue(completeSum / completeCount)) : (baselineCount == 0 ? "--" : HourlyValue(baselineSum)),
                 lines.Count == 1 ? (count == 0 ? "--" : HourlyValue(selectedMax)) : deltaText,
                 lines.Count == 1 ? (peak < 0 ? "--" : peak.ToString("00") + ":00—" + (peak + 1).ToString("00") + ":00") : percentText };
+            // 四张摘要卡等宽铺满整行:基准 Cw=832 时 tileW=196、summaryY=540、x=24+i*212,
+            // 与旧版最左那张逐像素一致;标签画在卡内 +10(旧版 530 在卡顶 540 之上,就是那处叠字),
+            // 数字在 +34,长串抬到 +30 并换小一号字,标签与数字之间始终留出净空。
+            float tileW = (Cw - 3 * 16) / 4f;
+            // 收口到 PageBottom:2K 下 cardBottom+46 会把小卡推到页脚分割线以下(穿模),
+            // 基准窗口下则上移 28px,四张卡整体坐进内容区。
+            float summaryY = Math.Min(cardBottom + 46f, PageBottom - 78f);
             for (int i = 0; i < 4; i++)
             {
-                float x = Cx + i * 212;
-                PaintCardBase(g, x, 524, 196, 62);
-                AppText(g, labels[i], _fSmall, Csub, new RectangleF(x + 14, 530, 168, 18), false);
-                AppText(g, numbers[i], _fNum2, Ctext, new RectangleF(x + 14, 549, 176, 28), false);
+                float x = Cx + i * (tileW + 16f);
+                PaintCardBase(g, x, summaryY, tileW, 78);
+                bool longValue = g.MeasureString(numbers[i], _fNum2).Width > tileW - 32f;
+                AppText(g, labels[i], _fSmall, Csub, new RectangleF(x + 14, summaryY + 10f, tileW - 28f, 18), false);
+                AppText(g, numbers[i], longValue ? _fH2 : _fNum2, Ctext,
+                    new RectangleF(x + 14, summaryY + (longValue ? 30f : 34f), tileW - 28f, 28), false);
             }
             PaintHourlyMenu(g);
         }

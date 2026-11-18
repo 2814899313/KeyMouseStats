@@ -44,6 +44,16 @@ internal static class SegmentTrayTests
     {
         // 隔离:即使以后有人在这里误加 Store.Save(),也只会写进临时目录。
         Store.DataDirectory = Dir;
+        // Milestone 2 / 3.4:总览在「全新零数据」时会整页让位给冷启动引导,
+        // 本用例测的是正常页面上的分段托盘,所以先塞一条最小记录让它进入常规布局。
+        Store.History.Clear();
+        Store.Total = new Counters();
+        DayRecord seed = new DayRecord();
+        seed.Date = DateTime.Today;
+        seed.Keys = 1;
+        Store.Today = seed;
+        Store.History[DateTime.Today] = seed;
+        Store.Total.Keys = 1;
         try { Run(); }
         catch (Exception error) { Console.WriteLine("FAILED: " + error.Message); Environment.ExitCode = 1; return; }
         finally { try { if (Directory.Exists(Dir)) Directory.Delete(Dir, true); } catch { } }

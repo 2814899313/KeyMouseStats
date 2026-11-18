@@ -340,7 +340,27 @@ namespace KeyMouseStats
             if(!_keyboardDevicesRead) { KeyboardDevices.Refresh(); _keyboardDevicesRead=true; }
             int layout=Store.KeyboardLayout==0?KeyboardDevices.Suggested:Store.KeyboardLayout;
             bool holdMode=_keyMetric == 1;
-            PaintCard(g,Cx,138,Cw,438,null);
+            // 3.0:整卡随 ElasticH 长高,内部键帽矩阵按可用宽高等比缩放并居中,
+            // 底部图例/说明钉在卡片底边 —— 旧版卡片高度写死 438,2K 下矩阵被横向拉成
+            // 98×34 的长条,键帽宽高比彻底失真。
+            // 卡片高度还要「按矩阵的真实比例收敛」:键盘是 23×6.35 单位的固定宽高比,
+            // 一旦宽度成为瓶颈,再往下拉高卡片只会在矩阵上下各留一大片黑壳。
+            float heatCardH = 438f + ElasticH;
+            float probeW = 0f, probeH = 0f;
+            foreach (HeatKey probe in KeyboardHeat.Layout(layout))
+            {
+                probeW = Math.Max(probeW, probe.Bounds.Right);
+                probeH = Math.Max(probeH, probe.Bounds.Bottom);
+            }
+            if (probeW > 0.5f && probeH > 0.5f)
+            {
+                float unitLimit = (Cw - 44f) / probeW;
+                // 122 = 卡片顶到托盘顶的固定高度;38 = 托盘内上下留白;86 = 图例块 + 底边距。
+                float needed = 122f + probeH * unitLimit + 38f + 86f;
+                if (needed < heatCardH) heatCardH = needed;
+            }
+            float heatBottom = 138f + heatCardH;
+            PaintCard(g,Cx,138,Cw,heatCardH,null);
             using(Font title=new Font("Microsoft YaHei UI",17,FontStyle.Bold,GraphicsUnit.Pixel))
                 AppText(g,holdMode?"你的键盘，按住的痕迹":"你的键盘，使用的痕迹",title,Ctext,new RectangleF(Cx+22,153,400,30),false);
             // 口径切换已上移到页面顶部的二级筛选栏,卡片里只保留配列选择,避免同一个「按住时长」出现两次。
@@ -397,16 +417,27 @@ namespace KeyMouseStats
             AppText(g,"0+",_fSmall,Csub,new RectangleF(Cx+Cw-198,232,40,20),false);
             AppText(g,max>0?(holdMode?HoldReportData.Duration(max):Analysis.FmtCount(max)+" 次"):"暂无样本",_fSmall,Csub,new RectangleF(Cx+Cw-133,232,111,20),true);
             Color tray=ArtTheme.Mix(Ccard,ArtTheme.Current.Background,0.64);
-            using(GraphicsPath shell=RoundedRect(Cx+12,260,Cw-24,242,14))
+            // 图例区(徽章 29 + 说明两行)固定 60px 高,钉在卡片底边;托盘吃掉剩下的全部。
+            float badgeY=heatBottom-60f;
+            float shellTop=260f, shellBottom=Math.Max(shellTop+120f,badgeY-16f);
+            using(GraphicsPath shell=RoundedRect(Cx+12,shellTop,Cw-24,shellBottom-shellTop,14))
             using(SolidBrush b=new SolidBrush(tray))
             using(Pen edge=new Pen(ArtTheme.Mix(Ccard,Ctext,0.07))) { g.FillPath(b,shell);g.DrawPath(edge,shell); }
-            float unit=(Cw-48)/width, row=Math.Min(42,220/height), originY=272+(220-height*row)/2;
+            // 等比缩放:unit 同时是键帽宽与行高,维持 1u 键帽的方形比例,再整体居中。
+            float plateTop=shellTop+10f, plateH=Math.Max(80f,(shellBottom-6f)-plateTop);
+            float unitW=(Cw-44f)/Math.Max(1f,width);
+            float unitH=height>0f?plateH/height:0f;
+            float unit=Math.Min(unitW,unitH);
+            if(unit<=0f || unit>200f) unit=unitW>0f?unitW:1f;
+            float row=unit;
+            float originX=Cx+22f+(Cw-44f-width*unit)/2f;
+            float originY=plateTop+(plateH-height*row)/2f;
             _keyboardHoverRects.Clear();
             _keyboardScans.Clear();
             PointF mouse=ToBase(_mouse);mouse=new PointF(mouse.X-ContentX,mouse.Y-ContentY);
             HeatKey hover=null;long hoverCount=0;KeyHold hoverHold=null;
             RectangleF hoverRect=RectangleF.Empty;
-            RectangleF plateBounds=new RectangleF(Cx+22,270,Cw-44,226);
+            RectangleF plateBounds=new RectangleF(Cx+22,plateTop,Cw-44,plateH);
             Graphics keyGraphics=g;
             if(ThemeArt.Active)
             {
@@ -435,7 +466,7 @@ namespace KeyMouseStats
             using(StringFormat center=new StringFormat {Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center})
             foreach(HeatKey key in keys)
             {
-                RectangleF rect=new RectangleF(Cx+24+key.Bounds.X*unit,originY+key.Bounds.Y*row,key.Bounds.Width*unit-4,key.Bounds.Height*row-5);
+                RectangleF rect=new RectangleF(originX+key.Bounds.X*unit,originY+key.Bounds.Y*row,key.Bounds.Width*unit-4,key.Bounds.Height*row-5);
                 _keyboardHoverRects.Add(rect);
                 _keyboardScans.Add(key.Scan);
                 long value=holdMode?(long)KeyboardHeat.HoldMs(holds,key.Scan):KeyboardHeat.Count(counts,key.Scan);bool hovered=rect.Contains(mouse);
@@ -506,7 +537,7 @@ namespace KeyMouseStats
                 }
             }
             string keyLabel=hover==null?"探索键位":hover.Label;
-            RectangleF badge=new RectangleF(Cx+22,516,80,29);
+            RectangleF badge=new RectangleF(Cx+22,badgeY,80,29);
             using(GraphicsPath path=RoundedRect(badge.X,badge.Y,badge.Width,badge.Height,7))
             using(SolidBrush b=new SolidBrush(ArtTheme.Mix(Ccard,Cblue,0.12))) g.FillPath(b,path);
             using(StringFormat center=new StringFormat {Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center})
@@ -522,15 +553,15 @@ namespace KeyMouseStats
             if(OriArt.Active && hover==null && !holdMode)detail=max>0?favorite+" 汇聚最多灵光 · "+Analysis.FmtCount(max)+" 次 · 点亮祖灵叶片":"森林静候第一束按键灵光。";
             if(EuroTruckArt.Active && hover==null && !holdMode)detail=max>0?favorite+" 驶上热键榜首 · "+Analysis.FmtCount(max)+" 次 · 获得黄金方向盘":"车队待命 · 等待第一条击键记录。";
             if(WuxiaArt.Active && hover==null && !holdMode)detail=max>0?favorite+" 登临键谱榜首 · "+Analysis.FmtCount(max)+" 次 · 朱砂金边封为盟主键":"江湖谱尚空 · 等待第一式落键。";
-            AppText(g,detail,_fBody,Ctext,new RectangleF(Cx+114,519,445,24),false);
+            AppText(g,detail,_fBody,Ctext,new RectangleF(Cx+114,badgeY+3,Cw-305,24),false);
             // 1.8.0:把这条明细留给 Ctrl+C 复制(有悬停就复制悬停项,否则复制本页提示)。
             _hoverDetail = hover==null ? "" : keyLabel + " · " + detail;
-            AppText(g,"配列覆盖 "+(total>0?(100.0*visible/total).ToString("0.0",CultureInfo.InvariantCulture):"0.0")+"%",_fSmall,Csub,new RectangleF(Cx+Cw-183,519,160,24),true);
+            AppText(g,"配列覆盖 "+(total>0?(100.0*visible/total).ToString("0.0",CultureInfo.InvariantCulture):"0.0")+"%",_fSmall,Csub,new RectangleF(Cx+Cw-183,badgeY+3,160,24),true);
             string note;
             if(_selectedKeyScan>=0) note="已下钻到单个键位 · 按 Esc 或点空白处回到全部按键 · 三格统计已切换为该键的数据。";
             else if(holdMode) note=unmappedHold>0?"含 "+HoldReportData.Duration(unmappedHold)+" 无法定位到键位(每天 Top 48 以外的按键) · 逐键明细按虚拟键归位，主区 Enter 与小键盘 Enter 合并。":"逐键明细按虚拟键归位：主区 Enter 与小键盘 Enter 合并，其余键位一一对应。";
             else note=legacy>0?"含 "+Analysis.FmtCount(legacy)+" 次旧记录，按键名近似归位；旧 Enter 无法区分主区与小键盘。":"按物理键位统计 · 标准 ANSI 示意，厂商自定义键位与 Fn 层可能不同。";
-            AppText(g,note,_fSmall,Csub,new RectangleF(Cx+22,551,Cw-44,20),false);
+            AppText(g,note,_fSmall,Csub,new RectangleF(Cx+22,heatBottom-25f,Cw-44,20),false);
         }
     }
 }

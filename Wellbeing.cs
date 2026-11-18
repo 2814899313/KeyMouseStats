@@ -32,6 +32,13 @@ namespace KeyMouseStats
         public static bool SummaryEnabled;
         public static int SummaryHour = 22;
         public static string SummarySent = "";
+        // ---- Milestone 3 / 4.2:全屏免打扰与本地触发器(wellbeing_v1 追加字段) ----
+        /// <summary>全屏 / 游戏 / 演示期间静默挂起提醒。</summary>
+        public static bool FullscreenDnd = true;
+        /// <summary>久坐提醒时异步执行的本地脚本(空 = 不执行)。</summary>
+        public static string ScriptPath = "";
+        /// <summary>久坐提醒时异步 POST 的 Webhook(空 = 不投递)。</summary>
+        public static string WebhookUrl = "";
 
         public static bool GoalEnabled { get { return GoalMode != GoalOff && GoalTarget > 0; } }
         public static bool AnyEnabled { get { return GoalEnabled || ContinuousEnabled || SummaryEnabled; } }
@@ -91,7 +98,10 @@ namespace KeyMouseStats
                 + (LastReminder == DateTime.MinValue ? "" : LastReminder.ToString("O", CultureInfo.InvariantCulture)) + "|"
                 + (SummaryEnabled ? "1" : "0") + "|"
                 + SummaryHour.ToString(CultureInfo.InvariantCulture) + "|"
-                + SummarySent;
+                + SummarySent + "|"
+                + (FullscreenDnd ? "1" : "0") + "|"
+                + AutomationTrigger.EncodeField(ScriptPath) + "|"
+                + AutomationTrigger.EncodeField(WebhookUrl);
         }
 
         public static void Load(string text)
@@ -119,6 +129,10 @@ namespace KeyMouseStats
                 if (int.TryParse(parts[8], NumberStyles.Integer, CultureInfo.InvariantCulture, out minutes))
                     SummaryHour = minutes >= 0 && minutes <= 23 ? minutes : 22;
                 SummarySent = parts[9] ?? "";
+                // 旧版只有 10 段:缺段时保持默认,绝不覆盖用户既有设置。
+                if (parts.Length >= 11) FullscreenDnd = parts[10] != "0";
+                if (parts.Length >= 12) ScriptPath = AutomationTrigger.DecodeField(parts[11]);
+                if (parts.Length >= 13) WebhookUrl = AutomationTrigger.DecodeField(parts[12]);
             }
             catch (FormatException) { }
         }
@@ -162,13 +176,21 @@ namespace KeyMouseStats
     internal static class Wellbeing
     {
         /// <summary>免打扰判断。产品里查前台窗口是否全屏;测试可替换。</summary>
-        internal static Func<bool> FullscreenProbe = delegate { return FullscreenWindow.Active(); };
+        /// <summary>
+        /// 免打扰判断。开启 DND 时先问 shell 的系统状态(忙/全屏 D3D/演示),拿不到答案再回退几何全屏检测;
+        /// 关闭 DND 时永不抑制。测试可整体替换。
+        /// </summary>
+        internal static Func<bool> FullscreenProbe = delegate
+        {
+            return WellbeingSettings.FullscreenDnd && ShellNotification.Active();
+        };
 
         /// <summary>目标达成:同一天只提示一次。</summary>
         public static string GoalMessage(DateTime now, DayRecord day)
         {
             if (!WellbeingSettings.GoalEnabled || day == null) return null;
             if (!WellbeingSettings.Reached(day)) return null;
+            if (FullscreenProbe()) return null;   // 全屏/演示期间不打扰
             string today = now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             if (WellbeingSettings.GoalNotified == today) return null;
             WellbeingSettings.GoalNotified = today;

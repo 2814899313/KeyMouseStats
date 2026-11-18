@@ -34,7 +34,7 @@ namespace KeyMouseStats
         {
             Text = "数据管理"; FormBorderStyle = FormBorderStyle.FixedDialog; StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false; MinimizeBox = false; ShowInTaskbar = false; AutoScaleMode = AutoScaleMode.None;
-            Font = new Font("Microsoft YaHei UI", 9f); ClientSize = new Size(620, 834);
+            Font = new Font("Microsoft YaHei UI", 9f); ClientSize = new Size(620, 1116);
             _keep.Value = Math.Max(1, Math.Min(60, Store.BackupKeep));
 
             Label backupTitle = Header("备份");
@@ -110,6 +110,70 @@ namespace KeyMouseStats
             _archives.SetBounds(20, 692, 580, 122);
             Controls.Add(archiveTitle);
             Controls.Add(_archives);
+
+            // Milestone 3 / 4.2:健康守护(全屏免打扰 + 本地触发器)
+            Label guardTitle = Header("健康守护");
+            guardTitle.SetBounds(20, 828, 300, 22);
+            CheckBox dnd = new CheckBox();
+            dnd.Text = "全屏 / 游戏 / 演示时自动免打扰";
+            dnd.Checked = WellbeingSettings.FullscreenDnd;
+            dnd.SetBounds(24, 858, 420, 24);
+            dnd.CheckedChanged += delegate { WellbeingSettings.FullscreenDnd = dnd.Checked; Store.Save(); };
+            Label scriptLabel = new Label();
+            scriptLabel.Text = "久坐提醒时执行的本地脚本(.bat / .ps1 / .exe,可留空)";
+            scriptLabel.SetBounds(24, 892, 560, 20);
+            TextBox scriptBox = new TextBox();
+            scriptBox.Text = WellbeingSettings.ScriptPath ?? "";
+            scriptBox.SetBounds(20, 914, 420, 24);
+            Button browse = new Button();
+            browse.Text = "浏览…";
+            browse.SetBounds(450, 912, 80, 26);
+            browse.Click += delegate
+            {
+                using (OpenFileDialog dialog = new OpenFileDialog())
+                {
+                    dialog.Filter = "可执行脚本 (*.bat;*.cmd;*.ps1;*.exe)|*.bat;*.cmd;*.ps1;*.exe|所有文件 (*.*)|*.*";
+                    if (dialog.ShowDialog(this) == DialogResult.OK) scriptBox.Text = dialog.FileName;
+                }
+            };
+            Label hookLabel = new Label();
+            hookLabel.Text = "Webhook URL(HTTP POST,可留空)";
+            hookLabel.SetBounds(24, 948, 560, 20);
+            TextBox hookBox = new TextBox();
+            hookBox.Text = WellbeingSettings.WebhookUrl ?? "";
+            hookBox.SetBounds(20, 970, 560, 24);
+
+            EventHandler saveTrigger = delegate
+            {
+                WellbeingSettings.ScriptPath = scriptBox.Text.Trim();
+                WellbeingSettings.WebhookUrl = hookBox.Text.Trim();
+                Store.Save();
+            };
+            scriptBox.Leave += saveTrigger;
+            hookBox.Leave += saveTrigger;
+
+            // Milestone 3 / 4.3b:跨设备 .kms 增量包
+            Label kmsTitle = Header("跨设备 .kms 增量包");
+            kmsTitle.SetBounds(20, 1008, 300, 22);
+            Button exportKms = new Button();
+            exportKms.Text = "导出 .kms 增量包";
+            exportKms.SetBounds(20, 1038, 170, 30);
+            exportKms.Click += delegate { KmsUi.Export(this); };
+            Button mergeKms = new Button();
+            mergeKms.Text = "合并 .kms 数据包";
+            mergeKms.SetBounds(200, 1038, 170, 30);
+            mergeKms.Click += delegate { KmsUi.Merge(this); };
+            Controls.Add(kmsTitle);
+            Controls.Add(exportKms);
+            Controls.Add(mergeKms);
+
+            Controls.Add(guardTitle);
+            Controls.Add(dnd);
+            Controls.Add(scriptLabel);
+            Controls.Add(scriptBox);
+            Controls.Add(browse);
+            Controls.Add(hookLabel);
+            Controls.Add(hookBox);
 
             _keep.ValueChanged += delegate { Store.BackupKeep = (int)_keep.Value; Store.Save(); RefreshBackupStatus(); };
             backupNow.Click += delegate { Backup(); };

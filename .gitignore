@@ -12,6 +12,9 @@
 *.exe
 *.pdb
 *.dll
+# v3.0:内嵌进主 exe 的原生 SQLite 引擎 —— 「单文件绿色软件」唯一的原生依赖,
+# 必须随仓库分发,否则 CI 上 build.bat 找不到资源会直接失败。
+!assets/native/**/*.dll
 *.obj
 *.cache
 *.log

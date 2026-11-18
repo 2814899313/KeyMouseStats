@@ -91,6 +91,67 @@ namespace KeyMouseStats
         }
     }
 
+    /// <summary>
+    /// 三键通道的独立热力色阶(Milestone 2 / 3.3)。
+    ///   0 全部点击 → 直接委托经典 HeatScale,保证与 v2.4.0 逐格一致;
+    ///   1 左键 = 晴空蓝青,2 右键 = 琥珀暖橙,3 中键 = 紫罗兰洋红。
+    /// 三条新色阶都从**主题自身**的 Cyan / Orange / Purple 派生:
+    /// 低端压向 Card(与卡片底分离)、高端提向 Text —— 对比度天然跟随 13 套主题,
+    /// 不引入新的对比度风险;格子上的文字由 HeatInk 按底色亮度反选,保持可读。
+    /// </summary>
+    internal static class ChannelScale
+    {
+        internal const int All = 0, Left = 1, Right = 2, Middle = 3;
+        internal const int Count = 4;
+        internal static readonly string[] Names = { "全部点击", "左键", "右键", "中键" };
+
+        internal static string NameOf(int channel)
+        {
+            return channel >= 0 && channel < Names.Length ? Names[channel] : Names[0];
+        }
+
+        /// <summary>该通道在主题里的主色。用于图例高亮与胶囊点缀。</summary>
+        internal static Color Accent(int channel)
+        {
+            ArtTheme theme = ArtTheme.Current;
+            if (channel == Left) return theme.Cyan;
+            if (channel == Right) return theme.Orange;
+            if (channel == Middle) return theme.Purple;
+            return theme.Accent;
+        }
+
+        /// <summary>通道色阶。channel 0 完全等于旧 HeatScale,不做任何偏移。</summary>
+        internal static Color At(int channel, double fraction)
+        {
+            if (channel <= All) return HeatScale.At(fraction);
+            ArtTheme theme = ArtTheme.Current;
+            Color accent = Accent(channel);
+            double p = Math.Max(0, Math.Min(1, fraction));
+            if (p < 0.5)
+            {
+                Color dark = ArtTheme.Mix(theme.Card, accent, 0.20);
+                return ArtTheme.Mix(dark, accent, p / 0.5);
+            }
+            return ArtTheme.Mix(accent, theme.Text, (p - 0.5) / 0.5 * 0.34);
+        }
+
+        /// <summary>与 ClickHeat.Heat 同构:对数归一 + 0.85 gamma。channel 0 结果逐位一致。</summary>
+        internal static Color For(int channel, long count, long max)
+        {
+            if (count <= 0 || max <= 0) return HeatScale.Zero;
+            double fraction = Math.Log(1.0 + count) / Math.Log(1.0 + max);
+            return At(channel, Math.Pow(Math.Min(1, fraction), 0.85));
+        }
+
+        /// <summary>图例色带:跟随当前通道渲染对应渐变。</summary>
+        internal static void Bar(Graphics g, RectangleF rect, int channel)
+        {
+            int steps = Math.Max(2, (int)rect.Width);
+            for (int i = 0; i < steps; i++)
+                using (SolidBrush brush = new SolidBrush(At(channel, (double)i / (steps - 1))))
+                    g.FillRectangle(brush, rect.X + i * rect.Width / steps, rect.Y, rect.Width / steps + 0.5f, rect.Height);
+        }
+    }
     internal sealed class ArtTheme
     {
         public string Name;
@@ -237,29 +298,45 @@ namespace KeyMouseStats
         }
         private void PaintThemeTexture(Graphics g)
         {
-            if(GujianArt.Active)GujianArt.DrawPage(g,(int)_tab,new RectangleF(0,0,BW,BH));
-            if(OriArt.Active)OriArt.DrawPage(g,(int)_tab,new RectangleF(0,0,BW,BH));
-            if(EuroTruckArt.Active)EuroTruckArt.DrawPage(g,(int)_tab,new RectangleF(0,0,BW,BH));
-            if(WuxiaArt.Active)WuxiaArt.DrawPage(g,(int)_tab,new RectangleF(0,0,BW,BH));
-            if(BalatroArt.Active)BalatroArt.DrawPage(g,(int)_tab,new RectangleF(0,0,BW,BH));
-            if(MinecraftArt.Active)MinecraftArt.DrawPage(g,(int)_tab,new RectangleF(0,0,BW,BH));
-            if(ResidentArt.Active)ResidentArt.DrawPage(g,(int)_tab,new RectangleF(0,0,BW,BH));
-            if(HaloArt.Active)HaloArt.DrawPage(g,(int)_tab,new RectangleF(0,0,BW,BH));
+            // 3.0:主题原画按「当前逻辑尺寸」铺,而不是设计基准 BW×BH。
+            // 基准是 1072×724,窗口一旦更大(2K,或 1080p@150% 的逻辑 1280×720 之外的实际值),
+            // 原画就只盖住左上角那一块,右边和下方露出纯底色 —— 也就是大屏上看到的「背景只铺了一半」。
+            // 小于基准时仍按基准画,避免原画被压扁。
+            float pageW = BW, pageH = BH;
+            try
+            {
+                float scale = LayoutFrame.Sanitize(_s);
+                if (scale > 0f)
+                {
+                    if (ClientSize.Width / scale > pageW) pageW = ClientSize.Width / scale;
+                    if (ClientSize.Height / scale > pageH) pageH = ClientSize.Height / scale;
+                }
+            }
+            catch { }
+            RectangleF pageRect = new RectangleF(0, 0, pageW, pageH);
+            if(GujianArt.Active)GujianArt.DrawPage(g,(int)_tab,pageRect);
+            if(OriArt.Active)OriArt.DrawPage(g,(int)_tab,pageRect);
+            if(EuroTruckArt.Active)EuroTruckArt.DrawPage(g,(int)_tab,pageRect);
+            if(WuxiaArt.Active)WuxiaArt.DrawPage(g,(int)_tab,pageRect);
+            if(BalatroArt.Active)BalatroArt.DrawPage(g,(int)_tab,pageRect);
+            if(MinecraftArt.Active)MinecraftArt.DrawPage(g,(int)_tab,pageRect);
+            if(ResidentArt.Active)ResidentArt.DrawPage(g,(int)_tab,pageRect);
+            if(HaloArt.Active)HaloArt.DrawPage(g,(int)_tab,pageRect);
             if(NikkiArt.Active)
             {
-                NikkiArt.DrawPage(g,(int)_tab,new RectangleF(0,0,BW,BH));
+                NikkiArt.DrawPage(g,(int)_tab,pageRect);
             }
             if (Store.ThemeId == 1)
             {
                 using (Pen p = new Pen(Color.FromArgb(22, Csub)))
-                    for (int y = 130; y < BH; y += 8) g.DrawLine(p, ContentX, y, BW, y);
+                    for (int y = 130; y < pageH; y += 8) g.DrawLine(p, ContentX, y, pageW, y);
             }
             if (Store.ThemeId == 3 || Store.ThemeId == 4)
             {
                 using (Pen p = new Pen(Color.FromArgb(Store.ThemeId == 3 ? 15 : 23, Cblue)))
                 {
-                    for (int x = ContentX; x < BW; x += 24) g.DrawLine(p, x, 0, x, BH);
-                    for (int y = 0; y < BH; y += 24) g.DrawLine(p, ContentX, y, BW, y);
+                    for (int x = ContentX; x < pageW; x += 24) g.DrawLine(p, x, 0, x, pageH);
+                    for (int y = 0; y < pageH; y += 24) g.DrawLine(p, ContentX, y, pageW, y);
                 }
             }
             // 页脚说明栏底衬:高山/雪地/车灯这类高光原画会把底部提示文字淹掉。
@@ -269,7 +346,7 @@ namespace KeyMouseStats
             {
                 Color shade = ArtTheme.Current.Background;
                 float top = ContentY + Cb - 74;
-                RectangleF band = new RectangleF(ContentX, top, BW - ContentX, BH - top);
+                RectangleF band = new RectangleF(ContentX, top, pageW - ContentX, pageH - top);
                 using (LinearGradientBrush scrim = new LinearGradientBrush(band, Color.FromArgb(0, shade), Color.FromArgb(196, shade), 90f))
                 {
                     ColorBlend blend = new ColorBlend(3);
@@ -310,8 +387,20 @@ namespace KeyMouseStats
             if (progress >= 1) { _themeScrim = Color.Empty; return; }
             int alpha = (int)(170 * (1 - progress));
             if (alpha <= 0) return;
+            // 3.0:交叉淡化铺满整个客户区(原来只铺 BW×BH,大窗口下右边会残留一条旧主题)。
+            float fadeW = BW, fadeH = BH;
+            try
+            {
+                float scale = LayoutFrame.Sanitize(_s);
+                if (scale > 0f)
+                {
+                    if (ClientSize.Width / scale > fadeW) fadeW = ClientSize.Width / scale;
+                    if (ClientSize.Height / scale > fadeH) fadeH = ClientSize.Height / scale;
+                }
+            }
+            catch { }
             using (SolidBrush scrim = new SolidBrush(Color.FromArgb(alpha, _themeScrim)))
-                g.FillRectangle(scrim, 0, 0, BW, BH);
+                g.FillRectangle(scrim, 0, 0, fadeW, fadeH);
         }
     }
 }

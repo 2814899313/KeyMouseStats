@@ -297,53 +297,73 @@ namespace KeyMouseStats
                 Analysis.FmtCount(slice.DistinctChars), Cpurple,
                 slice.DistinctChars > 0 ? "汉字 " + Analysis.FmtCount(slice.DistinctHan) + " 种" : "没有上屏");
 
+            // ---- 3.0 纵向分配:把 ElasticH 拆给第二排图表与第三排列表 ----
+            // 第三排底边严格收口在页脚分割线上方(PageBottom),第二排吃掉多出来空间中的 35%;
+            // 基准 1072×724 时 layout 与旧版一致(row2 = 192、row3 ≈ 170),2K 下两排同步长高。
+            float contentBottom = PageBottom;
+            float row2Y = Cy + 112;                              // 210
+            float leftW = Cw * 0.625f;                           // 基准 520
+            float rightX = Cx + leftW + 17f;                     // 基准 561
+            float rightW = Cw - leftW - 17f;                     // 基准 295
+            // 3.0:直接用 ElasticH 驱动第二排。它低于设计最小(175% 1080p)时为负,
+            // 第二排跟着压缩,第三排底边依旧收口在 PageBottom —— 旧的 max(0, …) 会让
+            // 第二排保持 192 高,第三排被顶到页脚线以下,和侧栏快捷键图例撞在一起。
+            float row2H = Math.Max(110f, 192f + ElasticH * 0.35f);
+            float row3Y = row2Y + row2H + 16f;
+            float row3H = Math.Max(80f, contentBottom - row3Y);
+            float textBodyW = leftW - 36f, textBodyH = row3H - 50f;
+            float textChipY = row3Y + 4f;
+
             // ---- 左大卡:每日字数 / 时段分布 ----
-            float dayY = Cy + 112;
-            PaintCard(g, Cx, dayY, 520, 192, _textChart == 1 ? "时段分布 · 区间累计" : "每日上屏字数");
-            PaintTextChartChips(g, Cx, dayY, 520);
-            if (_textChart == 1) PaintTextHourChart(g, Cx + 18, dayY + 52, 520 - 36, 192 - 70, slice);
-            else PaintTextDayChart(g, Cx + 18, dayY + 52, 520 - 36, 192 - 70);
+            float dayY = row2Y;
+            PaintCard(g, Cx, dayY, leftW, row2H, _textChart == 1 ? "时段分布 · 区间累计" : "每日上屏字数");
+            PaintTextChartChips(g, Cx, dayY, leftW);
+            if (_textChart == 1) PaintTextHourChart(g, Cx + 18, dayY + 52, leftW - 36, row2H - 70, slice);
+            else PaintTextDayChart(g, Cx + 18, dayY + 52, leftW - 36, row2H - 70);
 
             // ---- 右卡:词长 / 字符构成 / 输入节奏 ----
-            PaintCard(g, Cx + 537, dayY, 295, 192, _textWordMode == 0 ? "词长分布" : _textWordMode == 1 ? "字符构成" : _textWordMode == 2 ? "输入节奏" : "输入效率");
-            PaintTextModeChips(g, Cx + 537, dayY, 295, new[] { 410, 411, 412, 417 }, _textWordMode, WordModeNames);
-            float bx = Cx + 537 + 18, by = dayY + 52, bw = 295 - 36, bh = 192 - 70;
+            PaintCard(g, rightX, dayY, rightW, row2H, _textWordMode == 0 ? "词长分布" : _textWordMode == 1 ? "字符构成" : _textWordMode == 2 ? "输入节奏" : "输入效率");
+            PaintTextModeChips(g, rightX, dayY, rightW, new[] { 410, 411, 412, 417 }, _textWordMode, WordModeNames);
+            float bx = rightX + 18, by = dayY + 52, bw = rightW - 36, bh = row2H - 70;
             if (_textWordMode == 1) PaintTextComposition(g, bx, by, bw, bh, slice);
             else if (_textWordMode == 2) PaintTextRhythm(g, bx, by, bw, bh, slice);
             else if (_textWordMode == 3) PaintTextEfficiency(g, bx, by, bw, bh, slice);
             else PaintTextWordLength(g, bx, by, bw, bh, slice);
 
             // ---- 左下:高频字符 / 高频词组 / 输出应用 ----
-            PaintCard(g, Cx, Cy + 320, 520, 168, _textWordTab == 0 ? "高频字符 · TOP 20" : _textWordTab == 1 ? "高频词组 · TOP 20" : "输出应用 · 按字数");
+            // 标题里的 TOP N 跟着格子容量走:基准 20,2K 自动扩到 40+。
+            int charColumns = TextGridColumns(textBodyW);
+            int charCapacity = charColumns * TextGridRows(textBodyH);
+            PaintCard(g, Cx, row3Y, leftW, row3H, _textWordTab == 0 ? "高频字符 · TOP " + charCapacity
+                : _textWordTab == 1 ? "高频词组 · TOP " + charCapacity : "输出应用 · 按字数");
             if (_textWordTab == 2)
             {
                 string title = "输出应用 · 按字数";
                 SizeF titleSize = g.MeasureString(title, _fH2);
-                RectangleF info = new RectangleF(Cx + 18 + titleSize.Width + 6, Cy + 329, 18, 22);
+                RectangleF info = new RectangleF(Cx + 18 + titleSize.Width + 6, row3Y + 9, 18, 22);
                 AppText(g, "ⓘ", _fAxis, Csub, info, false);
                 AddTextHit(info, 6, 0);
             }
             // 卡片内所有切换器统一成标准 ToggleChip(h30 / r8 / Ccard + Cline),
-            // 定位在标题行垂直居中,不再用 24 高的私有小方块。
-            float textChipY = Cy + 324;
+            // 定位在标题行垂直居中,并整组右对齐到卡片右边缘(2K 下不再聚在左半张卡里)。
             if (_textWordTab == 0)
             {
-                PaintTextToggleChip(g, new RectangleF(Cx + 250, textChipY, 48, ToggleChipHeight), "汉字", _textCharFilter == 0, 413);
-                PaintTextToggleChip(g, new RectangleF(Cx + 302, textChipY, 48, ToggleChipHeight), "标点", _textCharFilter == 1, 414);
+                PaintTextToggleChip(g, new RectangleF(Cx + leftW - 294f, textChipY, 48, ToggleChipHeight), "汉字", _textCharFilter == 0, 413);
+                PaintTextToggleChip(g, new RectangleF(Cx + leftW - 242f, textChipY, 48, ToggleChipHeight), "标点", _textCharFilter == 1, 414);
             }
-            PaintTextToggleChip(g, new RectangleF(Cx + 358, textChipY, 46, ToggleChipHeight), "单字", _textWordTab == 0, 415);
-            PaintTextToggleChip(g, new RectangleF(Cx + 408, textChipY, 46, ToggleChipHeight), "词组", _textWordTab == 1, 416);
-            PaintTextToggleChip(g, new RectangleF(Cx + 458, textChipY, 46, ToggleChipHeight), "应用", _textWordTab == 2, 418);
-            PaintTextTopChars(g, Cx + 18, Cy + 320 + 40, 520 - 36, 168 - 50, slice);
+            PaintTextToggleChip(g, new RectangleF(Cx + leftW - 186f, textChipY, 46, ToggleChipHeight), "单字", _textWordTab == 0, 415);
+            PaintTextToggleChip(g, new RectangleF(Cx + leftW - 136f, textChipY, 46, ToggleChipHeight), "词组", _textWordTab == 1, 416);
+            PaintTextToggleChip(g, new RectangleF(Cx + leftW - 86f, textChipY, 46, ToggleChipHeight), "应用", _textWordTab == 2, 418);
+            PaintTextTopChars(g, Cx + 18, row3Y + 40, textBodyW, textBodyH, slice);
 
             // ---- 右下:最近上屏 ----
-            PaintCard(g, Cx + 537, Cy + 320, 295, 168, "最近上屏");
+            PaintCard(g, rightX, row3Y, rightW, row3H, "最近上屏");
             PaintTextToggleChip(g, new RectangleF(Cx + Cw - 16 - 172, textChipY, 56, ToggleChipHeight),
                 _textBlurRecent ? "明文" : "模糊", _textBlurRecent, 408);
             _textRefreshRect = new RectangleF(Cx + Cw - 16 - 108, textChipY, 108, ToggleChipHeight);
             PaintTextToggleChip(g, _textRefreshRect, "刷新 " + RimeTextStats.RefreshLabel(Store.TextRefreshSeconds) + " ▾", false, 405);
             AddTextHit(_textRefreshRect, 7, 0);
-            PaintTextRecent(g, Cx + 537 + 18, Cy + 320 + 40, 295 - 36, 168 - 50, slice);
+            PaintTextRecent(g, rightX + 18, row3Y + 40, rightW - 36, row3H - 50, slice);
 
             // ---- 悬停:高亮 + 浮层,同时把明细交给 Ctrl+C ----
             // 每帧按当前鼠标位置重算一次:换页、换筛选之后不会残留旧元素的提示。
@@ -649,9 +669,28 @@ namespace KeyMouseStats
             }
         }
 
+        /// <summary>字符网格的列数:按可用宽度反推。基准 520 宽 = 10 列,2K 自动扩到 20+ 列。</summary>
+        private static int TextGridColumns(float w)
+        {
+            return LayoutFrame.ClampInt((int)((w + 6f) / 49f), 10, 30);
+        }
+
         /// <summary>
-        /// 高频字符 Top 20：10 列 × 2 行独立卡片，按频次从左向右排列。
-        /// 字符、次数和相对频次分层展示，整张卡片可悬停查看明细。
+        /// 字符网格的行数:按可用高度反推。基准 118 高 = 2 行,2K 自动扩到 8~10 行。
+        /// 高度不足 76px 时退到 1 行 —— 低于设计最小的逻辑画布(175% 1080p)上,
+        /// 强行保留 2 行会把字形压到 5px 并互相叠字。
+        /// </summary>
+        private static int TextGridRows(float h)
+        {
+            int rows = (int)((h - 14f) / 58f);
+            if (rows < 1) rows = 1;
+            if (rows > 10) rows = 10;
+            return rows;
+        }
+
+        /// <summary>
+        /// 高频字符网格:列数 × 行数由卡片可用宽高反推,按频次从左向右排列。
+        /// 字符、次数和相对频次分层展示,整张卡片可悬停查看明细。
         /// </summary>
         private void PaintTextTopChars(Graphics g, float x, float y, float w, float h, RimeSlice slice)
         {
@@ -662,9 +701,13 @@ namespace KeyMouseStats
                 PaintTextApps(g, x, y, w, h, slice);
                 return;
             }
+            // 3.0 内容密度:容量由可用宽高反推(基准 10 列 × 2 行 = Top 20,2K 自动扩到 40+),
+            // 取满容量就停,不会把 240 个候选字符一股脑塞进格子。
+            int gridColumns = TextGridColumns(w);
+            int capacity = gridColumns * TextGridRows(h);
             if (_textWordTab == 1)
             {
-                foreach (KeyValuePair<string, long> row in slice.TopPhrases(20))
+                foreach (KeyValuePair<string, long> row in slice.TopPhrases(capacity))
                 {
                     _textTopLabels.Add(row.Key);
                     _textTopValues.Add(row.Value);
@@ -678,7 +721,7 @@ namespace KeyMouseStats
                     if (_textCharFilter == 0 && !RimeText.IsCjk(row.Key)) continue;
                     _textTopLabels.Add(RimeText.DisplayName(row.Key));
                     _textTopValues.Add(row.Value);
-                    if (_textTopLabels.Count >= 20) break;
+                    if (_textTopLabels.Count >= capacity) break;
                 }
             }
             if (_textTopLabels.Count == 0)
@@ -691,10 +734,13 @@ namespace KeyMouseStats
             foreach (long value in _textTopValues) sum += value;
 
             Font glyphFont = TextCharFont();
-            const int columns = 10;
             const float gap = 6;
+            int columns = gridColumns;
+            // 实际用到的行数按数据收敛,容量大于数据时不会在底部留一整排空格子。
+            int gridRows = (_textTopLabels.Count + columns - 1) / columns;
+            if (gridRows < 1) gridRows = 1;
             float cellW = (w - (columns - 1) * gap) / columns;
-            float cellH = (h - 20 - gap) / 2;
+            float cellH = (h - 20f - (gridRows - 1) * gap) / gridRows;
             long highest = Math.Max(1, _textTopValues[0]);
             PointF mouse = ToBase(_mouse);
             mouse = new PointF(mouse.X - ContentX, mouse.Y - ContentY);
@@ -740,13 +786,18 @@ namespace KeyMouseStats
             else
                 footer = "按频次排序 · 前 " + _textTopLabels.Count + " 个字符占总字数 "
                     + (sum > 0 && slice.Chars > 0 ? (sum * 100.0 / slice.Chars).ToString("0", CultureInfo.InvariantCulture) : "0") + "%";
-            AppText(g, footer, _fAxis, Csub, new RectangleF(x, y + h - 12, w, 12), false);
+            // 卡片内页脚只在高度够用时画:低于设计最小的画布上(h≈37)它会压在字形行上。
+            if (h >= 64f) AppText(g, footer, _fAxis, Csub, new RectangleF(x, y + h - 12, w, 12), false);
         }
 
         /// <summary>按前台程序聚合的文字产出；只显示程序名，不显示窗口标题或内容上下文。</summary>
         private void PaintTextApps(Graphics g, float x, float y, float w, float h, RimeSlice slice)
         {
-            List<RimeAppSummary> apps = slice.TopApps(5);
+            // 3.0:条数与行高由第三排卡片的实际高度反推 —— 基准 5 条 × 21,2K 扩到 10~12 条
+            // 并在 [21,44] 区间内均分行高,不再「5 条贴着顶部、下半张卡空框」。
+            int maxRows = LayoutFrame.CalcVisibleRows(h, 0f, 0f, 21f, 44f, 12);
+            if (maxRows < 1) maxRows = 1;
+            List<RimeAppSummary> apps = slice.TopApps(maxRows);
             if (apps.Count == 0)
             {
                 AppText(g, "本区间没有带程序列的上屏记录", _fSmall, Csub, new RectangleF(x, y + h / 2 - 10, w, 20), false);
@@ -754,8 +805,13 @@ namespace KeyMouseStats
             }
 
             long total = Math.Max(1, slice.Chars);
-            float rowH = Math.Min(21f, h / apps.Count);
-            float nameW = 140, charsW = 110, tagsW = 120;
+            float rowH = LayoutFrame.CalcRowHeight(h, 0f, 0f, 21f, 44f, apps.Count);
+            float nameW = 140, charsW = 110;
+            // 3.0:高频字从 3 个加到 5 个。单字胶囊宽度是统一的,按实测值给足 5 个的列宽,
+            // 免得第 4、5 个胶囊压到「字数 / 占比」两列上。
+            int tagSlots = 5;
+            float oneTag = Math.Min(34f, g.MeasureString("字", _fAxis).Width + 12f);
+            float tagsW = oneTag * tagSlots + 3f * (tagSlots - 1) + 6f;
             float barX = x + nameW + 8;
             float barW = Math.Max(24f, w - nameW - charsW - tagsW - 24);
             for (int i = 0; i < apps.Count; i++)
@@ -794,7 +850,7 @@ namespace KeyMouseStats
                 List<KeyValuePair<int, long>> chars = app.TopChars(12);
                 float tagX = x + w - tagsW;
                 int shown = 0;
-                for (int k = 0; k < chars.Count && shown < 3; k++)
+                for (int k = 0; k < chars.Count && shown < tagSlots; k++)
                 {
                     if (!RimeText.IsCjk(chars[k].Key)) continue;
                     string label = RimeText.DisplayName(chars[k].Key);
@@ -816,8 +872,8 @@ namespace KeyMouseStats
                 AppText(g, "本区间没有上屏记录", _fSmall, Csub, new RectangleF(x, y + h / 2 - 10, w, 20), false);
                 return;
             }
-            int rows = Math.Min(5, slice.Recent.Count);
-            float rowHeight = 22;
+            int rows = LayoutFrame.CalcVisibleRows(h, 0f, 0f, 22f, 30f, slice.Recent.Count);
+            float rowHeight = LayoutFrame.CalcRowHeight(h, 0f, 0f, 22f, 30f, rows);
             PointF mouse = ToBase(_mouse);
             mouse = new PointF(mouse.X - ContentX, mouse.Y - ContentY);
             for (int i = 0; i < rows; i++)

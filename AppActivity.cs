@@ -96,9 +96,228 @@ namespace KeyMouseStats
                 uint verifiedPid;
                 if (GetForegroundWindow() != window || GetWindowThreadProcessId(window, out verifiedPid) == 0 || verifiedPid != pid)
                     return new AppUsage { Title = "窗口切换中 / 无法归因" };
-                return new AppUsage { ProcessPath = _lastPath, Title = _titleText };
+                // v3.0:把成功解析的快照发布给钩子热路径(ForegroundApp.Cached),
+                // 这样钩子里只需读一个字段,不再触发任何跨进程调用。
+                AppUsage snapshot = new AppUsage { ProcessPath = _lastPath, Title = _titleText };
+                _lastSnapshot = snapshot;
+                return snapshot;
             }
             catch { return new AppUsage { Title = "无法识别的前台窗口" }; }
+        }
+        // ------------------------------------------------------------ 后台窗口解析(Step 3)
+        //
+        //  钩子回调里**不允许**做任何跨进程调用:GetWindowText / OpenProcess 在目标程序
+        //  卡住时会阻塞几百毫秒,一旦超过 LowLevelHooksTimeout(默认 300 ms),Windows 就会
+        //  静默摘掉钩子(表现为「点了没反应」)。因此钩子只取廉价的 GetForegroundWindow(),
+        //  把 HWND 塞进环形缓冲;真正的 (进程路径, 窗口标题) 解析由后台写线程在这里带
+        //  LRU 缓存地完成。
+
+        /// <summary>后台解析结果:只描述窗口,不带任何计数。</summary>
+        internal sealed class WindowInfo
+        {
+            public string ProcessPath = "";
+            public string ProcessName = "";
+            public string WindowTitle = "";
+        }
+
+        private sealed class HwndCacheEntry
+        {
+            public WindowInfo Info;
+            public long StampMs;
+            public long LastUsed;
+        }
+
+        /// <summary>LRU 容量上限。浏览器狂切标签时的兜底。</summary>
+        internal const int CacheCapacity = 256;
+        /// <summary>缓存有效期(毫秒)。</summary>
+        internal const int CacheTtlMs = 1500;
+
+        private static readonly Dictionary<IntPtr, HwndCacheEntry> HwndCache =
+            new Dictionary<IntPtr, HwndCacheEntry>();
+        private static readonly object CacheGate = new object();
+        private static readonly object UwpGate = new object();
+        private static long _cacheUse;
+        private static AppUsage _lastSnapshot;
+        private static readonly AppUsage UnknownSnapshot = new AppUsage { Title = "无法识别的前台窗口" };
+
+        private delegate bool EnumChildProc(IntPtr hwnd, IntPtr lParam);
+        private static readonly EnumChildProc ChildProbe = ProbeUwpChild;
+        private static IntPtr _uwpChildFound;
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumChildWindows(IntPtr parent, EnumChildProc callback, IntPtr lParam);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetClassName(IntPtr hwnd, StringBuilder name, int maxCount);
+
+        /// <summary>钩子热路径取用的最近一次已知前台快照 —— 纯字段读,零系统调用。</summary>
+        internal static AppUsage Cached()
+        {
+            AppUsage snapshot = _lastSnapshot;
+            return snapshot == null ? UnknownSnapshot : snapshot;
+        }
+
+        /// <summary>
+        /// 按 HWND 解析 (进程路径, 进程名, 完整窗口标题)。带 256 条 / 1500 ms 的 LRU 缓存,
+        /// 仅供后台写线程调用;绝不在钩子里调用。
+        /// </summary>
+        internal static WindowInfo ResolveWindowByHwnd(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return new WindowInfo { WindowTitle = "无前台窗口" };
+
+            long now = NowMs();
+            lock (CacheGate)
+            {
+                HwndCacheEntry hit;
+                if (HwndCache.TryGetValue(hwnd, out hit) && now >= hit.StampMs && now - hit.StampMs <= CacheTtlMs)
+                {
+                    hit.LastUsed = ++_cacheUse;
+                    return hit.Info;
+                }
+            }
+
+            WindowInfo info = ResolveCore(hwnd);
+
+            lock (CacheGate)
+            {
+                HwndCacheEntry entry = new HwndCacheEntry();
+                entry.Info = info;
+                entry.StampMs = now;
+                entry.LastUsed = ++_cacheUse;
+                HwndCache[hwnd] = entry;
+                if (HwndCache.Count > CacheCapacity) EvictOldestEntry();
+                _lastSnapshot = new AppUsage { ProcessPath = info.ProcessPath, Title = info.WindowTitle };
+            }
+            return info;
+        }
+
+        /// <summary>测试用:清空缓存,避免用例之间互相污染。</summary>
+        internal static void ClearWindowCacheForTest()
+        {
+            lock (CacheGate)
+            {
+                HwndCache.Clear();
+                _lastSnapshot = null;
+            }
+        }
+
+        private static void EvictOldestEntry()
+        {
+            // 256 条规模,线性找最久未用即可;只在缓存满且新增时发生。
+            IntPtr oldestKey = IntPtr.Zero;
+            long oldestUse = long.MaxValue;
+            bool found = false;
+            foreach (KeyValuePair<IntPtr, HwndCacheEntry> pair in HwndCache)
+            {
+                if (pair.Value.LastUsed < oldestUse)
+                {
+                    oldestUse = pair.Value.LastUsed;
+                    oldestKey = pair.Key;
+                    found = true;
+                }
+            }
+            if (found) HwndCache.Remove(oldestKey);
+        }
+
+        private static WindowInfo ResolveCore(IntPtr hwnd)
+        {
+            WindowInfo info = new WindowInfo();
+            try
+            {
+                uint pid;
+                if (GetWindowThreadProcessId(hwnd, out pid) == 0 || pid == 0)
+                {
+                    info.WindowTitle = "无法识别的前台窗口";
+                    return info;
+                }
+
+                string path = QueryProcessPath(pid);
+
+                // UWP:ApplicationFrameHost.exe 只是宿主框,真正的窗口属于
+                // Windows.UI.Core.CoreWindow 子窗口所属的那个进程。
+                if (IsFrameHost(path))
+                {
+                    IntPtr core = FindUwpCoreWindow(hwnd);
+                    uint childPid;
+                    if (core != IntPtr.Zero && GetWindowThreadProcessId(core, out childPid) != 0 && childPid != 0)
+                    {
+                        string real = QueryProcessPath(childPid);
+                        if (!string.IsNullOrEmpty(real)) path = real;
+                    }
+                }
+
+                info.ProcessPath = path;
+                info.ProcessName = string.IsNullOrEmpty(path) ? "" : Path.GetFileName(path);
+                info.WindowTitle = QueryWindowTitle(hwnd);
+                return info;
+            }
+            catch
+            {
+                info.WindowTitle = "无法识别的前台窗口";
+                return info;
+            }
+        }
+
+        private static string QueryProcessPath(uint pid)
+        {
+            IntPtr process = OpenProcess(0x1000, false, pid);   // QUERY_LIMITED_INFORMATION
+            if (process == IntPtr.Zero) return "";
+            try
+            {
+                StringBuilder path = new StringBuilder(32768);
+                uint size = (uint)path.Capacity;
+                return QueryFullProcessImageName(process, 0, path, ref size) ? path.ToString() : "";
+            }
+            finally
+            {
+                CloseHandle(process);
+            }
+        }
+
+        private static string QueryWindowTitle(IntPtr hwnd)
+        {
+            StringBuilder buffer = new StringBuilder(1024);
+            GetWindowText(hwnd, buffer, buffer.Capacity);
+            return buffer.Length == 0 ? "无标题窗口" : buffer.ToString();
+        }
+
+        private static bool IsFrameHost(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            return string.Equals(Path.GetFileName(path), "ApplicationFrameHost.exe",
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static IntPtr FindUwpCoreWindow(IntPtr frame)
+        {
+            lock (UwpGate)
+            {
+                _uwpChildFound = IntPtr.Zero;
+                try { EnumChildWindows(frame, ChildProbe, IntPtr.Zero); }
+                catch { }
+                return _uwpChildFound;
+            }
+        }
+
+        private static bool ProbeUwpChild(IntPtr child, IntPtr lParam)
+        {
+            try
+            {
+                StringBuilder name = new StringBuilder(256);
+                if (GetClassName(child, name, name.Capacity) > 0 &&
+                    string.Equals(name.ToString(), "Windows.UI.Core.CoreWindow", StringComparison.Ordinal))
+                {
+                    _uwpChildFound = child;
+                    return false;   // 找到即停止枚举
+                }
+            }
+            catch { }
+            return true;
+        }
+
+        private static long NowMs()
+        {
+            return (long)(System.Diagnostics.Stopwatch.GetTimestamp() * 1000.0
+                / System.Diagnostics.Stopwatch.Frequency);
         }
     }
 
@@ -187,7 +406,13 @@ namespace KeyMouseStats
         };
 
         // Append categories to preserve numeric IDs in existing manual rules.
-        public static readonly string[] Categories = { "编程", "游戏", "视频", "其他", "未分类", "办公" };
+        // v3.0:0~5 的数值与语义**永久冻结**(历史 app_rule 与聚合都按数值落盘),
+        // 只能向上追加。6=科研 7=写作 8=沟通 9=娱乐。
+        public static readonly string[] Categories =
+        {
+            "编程", "游戏", "视频", "其他", "未分类", "办公",
+            "科研", "写作", "沟通", "娱乐"
+        };
         public static readonly Dictionary<string, int> Rules = new Dictionary<string, int>(StringComparer.Ordinal);
         public const string UnattributedId = "__unattributed__";
         public const string OverflowTitle = "其他窗口（当日标题数量已达上限）";
@@ -248,6 +473,15 @@ namespace KeyMouseStats
                     || title.EndsWith("_" + marker, StringComparison.Ordinal))
                 { site = marker; return i < 4 ? 0 : 2; }
             }
+            string[] research = { "arxiv", "ieee xplore", "sciencedirect", "springer", "nature", "知网", "cnki", "pubmed", "google scholar", "researchgate" };
+            for (int i = 0; i < research.Length; i++)
+            {
+                string marker = research[i];
+                if (title == marker || title.EndsWith(" - " + marker, StringComparison.Ordinal)
+                    || title.EndsWith(" · " + marker, StringComparison.Ordinal) || title.EndsWith(" | " + marker, StringComparison.Ordinal)
+                    || title.EndsWith("_" + marker, StringComparison.Ordinal))
+                { site = marker; return 6; }
+            }
             return 4;
         }
 
@@ -262,6 +496,10 @@ namespace KeyMouseStats
             if (Contains("cs2.exe|dota2.exe|league of legends.exe|valorant-win64-shipping.exe|overwatch.exe|genshinimpact.exe|starrail.exe", name)) return 1;
             if (Contains("vlc.exe|potplayer64.exe|potplayer.exe|mpv.exe|bilibili.exe", name)) return 2;
             if (Contains("wps.exe|et.exe|wpp.exe|wpspdf.exe|winword.exe|excel.exe|powerpnt.exe|onenote.exe|outlook.exe|acrobat.exe|acrord32.exe|notion.exe|obsidian.exe|zotero.exe|opensquilla.exe|chatgpt.exe|claude.exe|wechat.exe|weixin.exe|qq.exe|dingtalk.exe|feishu.exe|discord.exe|telegram.exe", name)) return 5;
+            if (Contains("matlab.exe|spss.exe|stata.exe|stata-mp.exe|endnote.exe|mendeley.exe|jabref.exe|origin.exe|imagej.exe|chemdraw.exe", name)) return 6;
+            if (Contains("typora.exe|marktext.exe|scrivener.exe|ulysses.exe|zim.exe|writemonkey.exe|ghostwriter.exe", name)) return 7;
+            if (Contains("slack.exe|zoom.exe|teams.exe|msteams.exe|lark.exe|wxwork.exe|whatsapp.exe|line.exe|skype.exe", name)) return 8;
+            if (Contains("steam.exe|epicgameslauncher.exe|battle.net.exe|cloudmusic.exe|neteasecloudmusic.exe|qqmusic.exe|kugou.exe|spotify.exe|foobar2000.exe", name)) return 9;
             if (Contains("explorer.exe|taskmgr.exe|systemsettings.exe|searchhost.exe|startmenuexperiencehost.exe|shellexperiencehost.exe|applicationframehost.exe|7zfm.exe|winrar.exe", name)) return 3;
             if (name == "键鼠统计.exe" || name == "keymousestats.exe"
                 || name.StartsWith("keymousestats.", StringComparison.Ordinal) && name.EndsWith(".exe", StringComparison.Ordinal)) return 3;

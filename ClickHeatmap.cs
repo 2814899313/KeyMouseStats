@@ -73,6 +73,15 @@ namespace KeyMouseStats
             long count;
             day.ClickCells.TryGetValue(key, out count);
             day.ClickCells[key] = count + 1;
+
+            // v3.0:同一份数据再按通道记一份。ClickCells 仍是「全通道汇总」,
+            // 保证旧版本与「全部点击」视图读到的数值一个都不变。
+            int channel = ChannelOf(button);
+            long v1Key = ((long)channel << 32) | (uint)key;
+            if (day.ClickCellsV1 == null) day.ClickCellsV1 = new Dictionary<long, long>();
+            long channelCount;
+            day.ClickCellsV1.TryGetValue(v1Key, out channelCount);
+            day.ClickCellsV1[v1Key] = channelCount + 1;
             return true;
         }
 
@@ -128,6 +137,79 @@ namespace KeyMouseStats
                 target[key] = old + Math.Min(count, 100000000L);
             }
         }
+        // ---------------------------------------------------------------- 三通道(v3.0)
+
+        /// <summary>把按键序号归一成通道:1/2/3 = 左/右/中,≥4 = 侧键,其余 = 0(未知)。</summary>
+        public static int ChannelOf(int button)
+        {
+            if (button >= 1 && button <= 3) return button;
+            if (button >= 4) return 4;
+            return 0;
+        }
+
+        /// <summary>通道键打包:高 32 位通道,低 32 位 CellKey。</summary>
+        public static long ChannelKey(int channel, int cellKey)
+        {
+            return ((long)channel << 32) | (uint)cellKey;
+        }
+
+        public static int ChannelOfKey(long key)
+        {
+            return (int)(key >> 32);
+        }
+
+        public static int CellKeyOfChannelKey(long key)
+        {
+            return (int)(key & 0xFFFFFFFF);
+        }
+
+        /// <summary>一天的三通道明细写成 "channel:cx:cy:count,...";按打包键排序保证文件稳定。</summary>
+        public static string EncodeV1(Dictionary<long, long> cells)
+        {
+            if (cells == null || cells.Count == 0) return "";
+            List<long> keys = new List<long>(cells.Keys);
+            keys.Sort();
+            StringBuilder sb = new StringBuilder(keys.Count * 12);
+            foreach (long key in keys)
+            {
+                long count = cells[key];
+                if (count <= 0) continue;
+                int channel = ChannelOfKey(key);
+                int cellX, cellY;
+                SplitKey(CellKeyOfChannelKey(key), out cellX, out cellY);
+                if (sb.Length > 0) sb.Append(',');
+                sb.Append(channel.ToString(CultureInfo.InvariantCulture)).Append(':')
+                  .Append(cellX.ToString(CultureInfo.InvariantCulture)).Append(':')
+                  .Append(cellY.ToString(CultureInfo.InvariantCulture)).Append(':')
+                  .Append(count.ToString(CultureInfo.InvariantCulture));
+            }
+            return sb.ToString();
+        }
+
+        public static void DecodeV1(string text, Dictionary<long, long> target)
+        {
+            if (string.IsNullOrEmpty(text) || target == null) return;
+            string[] parts = text.Split(',');
+            int capacity = MaxCellsPerDay * 5;
+            for (int i = 0; i < parts.Length && target.Count < capacity; i++)
+            {
+                string[] fields = parts[i].Split(':');
+                if (fields.Length != 4) continue;
+                int channel, cellX, cellY;
+                long count;
+                if (!int.TryParse(fields[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out channel)) continue;
+                if (channel < 0 || channel > 4) continue;
+                if (!int.TryParse(fields[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out cellX)) continue;
+                if (!int.TryParse(fields[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out cellY)) continue;
+                if (!long.TryParse(fields[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out count)) continue;
+                if (count <= 0) continue;
+                if (cellX < -32768 || cellX > 32767 || cellY < -32768 || cellY > 32767) continue;
+                long key = ChannelKey(channel, CellKey(cellX, cellY));
+                long old;
+                target.TryGetValue(key, out old);
+                target[key] = old + Math.Min(count, 100000000L);
+            }
+        }
 
         /// <summary>
         /// 位置明细只留最近 KeepDays 天;被清掉的是采样格,当天总点击数仍然保留。
@@ -140,9 +222,11 @@ namespace KeyMouseStats
             int cleared = 0;
             foreach (KeyValuePair<DateTime, DayRecord> pair in history)
             {
-                if (pair.Key >= oldest || pair.Value == null || pair.Value.ClickCells.Count == 0) continue;
+                if (pair.Key >= oldest || pair.Value == null
+                    || (pair.Value.ClickCells.Count == 0 && pair.Value.ClickCellsV1.Count == 0)) continue;
                 cleared += pair.Value.ClickCells.Count;
                 pair.Value.ClickCells.Clear();
+                pair.Value.ClickCellsV1.Clear();
             }
             return cleared;
         }
@@ -222,6 +306,12 @@ namespace KeyMouseStats
             public long OffRegion;
             /// <summary>所选屏幕上有多少格被点亮。</summary>
             public int RegionCells;
+            /// <summary>本次聚合使用的通道过滤(0 = 全部点击)。</summary>
+            public int Channel;
+            /// <summary>区间内 channel=0(未区分按键)的历史点击数。</summary>
+            public long LegacyTotal;
+            /// <summary>分通道查询遇到未分类历史数据时为 true,供 UI 提示「早期版本未区分按键」。</summary>
+            public bool HasLegacyUnclassified;
 
             /// <summary>
             /// 按当前屏幕布局算九宫格。
@@ -283,31 +373,89 @@ namespace KeyMouseStats
             return rects;
         }
 
-        /// <summary>按传入的屏幕范围聚合若干天。区域统计需要另外调用 ComputeRegions。</summary>
+        /// <summary>按传入的屏幕范围聚合若干天(通道 0 = 全部点击,与 v2.4.0 完全等价)。</summary>
         public static Aggregate Collect(IEnumerable<DayRecord> days, Rectangle bounds)
         {
+            return Collect(days, bounds, 0);
+        }
+
+        /// <summary>
+        /// 带通道过滤的聚合。channel = 0 表示「全部点击」——它的逐格数值与 v2.4.0 完全一致;
+        /// 1/2/3/4 分别只看 左/右/中/侧。
+        /// 旧档只有 ch=(无 chv1)时,整格映射到 channel = 0 兼容通道,**绝不伪造归入左键**。
+        /// </summary>
+        public static Aggregate Collect(IEnumerable<DayRecord> days, Rectangle bounds, int channel)
+        {
             Aggregate aggregate = new Aggregate();
+            aggregate.Channel = channel;
             if (days == null) return aggregate;
             foreach (DayRecord day in days)
             {
-                if (day == null || day.ClickCells == null || day.ClickCells.Count == 0) continue;
+                if (day == null) continue;
+                bool hasFlat = day.ClickCells != null && day.ClickCells.Count > 0;
+                bool hasChanneled = day.ClickCellsV1 != null && day.ClickCellsV1.Count > 0;
+                if (!hasFlat && !hasChanneled) continue;
+                bool useChanneled = hasChanneled && InvariantHolds(day);
+                if (!useChanneled && !hasFlat) continue;
                 aggregate.Days++;
-                foreach (KeyValuePair<int, long> pair in day.ClickCells)
+
+                if (useChanneled)
                 {
-                    long count = pair.Value;
-                    if (count <= 0) continue;
-                    long old;
-                    aggregate.Cells.TryGetValue(pair.Key, out old);
-                    aggregate.Cells[pair.Key] = old + count;
-                    aggregate.Total += count;
-                    if (old + count > aggregate.Max)
+                    foreach (KeyValuePair<long, long> pair in day.ClickCellsV1)
                     {
-                        aggregate.Max = old + count;
-                        aggregate.MaxKey = pair.Key;
+                        long count = pair.Value;
+                        if (count <= 0) continue;
+                        int entryChannel = (int)(pair.Key >> 32);
+                        int cellKey = (int)(pair.Key & 0xFFFFFFFF);
+                        if (entryChannel == 0) aggregate.LegacyTotal += count;
+                        if (channel != 0 && entryChannel != channel) continue;
+                        Accumulate(aggregate, cellKey, count);
+                    }
+                }
+                else
+                {
+                    foreach (KeyValuePair<int, long> pair in day.ClickCells)
+                    {
+                        long count = pair.Value;
+                        if (count <= 0) continue;
+                        aggregate.LegacyTotal += count;
+                        if (channel != 0) continue;
+                        Accumulate(aggregate, pair.Key, count);
                     }
                 }
             }
+            if (channel != 0 && aggregate.LegacyTotal > 0) aggregate.HasLegacyUnclassified = true;
             return aggregate;
+        }
+
+        private static void Accumulate(Aggregate aggregate, int cellKey, long count)
+        {
+            long old;
+            aggregate.Cells.TryGetValue(cellKey, out old);
+            aggregate.Cells[cellKey] = old + count;
+            aggregate.Total += count;
+            if (old + count > aggregate.Max)
+            {
+                aggregate.Max = old + count;
+                aggregate.MaxKey = cellKey;
+            }
+        }
+
+        /// <summary>
+        /// chv1 与 ch 的一致性校验:分通道总和必须等于全通道汇总。
+        /// 不成立时聚合退回 ch(权威总数),避免把损坏的 chv1 当真。
+        /// </summary>
+        internal static bool InvariantHolds(DayRecord day)
+        {
+            if (day == null || day.ClickCellsV1 == null || day.ClickCellsV1.Count == 0) return false;
+            long channeled = 0;
+            foreach (KeyValuePair<long, long> pair in day.ClickCellsV1)
+                if (pair.Value > 0) channeled += pair.Value;
+            if (day.ClickCells == null || day.ClickCells.Count == 0) return true;   // 只有 chv1 时直接信任
+            long flat = 0;
+            foreach (KeyValuePair<int, long> pair in day.ClickCells)
+                if (pair.Value > 0) flat += pair.Value;
+            return channeled == flat;
         }
 
         /// <summary>屏幕坐标落在九宫格的第几格(超出范围时夹到边上)。</summary>
@@ -429,6 +577,84 @@ namespace KeyMouseStats
         }
     }
 
+    /// <summary>
+    /// 点击热区「三键通道」的可测门面(Milestone 2 / 3.3)。
+    /// 全部是纯函数:不碰 Graphics、不碰 Form,状态机、chip 派发、缓存签名与
+    /// 提示优先级都能被单测直接覆盖。
+    /// </summary>
+    internal static class ClickChannelUi
+    {
+        /// <summary>521=全部点击 / 522=左键 / 523=右键 / 524=中键。</summary>
+        internal const int FirstChipId = 521;
+        internal static readonly int[] ChannelChipIds = { 521, 522, 523, 524 };
+
+        // 左卡内的摆放常量(相对 Cx,画布单位)。
+        internal const int SegmentX = 22;
+        internal const int SegmentY = 188;
+        internal const int SegmentW = 236;
+
+        internal static bool IsChannelChip(int id)
+        {
+            return id >= FirstChipId && id < FirstChipId + ChannelScale.Count;
+        }
+
+        internal static int ChannelOfChip(int id)
+        {
+            return IsChannelChip(id) ? id - FirstChipId : ChannelScale.All;
+        }
+
+        internal static int ChipOfChannel(int channel)
+        {
+            return FirstChipId + Clamp(channel);
+        }
+
+        internal static int Clamp(int channel)
+        {
+            if (channel < ChannelScale.All) return ChannelScale.All;
+            if (channel >= ChannelScale.Count) return ChannelScale.Count - 1;
+            return channel;
+        }
+
+        /// <summary>缓存签名片段:通道一变,离屏位图与聚合缓存都必须重算。</summary>
+        internal static string StampSegment(int channel)
+        {
+            return "C" + Clamp(channel).ToString(CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
+        /// 历史数据提示的显示条件:切到单键视图、且聚合里存在未区分按键的历史点击。
+        /// 「全部点击」永远不显示——它本来就包含历史数据。
+        /// </summary>
+        internal static bool ShouldShowLegacyPill(int channel, bool hasLegacyUnclassified)
+        {
+            return Clamp(channel) > ChannelScale.All && hasLegacyUnclassified;
+        }
+
+        /// <summary>「还没有点击位置数据」的显示条件:必须让位给历史提示胶囊。</summary>
+        internal static bool ShouldShowEmpty(int channel, bool hasLegacyUnclassified, long total)
+        {
+            return total == 0 && !ShouldShowLegacyPill(channel, hasLegacyUnclassified);
+        }
+
+        internal static string LegacyPillText
+        {
+            get { return "早期版本记录未区分按键，仅「全部点击」包含历史数据"; }
+        }
+
+        /// <summary>左卡统计摘要首格文案,随通道变化。</summary>
+        internal static string TotalLabel(int channel)
+        {
+            int c = Clamp(channel);
+            return c == ChannelScale.All ? "有位置的点击" : ChannelScale.NameOf(c) + "点击数";
+        }
+
+        /// <summary>右卡「点击最多的区域」标题,随通道变化。</summary>
+        internal static string MostHeading(int channel)
+        {
+            int c = Clamp(channel);
+            return c == ChannelScale.All ? "点击最多的区域" : ChannelScale.NameOf(c) + "最常点击";
+        }
+    }
     internal sealed partial class Dashboard
     {
         /// <summary>0 今日 / 1 近 7 天 / 2 近 30 天。</summary>
@@ -439,6 +665,8 @@ namespace KeyMouseStats
         private bool _clickFocused;
         /// <summary>false 像素网格 / true 平滑热力。</summary>
         private bool _clickSmooth;
+        /// <summary>0 全部点击 / 1 左键 / 2 右键 / 3 中键(Milestone 2 / 3.3)。</summary>
+        private int _clickChannel;
         private readonly List<RectangleF> _clickGridRects = new List<RectangleF>();
         private int _clickGridHover = -1;
         private ContextMenuStrip _clickScreenMenu;
@@ -472,24 +700,26 @@ namespace KeyMouseStats
         /// 聚合结果缓存:悬停重绘每秒会走十几帧,没必要每帧都把 30 天的格子重算一遍。
         /// 签名包含区间、可见范围、九宫格屏幕与整份显示器布局,任何一项变了就重算。
         /// </summary>
-        private ClickHeat.Aggregate ClickAggregate(Rectangle visible, Rectangle regionArea, Rectangle[] screens)
+        private ClickHeat.Aggregate ClickAggregate(Rectangle visible, Rectangle regionArea, Rectangle[] screens, int channel)
         {
             long signature = visible.X * 1000003L + visible.Y;
             signature = signature * 31 + visible.Width * 1003L + visible.Height;
             signature = signature * 31 + regionArea.X * 1000003L + regionArea.Y;
             signature = signature * 31 + regionArea.Width * 1003L + regionArea.Height;
             signature = signature * 31 + (_clickFocused ? 1 : 0) + (_clickScreen + 2);
+            signature = signature * 31 + ClickChannelUi.Clamp(channel);
             if (screens != null)
                 foreach (Rectangle rect in screens)
                     signature = signature * 131 + rect.X + rect.Y * 7L + rect.Width * 13L + rect.Height * 17L;
             foreach (DayRecord day in ClickRangeDays())
             {
                 signature = signature * 131 + (day == null ? 0 : day.ClickCells.Count);
+                signature = signature * 131 + (day == null ? 0 : day.ClickCellsV1.Count);
                 signature = signature * 131 + (day == null ? 0 : day.Clicks);
             }
             if (_clickCache == null || _clickCacheRange != _clickRange || _clickCacheSignature != signature)
             {
-                _clickCache = ClickHeat.Collect(ClickRangeDays(), visible);
+                _clickCache = ClickHeat.Collect(ClickRangeDays(), visible, ClickChannelUi.Clamp(channel));
                 _clickCache.ComputeRegions(visible, regionArea, screens);
                 _clickCacheRange = _clickRange;
                 _clickCacheSignature = signature;
@@ -559,6 +789,17 @@ namespace KeyMouseStats
             AppChip(g, 520, Cx + 426, 150, 100, "鼠标动作", _clickActionView);
         }
 
+        /// <summary>
+        /// 三键通道切换(Milestone 2 / 3.3):全部点击 | 左键 | 右键 | 中键。
+        /// 走标准 PaintSegmentGroup,因而自动登记进 _chips / _chipIds —— 键盘 Tab 遍历无需额外代码。
+        /// </summary>
+        private void PaintClickChannelChips(Graphics g)
+        {
+            PaintSegmentGroup(g, Cx + ClickChannelUi.SegmentX, ClickChannelUi.SegmentY,
+                ClickChannelUi.SegmentW, ChannelScale.Names, ClickChannelUi.ChannelChipIds,
+                ClickChannelUi.Clamp(_clickChannel), false);
+        }
+
         private void PaintClickHeat(Graphics g)
         {
             PaintClickRangeChips(g);
@@ -575,7 +816,7 @@ namespace KeyMouseStats
             Rectangle visible = _clickFocused ? regionArea : virtualBounds;
             _clickScreenRects = screenRects;
             _clickScreenBounds = visible;
-            ClickHeat.Aggregate aggregate = ClickAggregate(visible, regionArea, screenRects);
+            ClickHeat.Aggregate aggregate = ClickAggregate(visible, regionArea, screenRects, _clickChannel);
 
             // 一级视图:跨屏全览 / 每块屏幕(单屏即放大形态),取代原来「下拉选屏 + 单屏放大」两个重叠控件。
             float viewX = Cx + 300;
@@ -597,19 +838,22 @@ namespace KeyMouseStats
             PaintChip(g, smoothToggle, _clickSmooth ? "平滑热力" : "像素网格", _clickSmooth, null);
 
             // 左卡:屏幕 + 热区
-            PaintCard(g, Cx, 138, 600, 438, null);
+            // C 批:三栏按 Cw 比例(基准 832 宽时左卡仍是 600、右卡 220)
+            float heatLeft = Cw * 0.721f;
+            PaintCard(g, Cx, 138, heatLeft, 438f + ElasticH, null);
             using (Font title = new Font("Microsoft YaHei UI", 17, FontStyle.Bold, GraphicsUnit.Pixel))
                 AppText(g, "你的屏幕，点击的痕迹", title, Ctext, new RectangleF(Cx + 22, 152, 400, 28), false);
             PaintClickViewToggle(g);
+            PaintClickChannelChips(g);
             string subtitle = screens.Length > 1
                 ? (_clickFocused
                     ? "单屏放大 · 屏幕 " + (screenIndex + 1) + " · 九宫格按所选屏幕计算"
                     : "跨屏全览 · 九宫格按所选屏幕（屏幕 " + (screenIndex + 1) + "）计算")
                 : "32 像素采样 · 只记位置，不截屏 · 位置明细保留 30 天";
-            AppText(g, subtitle, _fSmall, Csub, new RectangleF(Cx + 22, 184, 560, 20), false);
+            AppText(g, subtitle, _fSmall, Csub, new RectangleF(Cx + 270, 194, 308, 18), false);
 
             int hottest = ClickHeat.HottestRegion(aggregate);
-            string[] labels = { "有位置的点击", "最热区域", "单格最多" };
+            string[] labels = { ClickChannelUi.TotalLabel(_clickChannel), "最热区域", "单格最多" };
             string[] values = {
                 Analysis.FmtCount(aggregate.Total),
                 hottest >= 0 ? ClickHeat.RegionName(hottest) : "--",
@@ -618,22 +862,29 @@ namespace KeyMouseStats
             for (int i = 0; i < 3; i++)
             {
                 float x = Cx + 22 + i * 188;
-                AppText(g, labels[i], _fSmall, Csub, new RectangleF(x, 208, 150, 18), false);
-                AppText(g, values[i], _fNum2, Ctext, new RectangleF(x, 224, 170, 26), false);
+                AppText(g, labels[i], _fSmall, Csub, new RectangleF(x, 220, 150, 18), false);
+                AppText(g, values[i], _fNum2, Ctext, new RectangleF(x, 236, 170, 26), false);
             }
 
-            _clickTray = new RectangleF(Cx + 14, 254, 572, 308);
+            _clickTray = new RectangleF(Cx + 14, 266, Math.Max(120f, heatLeft - 28f), 296f + ElasticH);
             PaintClickTray(g, aggregate, screenIndex, screens);
             PaintClickHover(g, aggregate);
             // 右卡:所选屏幕的九宫格
-            PaintCard(g, Cx + 612, 138, 220, 438, null);
+            PaintCard(g, Cx + heatLeft + 12, 138, Cw - heatLeft - 12, 438f + ElasticH, null);
             using (Font title = new Font("Microsoft YaHei UI", 13, FontStyle.Bold, GraphicsUnit.Pixel))
-                AppText(g, "屏幕 " + (screenIndex + 1) + " 九宫格", title, Ctext, new RectangleF(Cx + 630, 152, 190, 24), false);
+                AppText(g, "屏幕 " + (screenIndex + 1) + " 九宫格", title, Ctext, new RectangleF(Cx + heatLeft + 28, 152, Math.Max(120f, Cw - heatLeft - 44f), 24), false);
             AppText(g, regionArea.Width + "×" + regionArea.Height + (chosen != null && chosen.Primary ? " · 主屏" : "")
                 + " · " + Analysis.FmtCount(aggregate.RegionTotal) + " 次", _fSmall, Csub,
-                new RectangleF(Cx + 630, 170, 190, 18), false);
+                new RectangleF(Cx + heatLeft + 28, 170, Math.Max(120f, Cw - heatLeft - 44f), 18), false);
 
-            float gridX = Cx + 628, gridY = 188, gridW = 188, cellW = gridW / 3f, cellH = 56f;
+            // 3.0:九宫格高度跟着右卡长高(旧版写死 56,2K 下 3×56 只占掉卡片顶部一条),
+            // 格子封顶 120 并在剩余空间里垂直居中,避免出现顶边一条、下面一大片的失衡。
+            float rightCardBottom = 138f + 438f + ElasticH;
+            float gridTop = 188f;
+            float gridAvail = Math.Max(168f, rightCardBottom - gridTop - 208f);   // 底部给图例块留 ~200px
+            float cellH = Math.Min(120f, Math.Max(56f, gridAvail / 3f));
+            float gridY = gridTop + Math.Max(0f, (gridAvail - cellH * 3f) / 2f);
+            float gridX = Cx + heatLeft + 28, gridW = Math.Max(72f, Cw - heatLeft - 44f), cellW = gridW / 3f;
             PointF gridMouse = ToBase(_mouse);
             gridMouse = new PointF(gridMouse.X - ContentX, gridMouse.Y - ContentY);
             _clickGridRects.Clear();
@@ -652,7 +903,7 @@ namespace KeyMouseStats
                         using (GraphicsPath hoverPath = RoundedRect(cell.X, cell.Y, cell.Width, cell.Height, 7))
                             g.DrawPath(outline, hoverPath);
                 }
-                Color fill = ClickHeat.Heat(aggregate.Regions[i], regionMax);
+                Color fill = ChannelScale.For(_clickChannel, aggregate.Regions[i], regionMax);
                 using (GraphicsPath path = RoundedRect(cell.X, cell.Y, cell.Width, cell.Height, 7))
                 {
                     using (SolidBrush brush = new SolidBrush(fill)) g.FillPath(brush, path);
@@ -686,27 +937,29 @@ namespace KeyMouseStats
             List<int> ranked = new List<int>();
             for (int i = 0; i < 9; i++) if (aggregate.Regions[i] > 0) ranked.Add(i);
             ranked.Sort(delegate(int a, int b) { return aggregate.Regions[b].CompareTo(aggregate.Regions[a]); });
-            float rowY = gridY + 3 * cellH + 10;
-            AppText(g, "点击最多的区域", _fSmall, Csub, new RectangleF(Cx + 630, rowY, 180, 20), false);
+            float legendX = Cx + heatLeft + 28;
+            float legendW = Math.Max(120f, Cw - heatLeft - 44f);
+            float rowY = Math.Max(gridY + 3 * cellH + 10, rightCardBottom - 200f);
+            AppText(g, ClickChannelUi.MostHeading(_clickChannel), _fSmall, Csub, new RectangleF(legendX, rowY, 180, 20), false);
             rowY += 20;
             for (int i = 0; i < Math.Min(3, ranked.Count); i++)
             {
                 int region = ranked[i];
                 double share = aggregate.RegionTotal > 0 ? (double)aggregate.Regions[region] / aggregate.RegionTotal : 0;
                 AppText(g, (i + 1) + "  " + ClickHeat.RegionName(region), _fBody, i == 0 ? Ctext : Csub,
-                    new RectangleF(Cx + 630, rowY, 84, 20), false);
+                    new RectangleF(legendX, rowY, 84, 20), false);
                 AppText(g, (share * 100).ToString("0.0", CultureInfo.InvariantCulture) + "%", _fBody,
-                    i == 0 ? Cblue : Csub, new RectangleF(Cx + 714, rowY, 100, 20), true);
+                    i == 0 ? Cblue : Csub, new RectangleF(legendX + 84, rowY, Math.Max(40f, legendW - 84f), 20), true);
                 rowY += 21;
             }
             if (ranked.Count == 0)
             {
-                AppText(g, "这块屏幕还没有位置数据", _fSmall, Csub, new RectangleF(Cx + 630, rowY, 190, 20), false);
+                AppText(g, "这块屏幕还没有位置数据", _fSmall, Csub, new RectangleF(legendX, rowY, 190, 20), false);
                 rowY += 21;
             }
-            AppText(g, "覆盖格子", _fSmall, Csub, new RectangleF(Cx + 630, rowY + 4, 90, 20), false);
+            AppText(g, "覆盖格子", _fSmall, Csub, new RectangleF(legendX, rowY + 4, 90, 20), false);
             AppText(g, aggregate.RegionCells.ToString(CultureInfo.InvariantCulture) + " 格 · " + aggregate.Days + " 天",
-                _fSmall, aggregate.RegionCells > 0 ? Ctext : Csub, new RectangleF(Cx + 700, rowY + 4, 116, 20), true);
+                _fSmall, aggregate.RegionCells > 0 ? Ctext : Csub, new RectangleF(legendX + 70, rowY + 4, Math.Max(50f, legendW - 70f), 20), true);
 
             List<string> notes = new List<string>();
             if (aggregate.OffRegion > 0) notes.Add("其他屏幕 " + Analysis.FmtCount(aggregate.OffRegion) + " 次");
@@ -714,13 +967,13 @@ namespace KeyMouseStats
             if (aggregate.Outside > 0) notes.Add("旧布局位置 " + Analysis.FmtCount(aggregate.Outside) + " 次");
             if (notes.Count > 0)
                 AppText(g, string.Join(" · ", notes.ToArray()), _fSmall, Csub,
-                    new RectangleF(Cx + 630, rowY + 24, 194, 18), false);
+                    new RectangleF(legendX, rowY + 24, 194, 18), false);
 
             // 颜色图例:标出真实次数范围,不用悬停去猜。
             float legendY = rowY + 44;
-            HeatScale.Bar(g, new RectangleF(Cx + 630, legendY, 184, 8));
+            ChannelScale.Bar(g, new RectangleF(legendX, legendY, 184, 8), _clickChannel);
             long legendMax = aggregate.Max;
-            AppText(g, legendMax > 0 ? "1 次" : "0 次", _fSmall, Csub, new RectangleF(Cx + 630, legendY + 10, 40, 16), false);
+            AppText(g, legendMax > 0 ? "1 次" : "0 次", _fSmall, Csub, new RectangleF(legendX, legendY + 10, 40, 16), false);
             AppText(g, legendMax > 1 ? Analysis.FmtCount(Math.Max(1, legendMax / 2)) + " 次" : "", _fSmall, Csub,
                 new RectangleF(Cx + 700, legendY + 10, 50, 16), true);
             AppText(g, legendMax > 0 ? Analysis.FmtCount(legendMax) + " 次" : "--", _fSmall, Csub,
@@ -739,7 +992,7 @@ namespace KeyMouseStats
         private void PaintMouseAction(Graphics g)
         {
             MouseActionStats data = MouseActionData();
-            PaintCardBase(g, Cx, 138, Cw, 438);
+            PaintCardBase(g, Cx, 138, Cw, 438f + ElasticH);
             AppText(g, "鼠标动作", _fH2, Ctext, new RectangleF(Cx + 22, 152, 260, 26), false);
             AppText(g, ClickRangeName() + " · 方向与操作特征 · 仅相对鼠标数据", _fSmall, Csub,
                 new RectangleF(Cx + 22, 180, 430, 18), false);
@@ -768,15 +1021,27 @@ namespace KeyMouseStats
                 AppText(g, info, _fSmall, Ctext, new RectangleF(box.X + 8, box.Y + 6, box.Width - 16, 20), false);
             }
 
-            PaintVectorCompass(g, new RectangleF(Cx + 24, 210, 440, 330), data);
-            PaintMouseActionCards(g, new RectangleF(Cx + 486, 210, 322, 330), data);
+            // 3.0:左右按 42% / 58% 切分并随 Cw、卡片高度一起伸缩(旧版写死 440 / 322 与 330 高)。
+            float padX = 24f, padTop = 208f;
+            float contentW = Math.Max(300f, Cw - padX * 2f);
+            float contentBottom = 138f + 438f + ElasticH - 14f;
+            float contentH = Math.Max(170f, contentBottom - padTop);
+            float columnGap = 18f;
+            float leftW = Math.Max(220f, (contentW - columnGap) * 0.42f);
+            float rightW = Math.Max(200f, contentW - columnGap - leftW);
+            PaintVectorCompass(g, new RectangleF(Cx + padX, padTop, leftW, contentH), data);
+            PaintMouseActionCards(g, new RectangleF(Cx + padX + leftW + columnGap, padTop, rightW, contentH), data);
         }
 
         private void PaintVectorCompass(Graphics g, RectangleF area, MouseActionStats data)
         {
+            // 雷达随可用宽高等比放大并垂直居中:半径取「半宽 - 轴标签」与「半高 - 标注」的较小值。
+            bool twoNotes = data.CalibratedPackets <= 0 && data.Packets > 0;
+            float textH = twoNotes ? 44f : 26f;
+            float plotH = Math.Max(120f, area.Height - textH - 8f);
             float cx = area.X + area.Width / 2f;
-            float cy = area.Y + 150;
-            float radius = 112;
+            float cy = area.Y + plotH / 2f + 6f;
+            float radius = Math.Max(40f, Math.Min(area.Width / 2f - 34f, plotH / 2f - 24f));
             PointF c = new PointF(cx, cy);
             using (SolidBrush halo = new SolidBrush(Color.FromArgb(26, Cblue))) g.FillEllipse(halo, cx - radius - 8, cy - radius - 8, radius * 2 + 16, radius * 2 + 16);
             using (Pen outer = new Pen(Color.FromArgb(90, Csub), 1.2f)) g.DrawEllipse(outer, cx - radius, cy - radius, radius * 2, radius * 2);
@@ -838,7 +1103,7 @@ namespace KeyMouseStats
             float lastY = cy + radius + 34;
             AppText(g, data.HasData ? data.HorizontalInsight() : "尚无相对鼠标方向样本", _fBody,
                 data.HasData ? Cgreen : Csub, new RectangleF(area.X + 20, lastY, area.Width - 40, 22), false);
-            if (data.CalibratedPackets <= 0 && data.Packets > 0)
+            if (twoNotes)
                 AppText(g, "甩动 / 折返需要已校准 DPI；当前只有原始方向分量。", _fAxis, Csub,
                     new RectangleF(area.X + 20, lastY + 22, area.Width - 40, 16), false);
         }
@@ -854,17 +1119,23 @@ namespace KeyMouseStats
                 MouseActionStats.Percent(data.MoveClickShare)
             };
             string[] notes = { "瞬时高速位移", "方向突变 > 120°", "按住按键时的位移", "位移后紧跟点击" };
-            float gap = 10, cardW = (area.Width - gap) / 2f, cardH = 120;
-            float top = area.Y + Math.Max(0, (area.Height - (cardH * 2 + gap)) / 2f);
+            // 3.0:2×2 网格直接铺满右侧整块可用区域,不再写死 120 高 + 垂直居中。
+            float gap = 14f;
+            float cardW = (area.Width - gap) / 2f;
+            float cardH = (area.Height - gap) / 2f;
             for (int i = 0; i < 4; i++)
             {
                 float x = area.X + (i % 2) * (cardW + gap);
-                float y = top + (i / 2) * (cardH + gap);
+                float y = area.Y + (i / 2) * (cardH + gap);
                 PaintCardBase(g, x, y, cardW, cardH);
-                AppText(g, labels[i], _fAxis, Csub, new RectangleF(x + 14, y + 12, cardW - 28, 18), false);
-                AppText(g, values[i], _fH2, i < 2 && data.CalibratedPackets <= 0 ? Csub : Ctext,
-                    new RectangleF(x + 14, y + 34, cardW - 28, 28), false);
-                AppText(g, notes[i], _fSmall, Csub, new RectangleF(x + 14, y + cardH - 26, cardW - 28, 18), false);
+                AppText(g, labels[i], _fAxis, Csub, new RectangleF(x + 14, y + 16, cardW - 28, 18), false);
+                // 数值落在卡片纵向 45% 处,备注贴底:卡片再高也不会出现「三行挤在顶端」的空框。
+                float valueY = y + Math.Max(40f, (cardH - 28f) * 0.45f);
+                // 卡片越高,数值字号越往上抬一档(_fNum 29px),避免大卡片里只挂三个小字。
+                Font valueFont = cardH >= 250f ? _fNum : _fH2;
+                AppText(g, values[i], valueFont, i < 2 && data.CalibratedPackets <= 0 ? Csub : Ctext,
+                    new RectangleF(x + 14, valueY, cardW - 28, 34), false);
+                AppText(g, notes[i], _fSmall, Csub, new RectangleF(x + 14, y + cardH - 30, cardW - 28, 18), false);
             }
         }
 
@@ -875,7 +1146,7 @@ namespace KeyMouseStats
             int height = Math.Max(1, (int)Math.Ceiling(_clickTray.Height * _s));
             string stamp = _clickRange + "|" + Store.ThemeId + "|" + _s.ToString("0.###", CultureInfo.InvariantCulture) + "|"
                 + width + "x" + height + "|" + aggregate.Total + "|" + aggregate.Max + "|" + aggregate.Cells.Count + "|"
-                + (_clickFocused ? "F" : "A") + screenIndex + "|" + (_clickSmooth ? "S" : "G") + "|" + screens.Length + "|"
+                + (_clickFocused ? "F" : "A") + screenIndex + "|" + (_clickSmooth ? "S" : "G") + "|" + screens.Length + "|" + ClickChannelUi.StampSegment(_clickChannel) + "|"
                 + _clickScreenBounds.Left + "," + _clickScreenBounds.Top + "," + _clickScreenBounds.Width + "," + _clickScreenBounds.Height;
             if (_clickPlate == null || _clickStamp != stamp || _clickPlate.Width != width || _clickPlate.Height != height)
             {
@@ -910,6 +1181,13 @@ namespace KeyMouseStats
             _clickCellKeys.Clear();
             _clickCellCounts.Clear();
 
+            // 极简显示器外框:先描边框与支架,再画玻璃面板,保证描边落在底纹之下。
+            for (int i = 0; i < screens.Length; i++)
+            {
+                if (_clickFocused && i != screenIndex) continue;
+                DrawMonitorFrame(g, projection.ToContent(screens[i].Bounds), i == screenIndex);
+            }
+
             // 每块屏幕的底:暗色玻璃 + 边框。九宫格选中的屏幕加发光边框,其余降透明度。
             for (int i = 0; i < screens.Length; i++)
             {
@@ -939,7 +1217,7 @@ namespace KeyMouseStats
                 PointF origin = projection.ToContent(sx, sy);
                 float size = Math.Max(1.5f, ClickHeat.Cell * projection.Scale + 0.35f);
                 RectangleF rect = new RectangleF(origin.X, origin.Y, size, size);
-                Color fill = ClickHeat.Heat(pair.Value, aggregate.Max);
+                Color fill = ChannelScale.For(_clickChannel, pair.Value, aggregate.Max);
                 double warmth = Math.Log(1.0 + pair.Value) / Math.Log(1.0 + Math.Max(1, aggregate.Max));
                 int alpha = 120 + (int)(95 * Math.Min(1, warmth));
                 if (_clickSmooth)
@@ -986,7 +1264,9 @@ namespace KeyMouseStats
                         g.FillRectangle(tray, rect.Right - 8 - k * 5, rect.Bottom - taskbarH + taskbarH / 2 - 1.5f, 3, 3);
             }
 
-            if (aggregate.Total == 0)
+            bool legacyPill = ClickChannelUi.ShouldShowLegacyPill(_clickChannel, aggregate.HasLegacyUnclassified);
+            if (legacyPill) DrawLegacyPill(g);
+            if (ClickChannelUi.ShouldShowEmpty(_clickChannel, aggregate.HasLegacyUnclassified, aggregate.Total))
             {
                 string empty = _clickFocused
                     ? "这块屏幕还没有点击位置数据\n从这一版开始记录，用一会儿鼠标就会出现"
@@ -1012,6 +1292,78 @@ namespace KeyMouseStats
                     using (Pen border = new Pen(Color.FromArgb(45, Ctext))) g.DrawPath(border, path);
                 }
                 using (SolidBrush ink = new SolidBrush(Ctext)) g.DrawString(label, _fSmall, ink, badge.X + 4, badge.Y + 1);
+            }
+        }
+        /// <summary>
+        /// 历史数据提示胶囊:切到单键视图、且区间内存在未区分按键的历史点击时显示。
+        /// 优先级高于「还没有点击位置数据」——先说清历史数据的边界,再说当前视图为空。
+        /// 半透明、小字号、居中靠上,不抢热力图本身的注意力。
+        /// </summary>
+        private void DrawLegacyPill(Graphics g)
+        {
+            if (!ClickChannelUi.ShouldShowLegacyPill(_clickChannel, true)) return;
+            string text = ClickChannelUi.LegacyPillText;
+            using (Font font = new Font("Microsoft YaHei UI", 11, FontStyle.Regular, GraphicsUnit.Pixel))
+            {
+                SizeF size = g.MeasureString(text, font);
+                float width = Math.Min(_clickTray.Width - 24, size.Width + 26);
+                float height = 26;
+                RectangleF pill = new RectangleF(
+                    _clickTray.X + (_clickTray.Width - width) / 2,
+                    _clickTray.Y + 10, width, height);
+                using (GraphicsPath path = RoundedRect(pill.X, pill.Y, pill.Width, pill.Height, height / 2))
+                {
+                    using (SolidBrush fill = new SolidBrush(Color.FromArgb(52, ArtTheme.Current.Card))) g.FillPath(fill, path);
+                    using (Pen border = new Pen(Color.FromArgb(90, ArtTheme.Mix(Cline, Ctext, 0.22))))
+                        g.DrawPath(border, path);
+                }
+                using (SolidBrush ink = new SolidBrush(Color.FromArgb(225, Csub)))
+                using (StringFormat format = new StringFormat
+                {
+                    Alignment = StringAlignment.Center,
+                    LineAlignment = StringAlignment.Center,
+                    FormatFlags = StringFormatFlags.NoWrap
+                }) g.DrawString(text, font, ink, pill, format);
+            }
+        }
+
+        /// <summary>
+        /// 极简显示器拟物外框(参照 ClickHeat.DrawIcon 的比例):
+        /// 细描边框 + 双立柱 + 底座横线。宽屏/竖屏/笔记本比例自适应;
+        /// pane 高度 &lt; 48px 时省略底座,避免缩略图上糊成一团。
+        /// 颜色全部来自主题派生(Mix(Cline, Ctext, 0.22)),13 套主题下都可见。
+        /// </summary>
+        private void DrawMonitorFrame(Graphics g, RectangleF pane, bool selected)
+        {
+            if (pane.Width < 24 || pane.Height < 18) return;
+            RectangleF limit = new RectangleF(_clickTray.X + 4, _clickTray.Y + 4,
+                _clickTray.Width - 8, _clickTray.Height - 8);
+            float left = Math.Max(limit.X, pane.X - 3);
+            float top = Math.Max(limit.Y, pane.Y - 3);
+            float right = Math.Min(limit.Right, pane.Right + 3);
+            float bottom = Math.Min(limit.Bottom, pane.Bottom + 3);
+            if (right - left < 12 || bottom - top < 10) return;
+
+            Color ink = ArtTheme.Mix(Cline, Ctext, 0.22);
+            if (selected) ink = ArtTheme.Mix(ink, Cblue, 0.35);
+            float thickness = selected ? 1.6f : 1.2f;
+            RectangleF bezel = new RectangleF(left, top, right - left, bottom - top);
+            using (GraphicsPath path = RoundedRect(bezel.X, bezel.Y, bezel.Width, bezel.Height, 4))
+            using (Pen pen = new Pen(Color.FromArgb(selected ? 195 : 125, ink), thickness))
+                g.DrawPath(pen, path);
+
+            if (pane.Height < 48) return;
+            float standH = Math.Max(4f, Math.Min(10f, pane.Height * 0.06f));
+            float standY = bezel.Bottom + standH;
+            if (standY > limit.Bottom) return;
+            using (Pen pen = new Pen(Color.FromArgb(selected ? 175 : 110, ink), Math.Max(1f, thickness - 0.2f)))
+            {
+                pen.StartCap = pen.EndCap = LineCap.Round;
+                float midX = bezel.X + bezel.Width / 2;
+                float span = Math.Max(6f, bezel.Width * 0.13f);
+                g.DrawLine(pen, midX - span / 2, bezel.Bottom, midX - span / 2, standY);
+                g.DrawLine(pen, midX + span / 2, bezel.Bottom, midX + span / 2, standY);
+                g.DrawLine(pen, midX - span * 1.5f, standY, midX + span * 1.5f, standY);
             }
         }
 

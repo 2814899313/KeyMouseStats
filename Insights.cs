@@ -123,12 +123,19 @@ namespace KeyMouseStats
             DateTime first = DateTime.Today.AddDays(-(weeks * 7 - 1));
             DateTime monday = first.AddDays(-(((int)first.DayOfWeek + 6) % 7));
             int columns = Math.Max(1, (int)Math.Ceiling((DateTime.Today - monday).TotalDays + 1) / 7);
-            float maxCell = _calendarSpan == 0 ? 34 : _calendarSpan == 1 ? 24 : 13;
-            float gap = _calendarSpan == 2 ? 2 : 4;
-            float cardH = _calendarSpan == 2 ? 340 : _calendarSpan == 1 ? 380 : 430;
-            float cell = Math.Min(maxCell, (Cw - 110) / (float)columns - gap);
+            // 3.0:格子边长由「宽度 / 高度 / 基准上限」三者取小,卡片高度再按格子反推。
+            // 基准窗口下三条约束都不生效(cell 仍是 34/24/13),2K 下格子等比放大、卡片跟着长高,
+            // 不再「卡片 430 高、格子 34px、下面一大片黑」。
+            float maxCell = (_calendarSpan == 0 ? 34f : _calendarSpan == 1 ? 24f : 13f) + ElasticH * 0.5f;
+            float gap = _calendarSpan == 2 ? 2f : 4f;
+            float baseCardH = _calendarSpan == 2 ? 340f : _calendarSpan == 1 ? 380f : 430f;
+            float heightLimit = ((PageBottom - 145f) - 85f - 80f) / 7f - gap;   // 7 行 + 页眉页脚
+            float cell = Math.Min(Math.Min(maxCell, heightLimit), (Cw - 110) / (float)columns - gap);
             if (cell < 8) cell = 8;
             float gridW = columns * (cell + gap) - gap;
+            // 卡片高度 = 页眉 85 + 网格实高 + 页脚 80,但不小于各档基准高度;
+            // 于是「近3月」在 2K 下会长到接近页脚分割线,而格子本身始终是正方形。
+            float cardH = Math.Max(baseCardH, 85f + (7f * (cell + gap) - gap) + 80f);
             float gridX = Cx + Math.Max(42, (Cw - gridW) / 2);
             float gridY = 230;
 
@@ -309,12 +316,13 @@ namespace KeyMouseStats
             string focusText = observed > 0 ? (100.0 * day.ActiveSeconds / observed).ToString("0", CultureInfo.InvariantCulture) + "%" : "--";
             string restText = known ? gaps.Count + " 次" : "--";
             PaintCardBase(g, Cx + 438, 520, 186, 46);
-            InsightText(g, "专注占比 · 活跃/观测", Cx + 448, 523, 160, _fSmall, Csub);
+            InsightText(g, "专注占比(活跃/观测)", Cx + 446, 523, 176, _fSmall, Csub);
             InsightText(g, focusText, Cx + 448, 538, 160, _fBody, Cgreen);
             PaintCardBase(g, Cx + 634, 520, 198, 46);
             InsightText(g, "工间休息 · ≥15 分钟", Cx + 644, 523, 178, _fSmall, Csub);
             InsightText(g, restText, Cx + 644, 538, 178, _fBody, Corange);
             InsightText(g, "旧版只有空闲总量，无法定位；锁屏不计空闲。", Cx + 438, 570, 378, _fSmall, Csub);
+            PaintFlowBoard(g);
         }
 
         private void PaintPeriods(Graphics g, List<ActiveSession> periods, RectangleF track, Color color, string label, ref string detail)
@@ -334,7 +342,10 @@ namespace KeyMouseStats
 
         private void PaintWeekActivity(Graphics g)
         {
-            PaintCardBase(g, Cx, 145, Cw, 321);
+            // 卡底 = 466 + ElasticH(基准 466,2K 1182):多出来的高度全部给热力网格,
+            // 明细行与下方汇总卡跟着卡底走,不再钉在基准 Y 上。
+            float cardTop = 145f, cardH = 321f + ElasticH, cardBottom = cardTop + cardH;
+            PaintCardBase(g, Cx, cardTop, Cw, cardH);
             InsightText(g, "近 7 天 × 24 小时 · 每格活跃分钟数", Cx + 18, 153, Cw - 36, _fH2, Ctext);
             InsightText(g, "悬停查看时段 · 点击日期查看会话", Cx + 18, 181, 370, _fBody, Csub);
             HeatScale.Bar(g,new RectangleF(Cx+489,184,220,9));
@@ -345,7 +356,15 @@ namespace KeyMouseStats
             double[] hours = new double[24];
             string detail = "蓝 → 红：活跃分钟数线性增加（0—60）；灰色：零值；斜线：无记录 / 尚未来到。";
             PointF mouse = ToBase(_mouse); mouse = new PointF(mouse.X - ContentX, mouse.Y - ContentY);
-            for (int h = 0; h < 24; h += 3) InsightText(g, h.ToString("00"), Cx + 112 + h * 25, 213, 30, _fAxis, Csub);
+            // 网格几何:横向 24 列占满「日期列右侧 → 时长列左侧」,纵向由明细行反推;
+            // 正方形格距取两者较小值(基准 25 → 2K 87),剩下的高度把整块网格居中,不再贴顶。
+            float gridX = Cx + 112f, gridRight = ContentRight - 120f;   // 基准 136 → 736
+            float gridBottom = cardBottom - 47f;                        // 基准 419:明细行上方 13px
+            float pitch = Math.Min((gridRight - gridX) / 24f, (gridBottom - 244f) / 7f);
+            if (pitch < 8f) pitch = 8f;
+            float gridTop = 244f + Math.Max(0f, (gridBottom - 244f - 7f * pitch) * 0.5f);
+            float rowShift = (pitch - 25f) * 0.5f;                      // 格距仍为 25 时恒为 0,基准逐像素不变
+            for (int h = 0; h < 24; h += 3) InsightText(g, h.ToString("00"), gridX + h * pitch, gridTop - 31f, 30, _fAxis, Csub);
             DateTime[] weekDates = new DateTime[7];
             DayRecord[] weekDays = new DayRecord[7];
             bool[] weekKnown = new bool[7];
@@ -362,16 +381,16 @@ namespace KeyMouseStats
                 DateTime date = weekDates[i];
                 DayRecord day = weekDays[i];
                 bool known = weekKnown[i];
-                float y = 244 + i * 25;
-                InsightText(g, date.ToString("MM.dd ddd"), Cx + 16, y - 3, 94, _fSmall, Csub);
-                _insightDates[new RectangleF(Cx + 12, y, 800, 22)] = date;
+                float y = gridTop + i * pitch;
+                InsightText(g, date.ToString("MM.dd ddd"), Cx + 16, y + rowShift - 3, 94, _fSmall, Csub);
+                _insightDates[new RectangleF(Cx + 12, y, Cw - 24, Math.Max(22f, pitch))] = date;
                 if (known) { sampled++; if (day.ActiveSeconds > busiest) { busiest = day.ActiveSeconds; bestDay = date; } }
                 for (int h = 0; h < 24; h++)
                 {
                     bool observed = known && (date < DateTime.Today || h <= DateTime.Now.Hour);
                     double seconds = observed ? day.ActiveHours[h] : 0;
                     hours[h] += seconds;
-                    RectangleF cell = new RectangleF(Cx + 112 + h * 25 + 1, y + 1, 19, 17);
+                    RectangleF cell = new RectangleF(gridX + h * pitch + 1, y + 1, pitch - 6f, pitch - 8f);
                     using (GraphicsPath path = RoundedRect(cell.X, cell.Y, cell.Width, cell.Height, 3))
                     using (SolidBrush b = new SolidBrush(!observed ? Cbg : seconds <= 0 ? HeatScale.Zero : HeatScale.At(seconds / 3600)))
                         g.FillPath(b, path);
@@ -379,9 +398,9 @@ namespace KeyMouseStats
                     if (cell.Contains(mouse)) using (Pen outline = new Pen(Cblue, 2)) g.DrawRectangle(outline, cell.X - 1, cell.Y - 1, cell.Width + 2, cell.Height + 2);
                     if (cell.Contains(mouse)) detail = date.ToString("MM.dd ddd") + "  " + h.ToString("00") + ":00—" + (h + 1).ToString("00") + ":00  ·  点击查看当天详情  ·  " + (observed ? (seconds / 60).ToString("0.#") + " 分钟活跃（已采集部分）" : "无记录");
                 }
-                InsightText(g, known ? Analysis.FmtHours(day.ActiveSeconds / 3600) : "无记录", Cx + 724, y - 3, 100, _fSmall, known ? Cgreen : Csub);
+                InsightText(g, known ? Analysis.FmtHours(day.ActiveSeconds / 3600) : "无记录", ContentRight - 100, y + rowShift - 3, 100, _fSmall, known ? Cgreen : Csub);
                 // 右侧汇总加一条迷你条,横向对比哪天更累。
-                RectangleF miniTrack = new RectangleF(Cx + 724, y + 12, 96, 4);
+                RectangleF miniTrack = new RectangleF(ContentRight - 96, y + rowShift + 12, 96, 4);
                 using (SolidBrush track = new SolidBrush(Color.FromArgb(20, Ctext))) g.FillRectangle(track, miniTrack);
                 if (known && maxDayActive > 0)
                 {
@@ -390,12 +409,13 @@ namespace KeyMouseStats
                     using (SolidBrush fill = new SolidBrush(Cgreen)) g.FillPath(fill, bar);
                 }
             }
-            InsightText(g, detail, Cx + 18, 432, Cw - 36, _fSmall, Csub);
+            InsightText(g, detail, Cx + 18, cardBottom - 34f, Cw - 36, _fSmall, Csub);   // 基准 432:相对卡底定位
             for (int h = 0; h < 24; h++) if (hours[h] > bestHour) { bestHour = hours[h]; peak = h; }
-            PaintCardBase(g, Cx, 480, Cw, 106);
-            InsightText(g, busiest > 0 ? "最活跃的一天  " + bestDay.ToString("MM.dd ddd") + "  ·  " + ActivityMonitor.FormatDuration(busiest) : "暂无足够的活跃记录", Cx + 18, 487, Cw - 36, _fH2, Ctext);
-            InsightText(g, bestHour > 0 ? "最忙时段  " + peak.ToString("00") + ":00—" + (peak + 1).ToString("00") + ":00  ·  七日累计 " + ActivityMonitor.FormatDuration(bestHour) : "继续使用后，这里会显示你的活跃高峰。", Cx + 18, 519, Cw - 36, _fBody, Cgreen);
-            InsightText(g, "覆盖 " + sampled + " / 7 天；仅比较已采集部分，单周结果不代表长期星期偏好。", Cx + 18, 550, Cw - 36, _fSmall, Csub);
+            float sumTop = cardBottom + 14f;                                              // 基准 480
+            PaintCardBase(g, Cx, sumTop, Cw, 106);
+            InsightText(g, busiest > 0 ? "最活跃的一天  " + bestDay.ToString("MM.dd ddd") + "  ·  " + ActivityMonitor.FormatDuration(busiest) : "暂无足够的活跃记录", Cx + 18, sumTop + 7, Cw - 36, _fH2, Ctext);
+            InsightText(g, bestHour > 0 ? "最忙时段  " + peak.ToString("00") + ":00—" + (peak + 1).ToString("00") + ":00  ·  七日累计 " + ActivityMonitor.FormatDuration(bestHour) : "继续使用后，这里会显示你的活跃高峰。", Cx + 18, sumTop + 39, Cw - 36, _fBody, Cgreen);
+            InsightText(g, "覆盖 " + sampled + " / 7 天；仅比较已采集部分，单周结果不代表长期星期偏好。", Cx + 18, sumTop + 70, Cw - 36, _fSmall, Csub);
         }
 
         private void ExportInsights()

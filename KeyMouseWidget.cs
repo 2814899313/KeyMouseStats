@@ -63,9 +63,16 @@ namespace KeyMouseStats
             // 只有产品进程允许把内存状态写回数据目录。测试/预览进程不设这个开关,
             // 除非自己把 Store.DataDirectory 重定向到临时目录,否则一切保存都会被丢弃。
             Store.PersistenceArmed = true;
+            // v3.0:SQLite 阴影双写(专用后台线程)。原生库不可用或初始化失败时自动降级,
+            // 绝不阻塞 v13 文本主链路。
+            ShadowPipeline.Start();
+            AppDomain.CurrentDomain.ProcessExit += delegate { ShadowPipeline.Flush(2000); };
             StatsWidget widget = new StatsWidget();
             widget.ListenForDashboard(dashEvent);
             Application.Run(widget);
+
+            ShadowPipeline.Flush(3000);
+            ShadowPipeline.Stop();
 
             GC.KeepAlive(mutex);
             GC.KeepAlive(dashEvent);
@@ -153,6 +160,10 @@ namespace KeyMouseStats
         public long[] HourClicks = new long[24];
         /// <summary>2.0.7:屏幕点击热区的采样格(key = ClickHeat.CellKey)与次数。只保留最近 30 天。</summary>
         public Dictionary<int, long> ClickCells = new Dictionary<int, long>();
+        /// <summary>v3.0:三通道热区。key = ((long)channel &lt;&lt; 32) | (uint)ClickHeat.CellKey(cellX,cellY);
+        /// 通道 1=左 2=右 3=中 4=侧,0=legacy(历史单通道档读入时映射到 0)。
+        /// ClickCells 仍然是全通道汇总,保证「全部点击」视图与旧版逐格完全一致。</summary>
+        public Dictionary<long, long> ClickCellsV1 = new Dictionary<long, long>();
         public Dictionary<int, long> KeyCounts = new Dictionary<int, long>();
         public Dictionary<int, long> PhysicalKeys = new Dictionary<int, long>();
         public Dictionary<int, long> PhysicalVks = new Dictionary<int, long>();
@@ -278,6 +289,11 @@ namespace KeyMouseStats
             {
                 long value; ClickCells.TryGetValue(cell.Key, out value);
                 ClickCells[cell.Key] = value + cell.Value;
+            }
+            foreach (KeyValuePair<long, long> cell in other.ClickCellsV1)
+            {
+                long value; ClickCellsV1.TryGetValue(cell.Key, out value);
+                ClickCellsV1[cell.Key] = value + cell.Value;
             }
             foreach (KeyValuePair<string, long> combo in other.ComboCounts)
             {
@@ -470,6 +486,9 @@ namespace KeyMouseStats
         public static bool MotionFollowSystem = true;
         /// <summary>1.8.0:全局快捷键(打开面板),默认关闭。</summary>
         public static bool GlobalHotkey;
+        /// <summary>Milestone 2 / 3.1:窗口记忆(画布单位,0 = 未记录)。</summary>
+        public static int WindowW, WindowH;
+        public static bool WindowMaximized;
         /// <summary>1.9.0:字符内容页重新读取 Rime 日志的最小间隔(秒);0 = 只在文件改动时重读。</summary>
         public static int TextRefreshSeconds = 15;
         /// <summary>2.0:最近一次在「每日首次打开面板」时生成日报的日期。用来保证一天只生成一次。</summary>
@@ -584,6 +603,9 @@ namespace KeyMouseStats
             /// <summary>1.9.0:字符内容页自动重读间隔(秒),0 = 手动。</summary>
             public int TextRefreshSeconds = 15;
             public bool HasTextRefresh;
+        public int WindowW, WindowH;
+        public bool WindowMaximized;
+        public bool HasWindowLayout;
             /// <summary>2.0:上次自动生成日报的日期(字符串形式,便于和文件里那一行直读)。</summary>
             public string DailyReportDay = "";
         }
@@ -642,6 +664,7 @@ namespace KeyMouseStats
                         case "hk": ParseHourBuckets(val, cur.HourKeys); break;
                         case "hc": ParseHourBuckets(val, cur.HourClicks); break;
                         case "ch": ClickHeat.Decode(val, cur.ClickCells); break;
+                        case "chv1": ClickHeat.DecodeV1(val, cur.ClickCellsV1); break;
                         case "kk": ParseKeyCounts(val, cur.KeyCounts); break;
                         case "physical_keys": ParseKeyCounts(val, cur.PhysicalKeys, 768); break;
                         case "physical_vks": ParseKeyCounts(val, cur.PhysicalVks); break;
@@ -689,7 +712,17 @@ namespace KeyMouseStats
                             result.HasMotion = true;
                             break;
                         // 1.9.0 新增的可选行:字符内容页的自动重读间隔(秒),0 = 手动
-                        case "text_refresh_v1":
+                        // Milestone 2 / 3.1:窗口宽 | 高 | 是否最大化;缺省即不干预。
+                case "window_layout_v1":
+                {
+                    string[] layout = val.Split('|');
+                    result.WindowW = layout.Length > 0 ? (int)ParseL(layout[0]) : 0;
+                    result.WindowH = layout.Length > 1 ? (int)ParseL(layout[1]) : 0;
+                    result.WindowMaximized = layout.Length >= 3 && ParseL(layout[2]) != 0;
+                    result.HasWindowLayout = true;
+                    break;
+                }
+                case "text_refresh_v1":
                             result.TextRefreshSeconds = RimeTextStats.NormalizeRefresh((int)ParseL(val));
                             result.HasTextRefresh = true;
                             break;
@@ -880,7 +913,13 @@ namespace KeyMouseStats
                     MotionFollowSystem = parsed.MotionFollowSystem;
                     GlobalHotkey = parsed.GlobalHotkey;
                 }
-                if (parsed.HasTextRefresh) TextRefreshSeconds = RimeTextStats.NormalizeRefresh(parsed.TextRefreshSeconds);
+                if (parsed.HasWindowLayout)
+            {
+                WindowW = parsed.WindowW > 0 ? parsed.WindowW : 0;
+                WindowH = parsed.WindowH > 0 ? parsed.WindowH : 0;
+                WindowMaximized = parsed.WindowMaximized;
+            }
+            if (parsed.HasTextRefresh) TextRefreshSeconds = RimeTextStats.NormalizeRefresh(parsed.TextRefreshSeconds);
                 DateTime reportDay;
                 if (DateTime.TryParseExact(parsed.DailyReportDay, "yyyy-MM-dd", CultureInfo.InvariantCulture,
                         DateTimeStyles.None, out reportDay))
@@ -986,6 +1025,7 @@ namespace KeyMouseStats
         /// <summary>同步保存:返回时文件已落盘。设置对话框与测试使用。</summary>
         public static void Save()
         {
+            if (SampleData.Active) return;            // 示例预览模式:绝不写盘
             if (!CanPersist || LoadFailed) return;   // 测试/预览进程或读取失败:不序列化、不写盘
             string text = Prepare();
             if (text == null) return;
@@ -1001,6 +1041,7 @@ namespace KeyMouseStats
         /// <summary>异步保存:序列化仍在调用线程完成,写盘交给后台线程,不阻塞输入处理。</summary>
         public static void SaveAsync()
         {
+            if (SampleData.Active) return;            // 示例预览模式:绝不写盘
             if (!CanPersist || LoadFailed) return;   // 测试/预览进程或读取失败:不序列化、不写盘
             string text = Prepare();
             if (text == null) return;
@@ -1052,6 +1093,7 @@ namespace KeyMouseStats
         private static void WriteSnapshot(string text, long sequence)
         {
             // 兜底:调用方可能在排队后才被判定为不允许写盘(如读取失败标记),这里再挡一次。
+            if (SampleData.Active) return;
             if (!CanPersist || LoadFailed) return;
             // 状态锁只保护计数与待写快照;真正写盘用独立的 FileGate,
             // 这样 UI 线程排队保存时不会等在前一次磁盘写入后面。
@@ -1146,6 +1188,9 @@ namespace KeyMouseStats
                 // 1.8.0 新增的可选行:动效档位 | 跟随系统 | 全局快捷键
                 sb.AppendLine("motion_v1=" + MotionLevel.ToString(CultureInfo.InvariantCulture) + "|" + (MotionFollowSystem ? "1" : "0") + "|" + (GlobalHotkey ? "1" : "0"));
                 sb.AppendLine("text_refresh_v1=" + TextRefreshSeconds.ToString(CultureInfo.InvariantCulture));
+                // Milestone 2 / 3.1:窗口宽 | 高 | 是否最大化(format 仍为 13,旧版忽略未知行)
+                sb.AppendLine("window_layout_v1=" + WindowW.ToString(CultureInfo.InvariantCulture) + "|"
+                    + WindowH.ToString(CultureInfo.InvariantCulture) + "|" + (WindowMaximized ? "1" : "0"));
                 sb.AppendLine("daily_report_v1=" + (DailyReportDay == DateTime.MinValue ? "" : DailyReportDay.ToString("yyyy-MM-dd")));
                 foreach (MonthArchive archive in Archives.Values) sb.AppendLine("archive_v1=" + MonthArchive.Encode(archive));
                 sb.AppendLine("art_theme=" + ArtTheme.Validate(ThemeId).ToString(CultureInfo.InvariantCulture));
@@ -1187,6 +1232,7 @@ namespace KeyMouseStats
                     sb.AppendLine("hk=" + EncodeHourBuckets(r.HourKeys));
                     sb.AppendLine("hc=" + EncodeHourBuckets(r.HourClicks));
                     if (r.ClickCells.Count > 0) sb.AppendLine("ch=" + ClickHeat.Encode(r.ClickCells));
+                    if (r.ClickCellsV1.Count > 0) sb.AppendLine("chv1=" + ClickHeat.EncodeV1(r.ClickCellsV1));
                     sb.AppendLine("kk=" + EncodeKeyCounts(r.KeyCounts));
                     sb.AppendLine("physical_keys=" + EncodeKeyCounts(r.PhysicalKeys));
                     sb.AppendLine("physical_vks=" + EncodeKeyCounts(r.PhysicalVks));
@@ -1265,6 +1311,10 @@ namespace KeyMouseStats
     internal static class Native
     {
         public delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+        // v3.0:钩子只取这个廉价的本地窗口句柄,跨进程解析交给后台写线程。
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetForegroundWindow();
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern IntPtr SetWindowsHookEx(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
@@ -1364,10 +1414,93 @@ namespace KeyMouseStats
     }
 
     /// <summary>悬浮小组件窗体。</summary>
+
+    /// <summary>
+    /// 悬浮窗顶部微控件(Milestone 2 / 3.4)的几何与绘制。
+    /// 命中判定抽成纯函数(只吃 Size/scale/Point),不依赖窗体实例,便于单测。
+    /// </summary>
+    internal static class WidgetChrome
+    {
+        internal const int None = 0;
+        internal const int Expand = 5;
+        internal const int DotCount = 4;
+
+        internal const float DividerY = 36f;
+        internal const float DotSpacing = 14f;   // 与 2*HitPad 相等:相邻命中区恰好相接而不重叠
+        internal const float DotRadius = 2.4f;
+        internal const float HitPad = 7f;
+
+        /// <summary>第 index 个分页圆点的命中区(设备像素)。</summary>
+        internal static RectangleF DotRect(Size client, float s, int index)
+        {
+            if (s <= 0f) s = 1f;
+            float cx = client.Width / 2f;
+            float x = cx + (index - 1.5f) * DotSpacing * s;
+            float y = DividerY * s;
+            return new RectangleF(x - HitPad * s, y - HitPad * s, 2f * HitPad * s, 2f * HitPad * s);
+        }
+
+        /// <summary>⤢ 展开图标的命中区(设备像素),贴在分隔线右端。</summary>
+        internal static RectangleF ExpandRect(Size client, float s)
+        {
+            if (s <= 0f) s = 1f;
+            return new RectangleF(client.Width - 24f * s, (DividerY - 9f) * s, 18f * s, 18f * s);
+        }
+
+        /// <summary>true = 这个位置可以武装拖拽/翻页;命中微控件时必须为 false。</summary>
+        internal static bool ShouldArmDrag(int chrome)
+        {
+            return chrome == None;
+        }
+
+        /// <summary>0 = 没命中;1..4 = 第 1..4 个分页圆点;5 = ⤢ 展开。</summary>
+        internal static int HitHoverChrome(Size client, float s, Point pt)
+        {
+            for (int i = 0; i < DotCount; i++)
+                if (DotRect(client, s, i).Contains(pt.X, pt.Y)) return i + 1;
+            if (ExpandRect(client, s).Contains(pt.X, pt.Y)) return Expand;
+            return None;
+        }
+
+        internal static void Paint(Graphics g, Size client, float s, int mode, double alpha, Color ink, Color accent)
+        {
+            if (alpha <= 0.01) return;
+            if (s <= 0f) s = 1f;
+            int a = (int)Math.Round(235 * Math.Min(1, alpha));
+            float cy = DividerY * s;
+            float r = DotRadius * s;
+            using (SolidBrush idle = new SolidBrush(Color.FromArgb(Math.Max(0, a / 3), ink)))
+            using (SolidBrush active = new SolidBrush(Color.FromArgb(a, accent)))
+            {
+                for (int i = 0; i < DotCount; i++)
+                {
+                    RectangleF dot = DotRect(client, s, i);
+                    float cx = dot.X + dot.Width / 2f;
+                    if (i == mode) g.FillEllipse(active, cx - r, cy - r, r * 2f, r * 2f);
+                    else g.FillEllipse(idle, cx - r * 0.8f, cy - r * 0.8f, r * 1.6f, r * 1.6f);
+                }
+            }
+            RectangleF box = ExpandRect(client, s);
+            float pad = 4f * s;
+            using (Pen pen = new Pen(Color.FromArgb(a, ink), Math.Max(1f, 1.2f * s)))
+            {
+                pen.StartCap = LineCap.Round;
+                pen.EndCap = LineCap.Round;
+                float x0 = box.X + pad, y0 = box.Y + pad;
+                float x1 = box.Right - pad, y1 = box.Bottom - pad;
+                float arm = Math.Max(1f, (x1 - x0) * 0.42f);
+                g.DrawLine(pen, x0, y0, x0 + arm, y0);
+                g.DrawLine(pen, x0, y0, x0, y0 + arm);
+                g.DrawLine(pen, x1, y1, x1 - arm, y1);
+                g.DrawLine(pen, x1, y1, x1, y1 - arm);
+            }
+        }
+    }
     internal sealed class StatsWidget : Form
     {
         private const int BaseW = 248;
-        private const int BaseH = 208;
+        /// <summary>基准高 208 → 216:给底部「最近 5 分钟 APM」留出 8px 安全内边距,不再贴边。</summary>
+        private const int BaseH = 216;
         private readonly Native.HookProc _kbProc;
         private readonly Native.HookProc _msProc;
         private IntPtr _kbHook = IntPtr.Zero;
@@ -1395,6 +1528,15 @@ namespace KeyMouseStats
         private DistanceSettings _distanceSettings;
 
         private bool _dragging = false;
+        // --- 悬停微控件(Milestone 2 / 3.4):分页圆点 + 展开图标,只在悬停时淡入 ---
+        private System.Windows.Forms.Timer _hoverTimer;
+        private double _hoverAlpha;
+        private double _hoverTarget;
+        private double _hoverStart;
+        private double _hoverStartAlpha;
+        private int _hoverDurationMs;
+        private int _hoverChrome;
+        private bool _suppressClick;
         private bool _dragMoved = false;
         private Point _dragFormStart;
         private Point _dragMouseStart;
@@ -1474,6 +1616,26 @@ namespace KeyMouseStats
             if (wanted && !_hotkeyRegistered) Store.GlobalHotkey = false;   // 被占用:回退成关闭,不留一个假的勾
         }
 
+        /// <summary>
+        /// 重建字体缓存。3.0:字号统一成「逻辑像素 × _s」,与几何的 ×s 完全同一口径。
+        ///
+        /// 旧版这里是点单位(GraphicsUnit.Point),注释写「点数不变,GDI+ 会按新 DPI 自行渲染」——
+        /// 这条前提只在「绘制 DC 的 DPI 恰好等于 96×_s」时成立。一旦小窗落在一块缩放不同的显示器上
+        /// (系统没补发 WM_DPICHANGED,或 DC 报的是系统 DPI),几何还按旧 _s、文字却按新 DPI 渲染,
+        /// 字就会撑破行距、右侧数值被窗口边缘截断 —— 也就是小窗那处错位。
+        /// 改成像素单位后,文字与几何共用唯一的 _s,DC 报什么 DPI 都不再影响排版。
+        /// </summary>
+        private void RebuildWidgetFonts()
+        {
+            Font[] previous = new Font[] { _fTitle, _fMode, _fLabel, _fValue };
+            float s = LayoutFrame.Sanitize(_s);
+            _fTitle = new Font("Microsoft YaHei UI", 14f * s, FontStyle.Bold, GraphicsUnit.Pixel);
+            _fMode = new Font("Microsoft YaHei UI", 11f * s, FontStyle.Regular, GraphicsUnit.Pixel);
+            _fLabel = new Font("Microsoft YaHei UI", 11f * s, FontStyle.Regular, GraphicsUnit.Pixel);
+            _fValue = new Font("Segoe UI", 18f * s, FontStyle.Bold, GraphicsUnit.Pixel);
+            for (int i = 0; i < previous.Length; i++) if (previous[i] != null) previous[i].Dispose();
+        }
+
         private void OpenDashboard()
         {
             try
@@ -1496,6 +1658,7 @@ namespace KeyMouseStats
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
+            ResetHover();   // 句柄重建(切穿透/改主题)后悬停状态必须归零,否则圆点会常亮
             _rawMouse.Register(Handle); // 鼠标穿透会重建句柄，需要重新注册。
             _rawKeys.Register(Handle);  // 键盘探针:只用来发现「钩子被摘」,不计数
             ActivityMonitor.Register(Handle);
@@ -1523,6 +1686,22 @@ namespace KeyMouseStats
             else if (m.Msg == 0x0218 && (m.WParam.ToInt64() == 0x07 || m.WParam.ToInt64() == 0x12)) InstallHooks();
             if (_combos != null && (m.Msg == 0x02B1 || m.Msg == 0x0218
                 && (m.WParam.ToInt64() == 4 || m.WParam.ToInt64() == 7 || m.WParam.ToInt64() == 18))) _combos.Reset();
+            // Milestone 2 / 3.1:跨 DPI 显示器时按新缩放重建布局(点字号由 GDI+ 自行按 DPI 缩放,这里只换 _s)。
+            if (m.Msg == 0x02E0)
+            {
+                int dpi = (int)(m.WParam.ToInt64() & 0xFFFF);
+                if (dpi > 0)
+                {
+                    _s = Math.Max(1f, dpi / 96f);
+                    ClientSize = new Size((int)Math.Round(BaseW * _s), (int)Math.Round(BaseH * _s));
+                    RebuildWidgetFonts();
+                    ApplyRoundedRegion();
+                    ResetHover();
+                    Invalidate();
+                }
+                base.WndProc(ref m);
+                return;
+            }
             if (m.Msg == 0x00FF && _rawMouse != null)
             {
                 // 键盘探针:只判断「钩子是不是已经不干活了」,不参与计数。
@@ -1542,12 +1721,12 @@ namespace KeyMouseStats
 
                     bool calibrating = _distanceSettings != null && _distanceSettings.Collect(counts);
                     if(calibrating)_mouseVectors.Reset();
-                    else if(counts>0)
+                    else if(counts>0&&!SampleData.Active)
                     {
                         if(Store.Day!=DateTime.Today)Store.RollDay(DateTime.Today);
                         _mouseVectors.Move(Store.Today,VectorNow(),_rawMouse.LastDevice,_rawMouse.LastDx,_rawMouse.LastDy,Store.MouseDpi);MarkDirty();
                     }
-                    if (!calibrating && MouseDistance.ValidDpi(Store.MouseDpi) && counts > 0)
+                    if (!calibrating && !SampleData.Active && MouseDistance.ValidDpi(Store.MouseDpi) && counts > 0)
                     {
                         if (Store.Day != DateTime.Today) Store.RollDay(DateTime.Today);
                         double meters = MouseDistance.ToMeters(counts, Store.MouseDpi);
@@ -1602,10 +1781,7 @@ namespace KeyMouseStats
             ClientSize = new Size((int)Math.Round(BaseW * _s), (int)Math.Round(BaseH * _s));
             ApplyRoundedRegion();
 
-            _fTitle = new Font("Microsoft YaHei UI", 10.5f, FontStyle.Bold);
-            _fMode = new Font("Microsoft YaHei UI", 8.25f);
-            _fLabel = new Font("Microsoft YaHei UI", 8.25f);
-            _fValue = new Font("Segoe UI", 13.5f, FontStyle.Bold);
+            RebuildWidgetFonts();   // 3.0:字号与几何共用 _s,不再用点单位交给 GDI+ 二次缩放
 
             Rectangle vs = SystemInformation.VirtualScreen;
             bool posOk = Store.PosX != -1 &&
@@ -1733,6 +1909,8 @@ namespace KeyMouseStats
                 long nowTick = Environment.TickCount;
                 _lastCountedTick = nowTick;   // 看门狗:我确实收到了事件
                 _lastKeyTick = nowTick;       // 键盘探针用它判断「钩子还活着」
+                // 示例预览期间不记账:既不累加示例记录,也不入环写库;但仍把事件交还系统。
+                if (SampleData.Active) return Native.CallNextHookEx(_kbHook, code, wParam, lParam);
                 try
                 {
                     int msg = unchecked((int)wParam.ToInt64());
@@ -1742,6 +1920,9 @@ namespace KeyMouseStats
                             Marshal.PtrToStructure(lParam, typeof(Native.KBDLLHOOKSTRUCT));
                         _combos.Process(msg, (int)released.vkCode, released.scanCode, released.flags);
                         HoldTracker.Release(ShortcutTracker.Normalize((int)released.vkCode, released.scanCode, released.flags), System.Diagnostics.Stopwatch.GetTimestamp());
+                        ShadowPipeline.Enqueue(InputEventKind.KeyUp, Native.GetForegroundWindow(),
+                            ShortcutTracker.Normalize((int)released.vkCode, released.scanCode, released.flags),
+                            0, 0, 0, System.Diagnostics.Stopwatch.GetTimestamp());
                         // 1.7.6:抬起会结算样本与墙钟占用(全量累计随之变化),所以抬起也要标记待保存。
                         MarkDirty();
                     }
@@ -1761,8 +1942,13 @@ namespace KeyMouseStats
                             {
                                 DateTime now = DateTime.Now;
                                 if (Store.Day != now.Date) Store.RollDay(now.Date);
-                                AppUsage foreground = ForegroundApp.Capture();
+                                // v3.0:钩子里不再做跨进程解析 —— Capture() 会让回调超过
+                                // LowLevelHooksTimeout(300 ms)被系统静默摘钩。这里只取廉价 HWND 入环,
+                                // 归属由后台写线程按 HWND 解析。
+                                IntPtr hwnd = Native.GetForegroundWindow();
+                                AppUsage foreground = ForegroundApp.Cached();
                                 vk = ShortcutTracker.Normalize(vk, info.scanCode, info.flags);
+                                ShadowPipeline.Enqueue(InputEventKind.KeyDown, hwnd, vk, 0, 0, 0, downTicks);
                                 DayRecord t = Store.Today;
                                 ShortcutStats.Add(t, combo);
                                 t.Keys++;
@@ -1793,6 +1979,8 @@ namespace KeyMouseStats
                 _lastCountedTick = nowTick;   // 看门狗:我确实收到了事件
                 // 鼠标事件不算键盘存活证据:
                 // (这里不更新 _lastKeyTick)
+                // 示例预览期间不记账(同上)。
+                if (SampleData.Active) return Native.CallNextHookEx(_msHook, code, wParam, lParam);
                 try
                 {
                     int msg = unchecked((int)wParam.ToInt64());
@@ -1806,7 +1994,7 @@ namespace KeyMouseStats
                     // 原始输入可用时,点击/滚轮由 WM_INPUT 那条路径计数(它不会被摘钩),
                     // 这里只保留作为「原始输入注册失败」时的兜底。
                     bool countHere = !_rawMouse.Registered;
-                    if (countHere && (isClick || isWheel)) AppActivity.Record(Store.Today, ForegroundApp.Capture(), isClick ? 1 : 2);
+                    if (countHere && (isClick || isWheel)) AppActivity.Record(Store.Today, ForegroundApp.Cached(), isClick ? 1 : 2);
                     DayRecord t = Store.Today;
                     Counters g = Store.Total;
                     int button=msg==0x0201||msg==0x0202?1:msg==0x0204||msg==0x0205?2:msg==0x0207||msg==0x0208?3:msg==0x020B||msg==0x020C?4+(int)((info.mouseData>>16)&0xffff):0;
@@ -1822,6 +2010,9 @@ namespace KeyMouseStats
                     int h = now.Hour;
                     if (countHere || !(isClick || isWheel))
                     {
+                        // v3.0:一次取句柄与时刻供各分支入环;GetForegroundWindow 是本地轻调用。
+                        IntPtr evtHwnd = isClick ? Native.GetForegroundWindow() : IntPtr.Zero;
+                        long evtTicks = System.Diagnostics.Stopwatch.GetTimestamp();
                         switch (msg)
                         {
                             case Native.WM_MOUSEMOVE:
@@ -1832,6 +2023,8 @@ namespace KeyMouseStats
                                     double d = Math.Sqrt((double)dx * dx + (double)dy * dy);
                                     t.MovePx += d;
                                     g.MovePx += d;
+                                    ShadowPipeline.Enqueue(InputEventKind.Move, IntPtr.Zero, 0,
+                                        info.pt.X, info.pt.Y, (int)Math.Round(d), evtTicks);
                                 }
                                 _lastX = info.pt.X;
                                 _lastY = info.pt.Y;
@@ -1841,23 +2034,28 @@ namespace KeyMouseStats
                             case Native.WM_LBUTTONDOWN:
                                 t.Clicks++; t.Left++; t.HourClicks[h]++;
                                 g.Clicks++; g.Left++;
+                                ShadowPipeline.Enqueue(InputEventKind.MouseDown, evtHwnd, 1, info.pt.X, info.pt.Y, 0, evtTicks);
                                 LiveRate.AddClick(); MarkDirty(); break;
                             case Native.WM_RBUTTONDOWN:
                                 t.Clicks++; t.Right++; t.HourClicks[h]++;
                                 g.Clicks++; g.Right++;
+                                ShadowPipeline.Enqueue(InputEventKind.MouseDown, evtHwnd, 2, info.pt.X, info.pt.Y, 0, evtTicks);
                                 LiveRate.AddClick(); MarkDirty(); break;
                             case Native.WM_MBUTTONDOWN:
                                 t.Clicks++; t.Middle++; t.HourClicks[h]++;
                                 g.Clicks++; g.Middle++;
+                                ShadowPipeline.Enqueue(InputEventKind.MouseDown, evtHwnd, 3, info.pt.X, info.pt.Y, 0, evtTicks);
                                 LiveRate.AddClick(); MarkDirty(); break;
                             case Native.WM_XBUTTONDOWN:
                                 t.Clicks++; t.XButtons++; t.HourClicks[h]++;
                                 g.Clicks++; g.XButtons++;
+                                ShadowPipeline.Enqueue(InputEventKind.MouseDown, evtHwnd, 4, info.pt.X, info.pt.Y, 0, evtTicks);
                                 LiveRate.AddClick(); MarkDirty(); break;
                             case Native.WM_MOUSEWHEEL:
                             case Native.WM_MOUSEHWHEEL:
                                 t.Wheel++;
                                 g.Wheel++;
+                                ShadowPipeline.Enqueue(InputEventKind.Wheel, evtHwnd, 0, info.pt.X, info.pt.Y, (short)((info.mouseData >> 16) & 0xFFFF), evtTicks);
                                 MarkDirty(); break;
                         }
                     }
@@ -1875,6 +2073,7 @@ namespace KeyMouseStats
         /// </summary>
         private void DispatchRawButtons(ushort flags, short wheelDelta)
         {
+            if (SampleData.Active) return;   // 示例预览期间原始输入不计数
             if (flags == 0) return;
             if ((flags & 0x0001) != 0) CountClick(1);
             if ((flags & 0x0004) != 0) CountClick(2);
@@ -1889,7 +2088,7 @@ namespace KeyMouseStats
         {
             DateTime now = DateTime.Now;
             if (Store.Day != now.Date) Store.RollDay(now.Date);
-            AppActivity.Record(Store.Today, ForegroundApp.Capture(), 1);
+            AppActivity.Record(Store.Today, ForegroundApp.Cached(), 1);
             DayRecord t = Store.Today;
             Counters g = Store.Total;
             t.Clicks++;
@@ -1906,7 +2105,11 @@ namespace KeyMouseStats
                 _mouseVectors.Button(t, VectorNow(), button, true);
             // 2.0.7:钩子被系统摘掉时点击仍由原始输入计数,位置用当前光标补上。
             Native.POINT cursor;
-            if (Native.GetCursorPos(out cursor)) ClickHeat.Record(t, cursor.X, cursor.Y, button);
+            bool haveCursor = Native.GetCursorPos(out cursor);
+            if (haveCursor) ClickHeat.Record(t, cursor.X, cursor.Y, button);
+            ShadowPipeline.Enqueue(InputEventKind.MouseDown, Native.GetForegroundWindow(), button,
+                haveCursor ? cursor.X : 0, haveCursor ? cursor.Y : 0, 0,
+                System.Diagnostics.Stopwatch.GetTimestamp());
             LiveRate.AddClick();
             MarkDirty();
         }
@@ -1915,7 +2118,12 @@ namespace KeyMouseStats
         {
             DateTime now = DateTime.Now;
             if (Store.Day != now.Date) Store.RollDay(now.Date);
-            AppActivity.Record(Store.Today, ForegroundApp.Capture(), 2);
+            AppActivity.Record(Store.Today, ForegroundApp.Cached(), 2);
+            Native.POINT wheelCursor;
+            bool wheelPos = Native.GetCursorPos(out wheelCursor);
+            ShadowPipeline.Enqueue(InputEventKind.Wheel, Native.GetForegroundWindow(), 0,
+                wheelPos ? wheelCursor.X : 0, wheelPos ? wheelCursor.Y : 0, 0,
+                System.Diagnostics.Stopwatch.GetTimestamp());
             Store.Today.Wheel++;
             Store.Total.Wheel++;
             MarkDirty();
@@ -1944,6 +2152,24 @@ namespace KeyMouseStats
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
             float s = _s;
+            // 3.0 自愈:小窗被拖到另一块缩放不同的显示器、而系统没有补发 WM_DPICHANGED 时,
+            // _s 会滞留。绘制 DC 报出的 DPI 是最可靠的现场值 —— 不一致就当场重建几何、字体与圆角。
+            float liveScale = s;
+            try { liveScale = Math.Max(1f, g.DpiX / 96f); } catch { }
+            if (Visible && Math.Abs(liveScale - s) > 0.02f)
+            {
+                _s = liveScale;
+                s = liveScale;
+                try { ClientSize = new Size((int)Math.Round(BaseW * _s), (int)Math.Round(BaseH * _s)); } catch { }
+                RebuildWidgetFonts();
+                ApplyRoundedRegion();
+            }
+
+            // 底色兜底:先把整个客户区铺满不透明的卡片色。
+            // 圆角 FillPath 的抗锯齿边缘会留一圈半透明像素,叠上 Region 的圆角裁剪后,
+            // 右下角偶尔会透出下层窗口的文字。先铺满、再画圆角路径,边缘就是实心的。
+            using (SolidBrush baseFill = new SolidBrush(ArtTheme.Current.Card))
+                g.FillRectangle(baseFill, 0, 0, ClientSize.Width, ClientSize.Height);
 
             using (GraphicsPath path = RoundedPath(new Rectangle(Point.Empty, ClientSize), (int)Math.Round(16 * s)))
             {
@@ -1972,6 +2198,8 @@ namespace KeyMouseStats
 
             using (Pen pen = new Pen(ArtTheme.Current.Line))
                 g.DrawLine(pen, 14 * s, 36 * s, ClientSize.Width - 14 * s, 36 * s);
+            // 悬停才浮现:四个分页圆点 + 右端 ⤢ 展开图标(半透明,不抢标题与数值)。
+            WidgetChrome.Paint(g, ClientSize, s, _mode, _hoverAlpha, ArtTheme.Current.Muted, ArtTheme.Current.Accent);
 
             if (_mode == 1) { PaintGoal(g); return; }
             if (_mode == 3) { PaintStorage(g); return; }
@@ -1982,7 +2210,7 @@ namespace KeyMouseStats
             DrawCard(g, 18 * s, 46 * s, ArtTheme.Current.Accent, "键盘击键", Analysis.FmtCount(Motion.Roll("w-keys", c.Keys, 200)));
             DrawCard(g, 18 * s, 92 * s, ArtTheme.Current.Green, "鼠标点击", Analysis.FmtCount(Motion.Roll("w-clicks", c.Clicks, 200)));
             DrawCard(g, col2, 46 * s, ArtTheme.Current.Orange, "滚轮滚动", Analysis.FmtCount(Motion.Roll("w-wheel", c.Wheel, 200)));
-            DrawCard(g, col2, 92 * s, ArtTheme.Current.Purple, "鼠标路程(估算)",
+            DrawCard(g, col2, 92 * s, ArtTheme.Current.Purple, "鼠标路程",
                 !_rawMouse.Registered ? "采集不可用" : Analysis.FmtDistance(Motion.Roll("w-meters", c.MoveMeters, 200)));
             using (Pen line = new Pen(ArtTheme.Current.Line)) g.DrawLine(line, 14 * s, 137 * s, ClientSize.Width - 14 * s, 137 * s);
             ActiveSession current = ActivityMonitor.CurrentSession;
@@ -2193,13 +2421,90 @@ namespace KeyMouseStats
                 string message = Wellbeing.GoalMessage(now, Store.Today);
                 // 1.8.0:目标达成时在小部件上放一次庆祝动效(贴纸弹入 + 一次光晕),只播一次。
                 if (message != null) StartCelebration();
-                if (message == null) message = Wellbeing.ContinuousMessage(now, ActivityMonitor.CurrentSession);
+                string continuous = Wellbeing.ContinuousMessage(now, ActivityMonitor.CurrentSession);
+                if (message == null) message = continuous;
                 if (message == null) message = Wellbeing.SummaryMessage(now);
                 if (message == null) return;
+                // 4.2:久坐提醒同时异步投递本地触发器(后台线程,绝不阻塞这个 250ms 定时器)。
+                if (continuous != null)
+                {
+                    try
+                    {
+                        AutomationTrigger.Log = Program.LogEvent;
+                        AutomationTrigger.Fire(WellbeingSettings.ScriptPath, WellbeingSettings.WebhookUrl,
+                            WellbeingSettings.ContinuousMinutes, WellbeingSettings.CooldownMinutes);
+                    }
+                    catch { }
+                }
                 if (_tray != null) _tray.ShowBalloonTip(8000, "键鼠统计", message, ToolTipIcon.Info);
                 MarkDirty();
             }
             catch { }
+        }
+
+        // ------------------------------------------------------------ 悬停微控件
+        /// <summary>
+        /// 悬停淡入淡出。动效关闭时零延迟直出;「降低动效」档位限时 120 ms,
+        /// 与 Motion 的全局策略保持一致。
+        /// </summary>
+        private void SetHoverTarget(double target)
+        {
+            if (Math.Abs(_hoverTarget - target) < 0.001) return;
+            _hoverTarget = target;
+            if (!Motion.Enabled)
+            {
+                _hoverAlpha = target;
+                if (_hoverTimer != null) _hoverTimer.Stop();
+                InvalidateChrome();
+                return;
+            }
+            _hoverStartAlpha = _hoverAlpha;
+            _hoverStart = Environment.TickCount;
+            _hoverDurationMs = Motion.Level == Motion.LevelReduced ? 120 : 180;
+            EnsureHoverFrames();
+        }
+
+        private void EnsureHoverFrames()
+        {
+            if (_hoverTimer == null)
+            {
+                _hoverTimer = new System.Windows.Forms.Timer();
+                _hoverTimer.Interval = 30;
+                _hoverTimer.Tick += delegate { StepHover(); };
+            }
+            if (!_hoverTimer.Enabled) _hoverTimer.Start();
+        }
+
+        private void StepHover()
+        {
+            double elapsed = Environment.TickCount - _hoverStart;
+            double t = _hoverDurationMs <= 0 ? 1 : Math.Min(1, elapsed / _hoverDurationMs);
+            _hoverAlpha = _hoverStartAlpha + (_hoverTarget - _hoverStartAlpha) * Ease.Apply(Ease.OutCubic, t);
+            if (t >= 1)
+            {
+                _hoverAlpha = _hoverTarget;
+                if (_hoverTimer != null) _hoverTimer.Stop();
+            }
+            InvalidateChrome();
+        }
+
+        private void InvalidateChrome()
+        {
+            if (!IsHandleCreated || !Visible) return;
+            int top = (int)Math.Max(0, (WidgetChrome.DividerY - 10f) * _s);
+            int height = (int)Math.Max(1, 20f * _s);
+            Invalidate(new Rectangle(0, top, ClientSize.Width, height));
+        }
+
+        /// <summary>把悬停状态清空:切穿透、重建句柄时调用,防止穿透模式下圆点常亮。</summary>
+        private void ResetHover()
+        {
+            _hoverAlpha = 0;
+            _hoverTarget = 0;
+            _hoverChrome = WidgetChrome.None;
+            _suppressClick = false;
+            if (_hoverTimer != null) _hoverTimer.Stop();
+            InvalidateChrome();
         }
 
         // ------------------------------------------------------------ 目标达成庆祝
@@ -2274,16 +2579,38 @@ namespace KeyMouseStats
 
         // ---------------------------------------------------------------- 交互
 
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            base.OnMouseEnter(e);
+            if (_clickThrough) return;   // 穿透模式下本就收不到消息,这里是兜底
+            SetHoverTarget(1);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            _hoverChrome = WidgetChrome.None;
+            SetHoverTarget(0);
+        }
+
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            if (e.Button == MouseButtons.Left)
+            if (e.Button != MouseButtons.Left) return;
+            // 命中区判定必须早于拖拽武装:否则从圆点或 ⤢ 按下会把整个窗口拖走。
+            int chrome = WidgetChrome.HitHoverChrome(ClientSize, _s, e.Location);
+            if (!WidgetChrome.ShouldArmDrag(chrome))
             {
-                _dragging = true;
+                _hoverChrome = chrome;
+                _dragging = false;
                 _dragMoved = false;
-                _dragMouseStart = Control.MousePosition;
-                _dragFormStart = Location;
+                return;
             }
+            _suppressClick = false;
+            _dragging = true;
+            _dragMoved = false;
+            _dragMouseStart = Control.MousePosition;
+            _dragFormStart = Location;
         }
 
         protected override void OnMouseMove(MouseEventArgs e)
@@ -2302,6 +2629,26 @@ namespace KeyMouseStats
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+            // 微控件上的点击:只执行对应动作,绝不拖窗、绝不再顺带翻页。
+            if (e.Button == MouseButtons.Left && _hoverChrome != WidgetChrome.None)
+            {
+                int chrome = _hoverChrome;
+                _hoverChrome = WidgetChrome.None;
+                _dragging = false;
+                _suppressClick = true;
+                if (chrome == WidgetChrome.Expand)
+                {
+                    OpenDashboard();
+                }
+                else
+                {
+                    _mode = chrome - 1;
+                    if (_mode == 3) _storage = null;
+                    _dirtyUI = true;
+                }
+                Invalidate();
+                return;
+            }
             if (e.Button == MouseButtons.Left && _dragging)
             {
                 _dragging = false;
@@ -2323,6 +2670,9 @@ namespace KeyMouseStats
         protected override void OnMouseDoubleClick(MouseEventArgs e)
         {
             base.OnMouseDoubleClick(e);
+            if (_suppressClick) { _suppressClick = false; return; }   // 刚点过圆点/⤢:不要顺带展开面板
+            // 在圆点/⤢ 上连点两下不应顺带展开面板。
+            if (WidgetChrome.HitHoverChrome(ClientSize, _s, e.Location) != WidgetChrome.None) return;
             OpenDashboard();
         }
 
@@ -2493,6 +2843,7 @@ namespace KeyMouseStats
         private void SetClickThrough(bool on)
         {
             _clickThrough = on;
+            ResetHover();   // 穿透模式收不到鼠标消息,必须先把悬停清掉
             RecreateHandle();
         }
 
@@ -2612,7 +2963,9 @@ namespace KeyMouseStats
             }
         }
 
-        private const int SaveIntervalSeconds = 30;
+        // v3.0:SQLite 阴影双写接管高频事实,文本快照降频为「每日一次 + 退出时」,
+        // 不再每 30 秒重写整份历史(旧注释见 OnTick)。
+        private const int SaveIntervalSeconds = 86400;
 
         private void SaveNow(bool waitForDisk)
         {
@@ -2626,6 +2979,8 @@ namespace KeyMouseStats
         {
             base.OnFormClosing(e);
             SaveNow(true);
+            // 退出前把环形缓冲里剩下的样本落库,最多等 3 秒。
+            ShadowPipeline.Flush(3000);
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)

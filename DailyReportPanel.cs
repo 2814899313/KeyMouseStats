@@ -35,6 +35,8 @@ namespace KeyMouseStats
 
         private void ApplyDayChip(int id)
         {
+            if (id == 425) { ToggleBattleMask(); return; }
+            if (id == 426) { GenerateBattleReport(); return; }
             if (id == 420)
             {
                 if (!CanStepDay(-1)) return;      // 到 364 天下界就停,不再翻进没有数据的年份
@@ -85,13 +87,23 @@ namespace KeyMouseStats
             PaintDayHero(g, r);
 
             float row2 = Cy + 140;
-            PaintDayHours(g, Cx, row2, 410, 160, r);
-            PaintDayApps(g, Cx + 424, row2, 408, 160, r);
+            // 3.0:第二排高度也跟随 ElasticH(基准 160 不变);逻辑画布矮于设计最小时,
+            // 它是负数,第二排压缩后第三排才收口得进 PageBottom。
+            float row2H = Math.Max(110f, 160f + ElasticH * 0.12f);
+            float dayLeft = Cw * 0.493f; float dayGap = 14f; PaintDayHours(g, Cx, row2, dayLeft, row2H, r);
+            PaintDayApps(g, Cx + dayLeft + dayGap, row2, Cw - dayLeft - dayGap, row2H, r);
 
-            float row3 = Cy + 314;
-            PaintDayHabits(g, Cx, row3, 268, 174, r);
-            PaintDayChars(g, Cx + 282, row3, 268, 174, r);
-            PaintDayReminders(g, Cx + 564, row3, 268, 174, r);
+            // 第三排等宽三列:Cw=832 时正好 268 宽、x=24/306/588,与旧版逐像素一致;
+            // 放大到 2K 时三张卡一起长,不再让 0.678 的比例在卡 2 与卡 3 之间留出 1000px 的黑洞。
+            // 底边用 PageBottom(已扣掉页眉 ContentY 与页脚块):Cy + Cb 会越过窗口底 82px,
+            // 基准窗口下第三排的按键/鼠标两行会被页脚按钮压住。
+            float row3 = row2 + row2H + 14f;
+            float row3H = Math.Max(56f, PageBottom - row3);
+            RectangleF[] row3Cols = LayoutFrame.SplitColumns(
+                new RectangleF(Cx, row3, Cw, row3H), new float[] { 1f, 1f, 1f }, 14f);
+            PaintDayHabits(g, row3Cols[0].X, row3, row3Cols[0].Width, row3H, r);
+            PaintDayChars(g, row3Cols[1].X, row3, row3Cols[1].Width, row3H, r);
+            PaintDayReminders(g, row3Cols[2].X, row3, row3Cols[2].Width, row3H, r);
         }
 
         // ---- 顶部:日期 + 一句话 + 四个关键数字 ----
@@ -289,16 +301,32 @@ namespace KeyMouseStats
                 AppText(g, "这一天没有记录", _fSmall, Csub, new RectangleF(x + 18, y + h / 2 - 8, w - 36, 20), false);
                 return;
             }
-            float ry = y + 38;
-            if (r.Combos.Count > 0)
+            // 榜单从「组合键 Top」标签下沿开始,底部两行固定摘要的位置一个像素都不动。
+            float listTop = y + 38f;
+            int total = r.Combos.Count + r.TopKeys.Count;
+            if (total > 0)
+                AppText(g, r.Combos.Count > 0 ? "组合键 Top" : "按键 Top", _fAxis, Csub,
+                    new RectangleF(x + 18, listTop, w - 36, 14), false);
+            listTop += 17f;
+
+            // 3.0 内容密度:中段能排几条由可用高度反推,而不是写死 4 条(基准 260 高时能排 9 行),
+            // 2K 上把「组合键 5 + 按键 5」十条全铺开,不再「四条排完,下面一大片黑」。
+            float pinnedH = (r.TopKeys.Count > 0 ? 43f : 24f) + 6f;   // 摘要两行 + 净空
+            float body = h - (listTop - y) - pinnedH;
+            if (body < 17f) body = 17f;
+            int rows = LayoutFrame.CalcVisibleRows(body, 0f, 0f, 17f, 30f, total);
+            float rowH = LayoutFrame.CalcRowHeight(body, 0f, 0f, 17f, 30f, rows);
+            if (rowH < 17f) rowH = 17f;
+            // 行高封顶 30(2K 上不把 10 条摊成 90px 的稀疏表格);条数排不满时把余量
+            // 均摊进行距,让中段整块被填满,而不是贴着标签堆在顶部。
+            float pitch = rowH;
+            if (rows > 0 && body > rows * rowH) pitch = body / rows;
+            for (int i = 0; i < rows; i++)
             {
-                AppText(g, "组合键 Top", _fAxis, Csub, new RectangleF(x + 18, ry, w - 36, 14), false);
-                ry += 17;
-                for (int i = 0; i < r.Combos.Count && i < 4; i++)
-                {
-                    AppText(g, r.Combos[i], _fSmall, Ctext, new RectangleF(x + 18, ry, w - 36, 16), false);
-                    ry += 17;
-                }
+                // 先列组合键,再接按键;两者合在同一条榜里,顺序与卡底摘要一致。
+                string text = i < r.Combos.Count ? r.Combos[i] : r.TopKeys[i - r.Combos.Count];
+                float ry = listTop + i * pitch + (pitch - rowH) / 2f;
+                AppText(g, text, _fSmall, Ctext, new RectangleF(x + 18, ry, w - 36, rowH), false);
             }
             if (r.TopKeys.Count > 0)
             {
@@ -326,10 +354,32 @@ namespace KeyMouseStats
                 + Analysis.FmtCount(r.DistinctChars) + " 种",
                 _fAxis, Csub, new RectangleF(x + 18, y + 62, w - 36, 16), false);
 
-            // 构成条
+            // 构成条 + 图例:基准 260 高时仍在 y+84(与旧版逐像素一致);卡片长高后整块
+            // 按比例下移,最终贴到底部「高频 / 最活跃」两行之上,不再浮在卡片中段。
             long total = 0;
             for (int i = 0; i < r.Composition.Length; i++) total += r.Composition[i];
-            float barY = y + 84, barW = w - 36;
+            float barW = w - 36;
+            List<string> legendLines = new List<string>();
+            if (total > 0)
+            {
+                string legend = "";
+                for (int i = 0; i < r.Composition.Length; i++)
+                {
+                    if (r.Composition[i] <= 0) continue;
+                    if (legend.Length > 0) legend += " · ";
+                    legend += RimeSlice.CompositionNames[i] + " " + (r.Composition[i] * 100.0 / total).ToString("0", CultureInfo.InvariantCulture) + "%";
+                }
+                legendLines = WrapText(g, legend, _fAxis, barW);
+            }
+            float growth = h > 260f ? h - 260f : 0f;
+            float lineStep = LayoutFrame.Clamp(14f + growth * 0.02f, 14f, 26f);
+            float legendGap = LayoutFrame.Clamp(12f + growth * 0.014f, 12f, 22f);
+            float blockH = 8f + legendGap + Math.Min(2, legendLines.Count) * lineStep;
+            float baseBarY = y + 84f;
+            float hugBarY = (y + h - 40f) - 12f - blockH;      // 摘要两行之上
+            float t = LayoutFrame.Clamp(growth / 420f, 0f, 1f);
+            float barY = baseBarY + (hugBarY - baseBarY) * t;
+            if (barY < baseBarY) barY = baseBarY;
             if (total > 0)
             {
                 float bx = x + 18;
@@ -341,16 +391,9 @@ namespace KeyMouseStats
                         g.FillRectangle(brush, bx, barY, Math.Max(1f, segW - 1), 8);
                     bx += segW;
                 }
-                string legend = "";
-                for (int i = 0; i < r.Composition.Length; i++)
-                {
-                    if (r.Composition[i] <= 0) continue;
-                    if (legend.Length > 0) legend += " · ";
-                    legend += RimeSlice.CompositionNames[i] + " " + (r.Composition[i] * 100.0 / total).ToString("0", CultureInfo.InvariantCulture) + "%";
-                }
-                List<string> legendLines = WrapText(g, legend, _fAxis, barW);
                 for (int i = 0; i < legendLines.Count && i < 2; i++)
-                    AppText(g, legendLines[i], _fAxis, Csub, new RectangleF(x + 18, barY + 12 + i * 14, barW, 14), false);
+                    AppText(g, legendLines[i], _fAxis, Csub,
+                        new RectangleF(x + 18, barY + legendGap + i * lineStep, barW, lineStep), false);
             }
 
             if (r.TopChars.Count > 0)
@@ -365,25 +408,58 @@ namespace KeyMouseStats
         private void PaintDayReminders(Graphics g, float x, float y, float w, float h, DailyReport r)
         {
             PaintCard(g, x, y, w, h, "值得注意");
-            float ry = y + 38;
-            float bottom = y + h - 12;
-            for (int i = 0; i < r.Reminders.Count && ry + 16 <= bottom; i++)
+            int items = r.Reminders.Count;
+            if (items == 0) return;
+            float top = y + 38f, bottom = y + h - 12f;
+            float body = bottom - top;
+            if (body < 16f) body = 16f;
+
+            // 行高与条目间距都得按「折行后的总行数」算:只数条目会把两行文案挤成一行。
+            List<List<string>> wraps = new List<List<string>>(items);
+            int totalLines = 0;
+            for (int i = 0; i < items; i++)
             {
                 List<string> lines = WrapText(g, r.Reminders[i], _fSmall, w - 48);
+                if (lines.Count == 0) lines.Add("");
+                wraps.Add(lines);
+                totalLines += lines.Count;
+            }
+
+            // 行高 16..28、条目间距 6..18 随卡片高度呼吸:基准 260 高时仍是 16 / 6(与旧版逐像素一致),
+            // 卡片越高行距越松;再有余量就继续摊进条目之间 —— 2K 上四条提醒铺满整张卡,
+            // 而不是一条贴顶、下面留 700px 的黑。
+            float growth = h > 260f ? h - 260f : 0f;
+            float fitH = LayoutFrame.CalcRowHeight(body, 0f, (items - 1) * 6f, 16f, 28f, totalLines);
+            float lineH = LayoutFrame.Clamp(16f + growth * 0.017f, 16f, 28f);
+            if (fitH < lineH) lineH = fitH;                    // 行数多到排不下时先压行高,再谈铺开
+            if (lineH < 16f) lineH = 16f;
+            float fillGap = items > 1 ? (body - totalLines * lineH) / (items - 1) : 6f;
+            float spread = LayoutFrame.Clamp(growth / 300f, 0f, 1f);
+            float gap = 6f + (fillGap - 6f) * spread;
+            if (gap < 6f) gap = 6f;
+
+            float ry = top;
+            float slack = body - (totalLines * lineH + (items - 1) * gap);
+            if (slack > 0f && growth > 0f) ry += slack / 2f;    // 只有一条时居中,别孤零零贴在卡顶
+            for (int i = 0; i < items && ry + lineH <= bottom + 0.5f; i++)
+            {
+                List<string> lines = wraps[i];
                 bool good = r.Reminders[i].IndexOf("达成", StringComparison.Ordinal) >= 0
                     || r.Reminders[i].IndexOf("平稳", StringComparison.Ordinal) >= 0;
                 using (SolidBrush dot = new SolidBrush(good ? Cgreen : Corange))
-                    g.FillEllipse(dot, x + 18, ry + 6, 4, 4);
-                int available = (int)((bottom - ry) / 16);
+                    g.FillEllipse(dot, x + 18, ry + lineH / 2f - 2f, 4, 4);
+                int available = (int)Math.Floor((bottom - ry) / lineH);
+                if (available < 1) available = 1;
                 int count = Math.Min(lines.Count, available);
                 for (int k = 0; k < count; k++)
                 {
+                    // 末行把剩下的字并进来(AppText 自带省略号),绝不把半行裁到卡片外。
                     string line = k == count - 1 && count < lines.Count
                         ? string.Join("", lines.GetRange(k, lines.Count - k).ToArray()) : lines[k];
-                    AppText(g, line, _fSmall, Ctext, new RectangleF(x + 30, ry, w - 48, 16), false);
-                    ry += 16;
+                    AppText(g, line, _fSmall, Ctext, new RectangleF(x + 30, ry, w - 48, lineH), false);
+                    ry += lineH;
                 }
-                ry += 6;
+                ry += gap;
             }
         }
         // ---------------------------------------------------------------- 每日自动生成

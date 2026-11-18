@@ -48,7 +48,7 @@ internal static class AppActivityTests
         AppActivity.Record(officeDay, office, 0);
         long[] officeCategories;
         AppActivity.Aggregate(new DayRecord[] { officeDay }, false, out officeCategories);
-        Check(officeCategories.Length == 6 && officeCategories[5] == 1, "new category included in totals");
+        Check(officeCategories.Length == AppActivity.Categories.Length && officeCategories[5] == 1, "new category included in totals");
         AppActivity.LoadRule(AppActivity.Encode(AppActivity.AppRuleKey(office.ProcessPath)) + "|5");
         Check(AppActivity.Rules[AppActivity.AppRuleKey(office.ProcessPath)] == 5, "office category ID loads without changing existing IDs");
         AppActivity.Rules[AppActivity.WindowRuleKey(video)] = 2;

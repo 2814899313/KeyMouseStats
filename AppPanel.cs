@@ -241,7 +241,7 @@ namespace KeyMouseStats
             else if (_appCategory >= 0) rows.RemoveAll(delegate(AppActivity.Row row) { return row.Legacy || row.Category != _appCategory; });
             long totalKeys = 0;
             foreach (long value in categoryKeys) totalKeys += value;
-            Color[] colors = { Cblue, Cpurple, Corange, Cgreen, Csub, Ccyan };
+            Color[] colors = { Cblue, Cpurple, Corange, Cgreen, Csub, Ccyan, ArtTheme.Mix(Ccyan, Cgreen, 0.45f), ArtTheme.Mix(Cpurple, Ccyan, 0.45f), ArtTheme.Mix(Cblue, Cpurple, 0.5f), ArtTheme.Mix(Corange, Cred, 0.4f) };   // 10 类:与 AppActivity.Categories 一一对应
             int[] order = { 0, 5, 1, 2, 3, 4 };
             List<int> visible = new List<int>();
             foreach (int i in order) if (categoryKeys[i] > 0) visible.Add(i);
@@ -277,7 +277,9 @@ namespace KeyMouseStats
                 }
             }
 
-            PaintCardBase(g, Cx, 235, Cw, 351);
+            float cardTop, cardH, cardBottom;
+            AppCardFrame(out cardTop, out cardH, out cardBottom);
+            PaintCardBase(g, Cx, cardTop, Cw, cardH);
             if (_appDetail != null) { PaintAppDetail(g); return; }
             AppText(g, _appsByWindow ? "窗口标题 / 应用" : "应用 / 进程路径", _fH2, Ctext, new RectangleF(Cx + 18, 242, 260, 24), false);
             string[] views = { "次数", "APM 效率", "时长占比" };
@@ -433,9 +435,17 @@ namespace KeyMouseStats
             }
         }
 
+        /// <summary>应用页主卡的纵向基准:卡顶 235 固定,卡高随 ElasticH 生长,卡底 = 586 + ElasticH。</summary>
+        private void AppCardFrame(out float cardTop, out float cardH, out float cardBottom)
+        {
+            cardTop = 235f;
+            cardH = 351f + ElasticH;
+            cardBottom = cardTop + cardH;
+        }
+
         private void PaintAppsTable(Graphics g, List<AppActivity.Row> rows, Dictionary<string, long[]> keyGroups)
         {
-            Color[] colors = { Cblue, Cpurple, Corange, Cgreen, Csub, Ccyan };   // 应用用途分类:保持原样
+            Color[] colors = { Cblue, Cpurple, Corange, Cgreen, Csub, Ccyan, ArtTheme.Mix(Ccyan, Cgreen, 0.45f), ArtTheme.Mix(Cpurple, Ccyan, 0.45f), ArtTheme.Mix(Cblue, Cpurple, 0.5f), ArtTheme.Mix(Corange, Cred, 0.4f) };   // 10 类:与 AppActivity.Categories 一一对应   // 应用用途分类:保持原样
             Color[] keyColors = AppKeyBucketColors();                             // 键位 5 桶:第 4 桶改用主题主色
             int keyBuckets = KeySemantics.VisibleBuckets;
             string[] keyLabels = KeySemantics.LabelsGeneric;
@@ -465,14 +475,28 @@ namespace KeyMouseStats
             }
             using (Pen pen = new Pen(Cline)) g.DrawLine(pen, Cx + 16, 296, Cx + Cw - 16, 296);
 
-            const int pageSize = 7;
+            // 行数不再写死 7 行:卡内可用高度决定排几行、行距多高。
+            // 3.0:条目少(如 9~10 条)且有多余纵向空间时,行高在 [33,64] 区间内均匀放大,
+            // 主标题与副标题(如 Microsoft Edge / msedge.exe)间距更舒展,列表自然铺满卡片;
+            // 条目多时按 33 的下限多排几行,不会把行高压到 33 以下。
+            float cardTop, cardH, cardBottom;
+            AppCardFrame(out cardTop, out cardH, out cardBottom);
+            const float headerH = 65f, footerH = 55f;          // 235→300 标题/图例;531→586 页脚
+            float bodyH = cardH - headerH - footerH;           // 基准 231,2K 947
+            int pageSize = Math.Min(rows.Count, Math.Max(1, (int)Math.Floor(bodyH / 33f)));
+            if (pageSize < 1) pageSize = 1;
+            float rowHeight = LayoutFrame.CalcRowHeight(cardH, headerH, footerH, 33f, 64f, pageSize);
+            float rowShift = (rowHeight - 33f) * 0.5f;         // 行高仍为 33 时恒为 0,基准逐像素不变
+            float bodyTop = cardTop + headerH;                 // 300
+            float footTop = cardBottom - footerH;              // 基准 531
             _appPageCount = Math.Max(1, (rows.Count + pageSize - 1) / pageSize);
             _appPage = Math.Min(_appPage, _appPageCount - 1);
             if (rows.Count == 0)
             {
-                AppText(g, _onlyUnclassified ? "当前范围没有待标注窗口" : _appCategory >= 0 ? "该分类下没有应用" : "还没有应用记录", _fNum2, Ctext, new RectangleF(Cx + 100, 355, Cw - 200, 40), false);
+                float emptyShift = Math.Max(0f, (bodyH - 231f) * 0.5f);   // 空状态在长高的行区里下移,不再贴顶
+                AppText(g, _onlyUnclassified ? "当前范围没有待标注窗口" : _appCategory >= 0 ? "该分类下没有应用" : "还没有应用记录", _fNum2, Ctext, new RectangleF(Cx + 100, bodyTop + 55f + emptyShift, Cw - 200, 40), false);
                 AppText(g, _onlyUnclassified || _appCategory >= 0 ? "关闭表头的筛选标签可查看全部；无法追溯的旧数据不列入此处。" : "使用键盘或鼠标后，这里会显示输入发生在哪个应用。", _fBody, Csub,
-                    new RectangleF(Cx + 100, 400, Cw - 200, 30), false);
+                    new RectangleF(Cx + 100, bodyTop + 100f + emptyShift, Cw - 200, 30), false);
             }
             string reason = "点击“手动分类”直接选用途；高级规则支持标题关键词。APM 页可看各应用的输入效率。";
             PointF mouse = ToBase(_mouse); mouse = new PointF(mouse.X - ContentX, mouse.Y - ContentY);
@@ -485,34 +509,34 @@ namespace KeyMouseStats
             for (int i = 0; i < pageSize && _appPage * pageSize + i < rows.Count; i++)
             {
                 AppActivity.Row row = rows[_appPage * pageSize + i];
-                float y = 300 + i * 33;
-                _appRowRects.Add(new RectangleF(Cx + 4, y, Cw - 8, 33));
+                float y = bodyTop + i * rowHeight;
+                _appRowRects.Add(new RectangleF(Cx + 4, y, Cw - 8, rowHeight));
                 _appRowRows.Add(row);
                 if (i % 2 == 0)
                     using (SolidBrush brush = new SolidBrush(Color.FromArgb(12, Ctext)))
-                        g.FillRectangle(brush, Cx + 8, y, Cw - 16, 33);
-                RectangleF check = new RectangleF(Cx + 6, y + 9, 14, 14);
+                        g.FillRectangle(brush, Cx + 8, y, Cw - 16, rowHeight);
+                RectangleF check = new RectangleF(Cx + 6, y + rowShift + 9, 14, 14);
                 _appCompareRects.Add(check); _appCompareRows.Add(row);
                 AppCheckbox(g, check, IsCompared(row));
                 Bitmap icon = row.Legacy ? null : AppIcon(row.ProcessPath);
-                if (icon != null) g.DrawImage(icon, Cx + 26, y + 8, 16, 16);
+                if (icon != null) g.DrawImage(icon, Cx + 26, y + rowShift + 8, 16, 16);
                 else
                 {
                     Color fallback = row.Category < 0 ? Csub : colors[row.Category];
-                    using (GraphicsPath path = RoundedRect(Cx + 26, y + 8, 16, 16, 4))
+                    using (GraphicsPath path = RoundedRect(Cx + 26, y + rowShift + 8, 16, 16, 4))
                     using (SolidBrush b = new SolidBrush(Color.FromArgb(40, fallback))) g.FillPath(b, path);
                 }
-                AppText(g, row.Name, _fBody, Ctext, new RectangleF(Cx + 48, y, 180, 20), false);
+                AppText(g, row.Name, _fBody, Ctext, new RectangleF(Cx + 48, y + rowShift, 180, 20), false);
                 string detailText = row.Legacy ? "" : Path.GetFileName(row.ProcessPath ?? "");
-                AppText(g, detailText, _fSmall, Csub, new RectangleF(Cx + 48, y + 17, 180, 15), false);
-                if (new RectangleF(Cx + 48, y, 180, 33).Contains(mouse))
+                AppText(g, detailText, _fSmall, Csub, new RectangleF(Cx + 48, y + rowShift + 17, 180, 15), false);
+                if (new RectangleF(Cx + 48, y, 180, rowHeight).Contains(mouse))
                     reason = row.Legacy ? row.Reason : "完整路径：" + row.ProcessPath;
                 if (check.Contains(mouse)) reason = "勾选两个应用即可并排对比（最多两个）";
                 Color color = row.Category < 0 ? Csub : colors[row.Category];
                 AppText(g, row.Category < 0 ? "混合分类" : AppActivity.Categories[row.Category], _fBody, color,
-                    new RectangleF(349, y, 90, 20), false);
-                AppText(g, row.Source, _fAxis, Csub, new RectangleF(349, y + 17, 90, 15), false);
-                if (new RectangleF(349, y, 90, 33).Contains(mouse)) reason = row.Reason;
+                    new RectangleF(349, y + rowShift, 90, 20), false);
+                AppText(g, row.Source, _fAxis, Csub, new RectangleF(349, y + rowShift + 17, 90, 15), false);
+                if (new RectangleF(349, y, 90, rowHeight).Contains(mouse)) reason = row.Reason;
                 if (_appKeyGroups)
                 {
                     // 按窗口视图下键位桶只按进程聚合,整列不画条,循环结束后统一给一次提示。
@@ -525,7 +549,7 @@ namespace KeyMouseStats
                             for (int j = 0; j < keyBuckets && j < groups.Length; j++) groupTotal += groups[j];
                         if (groupTotal > 0)
                         {
-                            RectangleF bar = new RectangleF(keyBarX, y + 9, keyBarW, 13);
+                            RectangleF bar = new RectangleF(keyBarX, y + rowShift + 9, keyBarW, 13);
                             int hoverSeg = -1, lastSeg = -1;
                             if (bar.Contains(mouse))
                             {
@@ -570,18 +594,18 @@ namespace KeyMouseStats
                                 keyHoverSeg = hoverSeg; keyHoverBar = bar;
                             }
                         }
-                        else AppText(g, "该区间无此维度", _fSmall, Csub, new RectangleF(keyBarX, y + 6, 220, 22), false);
+                        else AppText(g, "该区间无此维度", _fSmall, Csub, new RectangleF(keyBarX, y + rowShift + 6, 220, 22), false);
                     }
                 }
                 else
                 {
                     long[] values = { row.Keys, row.Clicks, row.Wheel };
                     for (int j = 0; j < 3; j++)
-                        AppText(g, Analysis.FmtCount(values[j]), _fBody, Ctext, new RectangleF(columnX[j + 1], y + 6, 80, 22), true);
+                        AppText(g, Analysis.FmtCount(values[j]), _fBody, Ctext, new RectangleF(columnX[j + 1], y + rowShift + 6, 80, 22), true);
                 }
                 if (!row.Legacy)
                 {
-                    RectangleF edit = new RectangleF(766, y + 3, 70, 25);
+                    RectangleF edit = new RectangleF(766, y + rowShift + 3, 70, 25);
                     _appEditRects.Add(edit); _appEditRows.Add(row);
                     PaintChip(g, edit, "手动分类", false, null);
                     if (IsCompared(row))
@@ -589,34 +613,35 @@ namespace KeyMouseStats
                         double pop = 1;
                         if (Motion.Running("appcompare")) pop = Ease.Apply(Ease.OutQuad, Motion.Progress("appcompare"));
                         using (SolidBrush mark = new SolidBrush(ArtTheme.Mix(Cblue, Ctext, (float)(0.25 + 0.35 * pop))))
-                            g.FillRectangle(mark, Cx + 4, y, 3, 33);
+                            g.FillRectangle(mark, Cx + 4, y, 3, rowHeight);
                     }
                 }
             }
             // 按窗口视图:键位桶只按进程聚合,七行画同一根条是误导;整列只给一次浅灰提示。
             if (_appKeyGroups && _appsByWindow)
             {
-                int shown = Math.Min(pageSize, rows.Count);
+                int shownRows = Math.Min(pageSize, rows.Count);
                 using (SolidBrush hint = new SolidBrush(Csub))
                 using (StringFormat centered = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
                     g.DrawString("按进程统计（请切至「按应用」查看）", _fSmall, hint,
-                        new RectangleF(keyBarX, 300, keyBarW, Math.Max(33, shown * 33)), centered);
+                        new RectangleF(keyBarX, bodyTop, keyBarW, Math.Max(rowHeight, shownRows * rowHeight)), centered);
             }
             string summary = CompareSummary();
             _appCompareClearRect = RectangleF.Empty;
+            // 页脚三行(对比摘要 / 悬停明细 / 总数分页)整体钉在卡底往上 55px,不随行数漂移。
             if (summary != null)
             {
                 // 文本不换行,所以宽度要卡死在「清除对比」chip 左侧,不能让它压到 chip 上。
-                AppText(g, summary, _fSmall, Ctext, new RectangleF(Cx + 18, 536, Cw - 274, 22), false);
-                _appCompareClearRect = new RectangleF(Cx + Cw - 250, 532, 96, 27);
+                AppText(g, summary, _fSmall, Ctext, new RectangleF(Cx + 18, footTop + 5, Cw - 274, 22), false);
+                _appCompareClearRect = new RectangleF(Cx + Cw - 250, footTop + 1, 96, 27);
                 PaintChip(g, _appCompareClearRect, "清除对比", false, null);
             }
-            else AppText(g, reason, _fSmall, Csub, new RectangleF(Cx + 18, 538, Cw - 40, 18), false);
+            else AppText(g, reason, _fSmall, Csub, new RectangleF(Cx + 18, footTop + 7, Cw - 40, 18), false);
             AppText(g, "共 " + rows.Count + " 项 · 按击键排序 · " + (_appPage + 1) + " / " + _appPageCount + " 页"
                 + (_comparePicked.Count == 1 ? " · 再勾选一个应用即可对比" : ""),
-                _fSmall, Csub, new RectangleF(Cx + 18, 558, 600, 24), false);
-            AppChip(g, 40, Cx + Cw - 186, 547, 80, "上一页", false);
-            AppChip(g, 41, Cx + Cw - 96, 547, 80, "下一页", false);
+                _fSmall, Csub, new RectangleF(Cx + 18, footTop + 27, 600, 24), false);
+            AppChip(g, 40, Cx + Cw - 186, footTop + 16, 80, "上一页", false);
+            AppChip(g, 41, Cx + Cw - 96, footTop + 16, 80, "下一页", false);
             // 气泡最后画:盖在行与页脚之上,不抢占页脚说明位,对比摘要占着页脚时也能看比例。
             if (keyHoverRow != null)
                 PaintKeyBucketPopover(g, keyHoverRow, keyHoverGroups, keyHoverTotal, keyHoverSeg, keyHoverBar, mouse);
@@ -710,7 +735,7 @@ namespace KeyMouseStats
         /// </summary>
         private void PaintAppsApm(Graphics g, List<AppActivity.Row> rows)
         {
-            Color[] colors = { Cblue, Cpurple, Corange, Cgreen, Csub, Ccyan };
+            Color[] colors = { Cblue, Cpurple, Corange, Cgreen, Csub, Ccyan, ArtTheme.Mix(Ccyan, Cgreen, 0.45f), ArtTheme.Mix(Cpurple, Ccyan, 0.45f), ArtTheme.Mix(Cblue, Cpurple, 0.5f), ArtTheme.Mix(Corange, Cred, 0.4f) };   // 10 类:与 AppActivity.Categories 一一对应
             List<AppFlow.Item> items = AppFlow.Build(rows);
             AppFlow.Totals totals = AppFlow.Sum(items);
             int excluded;
@@ -729,27 +754,40 @@ namespace KeyMouseStats
 
             PointF mouse = ToBase(_mouse); mouse = new PointF(mouse.X - ContentX, mouse.Y - ContentY);
             string reason = "APM = 每分钟击键 + 点击。切到「时长占比」可以看时间都花在哪儿。";
-            for (int i = 0; i < 7 && i < ranked.Count; i++)
+            // 与「次数」列表同一套行区口径:表头 235→322 固定,页脚 548→586 钉在卡底,
+            // 中间的行距 31 → 44、行数 7 → 21,不再写死 7 行后留半屏空壳。
+            float cardTop, cardH, cardBottom;
+            AppCardFrame(out cardTop, out cardH, out cardBottom);
+            const float headerH = 87f, footerH = 38f;          // 235→322 表头;548→586 页脚
+            float bodyH = cardH - headerH - footerH;           // 基准 226
+            float rowPitch = LayoutFrame.Clamp(31f * bodyH / 226f, 31f, 44f);
+            int rankRows = LayoutFrame.CalcVisibleRows(cardH, headerH, footerH, rowPitch, rowPitch, ranked.Count);
+            if (rankRows < 1) rankRows = 1;
+            float rowHeight = LayoutFrame.CalcRowHeight(cardH, headerH, footerH, rowPitch, rowPitch, rankRows);
+            float rowShift = (rowHeight - 31f) * 0.5f;         // 行高仍为 31 时恒为 0
+            float bodyTop = cardTop + headerH;                 // 322
+            float footTop = cardBottom - footerH;              // 基准 548
+            for (int i = 0; i < rankRows && i < ranked.Count; i++)
             {
                 AppFlow.Item item = ranked[i];
-                float y = 322 + i * 31;
+                float y = bodyTop + i * rowHeight;
                 if (i % 2 == 0)
                     using (SolidBrush brush = new SolidBrush(Color.FromArgb(12, Ctext)))
-                        g.FillRectangle(brush, Cx + 8, y, Cw - 16, 31);
+                        g.FillRectangle(brush, Cx + 8, y, Cw - 16, rowHeight);
                 Color dot = item.Category >= 0 && item.Category < colors.Length ? colors[item.Category] : Csub;
-                using (SolidBrush brush = new SolidBrush(dot)) g.FillEllipse(brush, Cx + 18, y + 11, 6, 6);
-                AppText(g, item.Name, _fBody, Ctext, new RectangleF(Cx + 32, y, 240, 20), false);
-                AppText(g, item.Detail, _fSmall, Csub, new RectangleF(Cx + 32, y + 17, 240, 14), false);
-                AppText(g, ActivityMonitor.FormatDuration(item.Seconds), _fBody, Csub, new RectangleF(340, y + 5, 100, 22), true);
-                AppText(g, Analysis.FmtCount((long)item.Inputs), _fBody, Ctext, new RectangleF(440, y + 5, 90, 22), true);
-                AppText(g, AppFlow.ApmText(item.Apm), _fBody, i < 3 ? Cblue : Ctext, new RectangleF(540, y + 5, 70, 22), true);
-                RectangleF bar = new RectangleF(620, y + 12, 180, 8);
+                using (SolidBrush brush = new SolidBrush(dot)) g.FillEllipse(brush, Cx + 18, y + rowShift + 11, 6, 6);
+                AppText(g, item.Name, _fBody, Ctext, new RectangleF(Cx + 32, y + rowShift, 240, 20), false);
+                AppText(g, item.Detail, _fSmall, Csub, new RectangleF(Cx + 32, y + rowShift + 17, 240, 14), false);
+                AppText(g, ActivityMonitor.FormatDuration(item.Seconds), _fBody, Csub, new RectangleF(340, y + rowShift + 5, 100, 22), true);
+                AppText(g, Analysis.FmtCount((long)item.Inputs), _fBody, Ctext, new RectangleF(440, y + rowShift + 5, 90, 22), true);
+                AppText(g, AppFlow.ApmText(item.Apm), _fBody, i < 3 ? Cblue : Ctext, new RectangleF(540, y + rowShift + 5, 70, 22), true);
+                RectangleF bar = new RectangleF(620, y + rowShift + 12, 180, 8);
                 using (SolidBrush track = new SolidBrush(Color.FromArgb(28, Ctext))) g.FillRectangle(track, bar);
                 double fraction = totals.Apm > 0 ? item.Apm / (totals.Apm * 2) : 0;
                 fraction = Math.Max(0, Math.Min(1, fraction));
                 using (SolidBrush brush = new SolidBrush(i == 0 ? Cblue : Ccyan))
                     g.FillRectangle(brush, bar.X, bar.Y, Math.Max(2f, (float)(bar.Width * fraction)), bar.Height);
-                if (new RectangleF(Cx + 8, y, Cw - 16, 31).Contains(mouse))
+                if (new RectangleF(Cx + 8, y, Cw - 16, rowHeight).Contains(mouse))
                 {
                     double share = totals.Inputs > 0 ? item.Inputs * 100.0 / totals.Inputs : 0;
                     reason = item.Name + "：击键 " + Analysis.FmtCount(item.Keys) + " · 点击 " + Analysis.FmtCount(item.Clicks)
@@ -759,14 +797,15 @@ namespace KeyMouseStats
             }
             if (ranked.Count == 0)
             {
-                AppText(g, "当前范围没有足够的前台活跃时长", _fNum2, Ctext, new RectangleF(Cx + 60, 380, Cw - 120, 40), false);
+                float emptyShift = Math.Max(0f, (bodyH - 226f) * 0.5f);
+                AppText(g, "当前范围没有足够的前台活跃时长", _fNum2, Ctext, new RectangleF(Cx + 60, bodyTop + 58f + emptyShift, Cw - 120, 40), false);
                 AppText(g, "应用时长从带前台观测的版本开始累计；样本不足 60 秒的应用不参与 APM 排名。", _fBody, Csub,
-                    new RectangleF(Cx + 60, 425, Cw - 120, 30), false);
+                    new RectangleF(Cx + 60, bodyTop + 103f + emptyShift, Cw - 120, 30), false);
             }
-            AppText(g, reason, _fSmall, Csub, new RectangleF(Cx + 18, 548, Cw - 36, 18), false);
+            AppText(g, reason, _fSmall, Csub, new RectangleF(Cx + 18, footTop, Cw - 36, 18), false);
             AppText(g, "共 " + ranked.Count + " 个应用参与 · 另有 " + excluded + " 个活跃不足 "
                 + AppFlow.MinApmSeconds.ToString("0", CultureInfo.InvariantCulture) + " 秒未参与 · 与「键位构成」共用当前筛选",
-                _fSmall, Csub, new RectangleF(Cx + 18, 566, Cw - 36, 18), false);
+                _fSmall, Csub, new RectangleF(Cx + 18, footTop + 18, Cw - 36, 18), false);
         }
 
         private Color[] AppShareColors()
@@ -829,7 +868,7 @@ namespace KeyMouseStats
                 AppText(g, (slice.Share * 100).ToString("0.0", CultureInfo.InvariantCulture) + "%", _fBody, Ctext,
                     new RectangleF(Cx + 610, rowY + 3, 74, 22), true);
                 AppText(g, "APM " + AppFlow.ApmText(slice.Apm), _fSmall, i == 0 ? Cblue : Csub,
-                    new RectangleF(Cx + 694, rowY + 3, 120, 22), true);
+                    new RectangleF(ContentRight - 120, rowY + 3, 120, 22), true);
                 if (new RectangleF(Cx + 300, rowY - 2, Cw - 316, 30).Contains(mouse) || i == active)
                 {
                     reason = slice.Name + " · 时长 " + ActivityMonitor.FormatDuration(slice.Seconds)

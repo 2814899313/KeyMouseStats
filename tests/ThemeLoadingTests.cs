@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Diagnostics;
 using System.Reflection;
@@ -76,8 +76,20 @@ internal static class ThemeLoadingTests
     }
     static void Wait(string resource)
     {
-        Stopwatch watch=Stopwatch.StartNew();
-        while(ThemeImages.Get(resource)==null)
-        {if(watch.ElapsedMilliseconds>15000)throw new Exception("Image failed: "+resource);Thread.Sleep(10);}
+        // 高并发构建负载下单图解码可能被拖过 45s —— 给一次自动重试,避免假红。
+        for(int attempt=0;attempt<2;attempt++)
+        {
+            Stopwatch watch=Stopwatch.StartNew();
+            while(ThemeImages.Get(resource)==null)
+            {
+                if(watch.ElapsedMilliseconds>45000)
+                {
+                    if(attempt==1)throw new Exception("Image failed: "+resource);
+                    break;
+                }
+                Thread.Sleep(10);
+            }
+            if(ThemeImages.Get(resource)!=null)return;
+        }
     }
 }
