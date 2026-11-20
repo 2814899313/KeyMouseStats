@@ -15,7 +15,28 @@ namespace KeyMouseStats
     internal sealed partial class Dashboard
     {
         private TimelineDrag _timelineDrag = new TimelineDrag();
-        private bool _flowTagged;
+        private FlowBoardData _flowData;
+        private DateTime _flowDataDay = DateTime.MinValue;
+        private DateTime _flowDataAt = DateTime.MinValue;
+        private DateTime _flowTaggedDay = DateTime.MinValue;
+
+        /// <summary>切到洞察页/换日期/定时器时准备;SQLite 读取与标签回写都不在 Paint 内。</summary>
+        internal void PrepareFlowData(bool force)
+        {
+            if (!FlowBoard.Available) { _flowData = null; return; }
+            DateTime day = _insightDay.Date;
+            bool sameDay = _flowData != null && _flowDataDay == day;
+            if (!force && sameDay && (DateTime.Now - _flowDataAt).TotalSeconds < 30) return;
+            FlowBoardData data = FlowBoard.Get(day);
+            _flowData = data;
+            _flowDataDay = day;
+            _flowDataAt = DateTime.Now;
+            if (data != null && data.HasData && data.Report != null && _flowTaggedDay != day)
+            {
+                _flowTaggedDay = day;
+                FlowBoard.TagSessions(data);
+            }
+        }
 
         private static readonly Color FlowDeep = Color.FromArgb(74, 122, 214);      // 深蓝
         private static readonly Color FlowNormal = Color.FromArgb(64, 196, 190);    // 晴青
@@ -43,23 +64,25 @@ namespace KeyMouseStats
             return (minutes / 60) + "h" + (minutes % 60 == 0 ? "" : (minutes % 60) + "m");
         }
 
-        /// <summary>卡片几何:锚在内容区底部,随 Cb 上下浮动。</summary>
-        private void FlowBoardRect(out float x, out float y, out float w, out float h)
+        /// <summary>卡片几何:锚在内容区底部,随 Cb 上下浮动。空间不足时返回 false(整卡隐藏)。</summary>
+        private bool FlowBoardRect(out float x, out float y, out float w, out float h)
         {
             x = Cx;
             w = Cw;
-            // 上沿固定钉在 y=598(既有内容收在 ~588),高度随 ElasticH 向下长,绝不向上压内容。
+            // 上沿固定钉在 y=598(既有内容收在 586),高度随 ElasticH 向下长,绝不向上压内容。
             y = Cy + 500f;
             h = 96f + ElasticH;
-            float limit = Cy + Cb - y - 8f;   // 底边严格收口在页脚横线之上
+            float limit = PageBottom - y - 8f;   // 底边严格收口在页脚分割线之上
+            if (limit < 76f) { h = 0f; return false; }   // 1072 基准高度没有余量:整卡隐藏,绝不压页脚
             if (h > limit) h = limit;
             if (h < 76f) h = 76f;
+            return true;
         }
 
         private void PaintFlowBoard(Graphics g)
         {
             float x, y, w, h;
-            FlowBoardRect(out x, out y, out w, out h);
+            if (!FlowBoardRect(out x, out y, out w, out h)) return;
             PaintCard(g, x, y, w, h, "深度心流与专注洞察");
 
             // 清爽版:显式能力探测降级(ShadowPipeline.Available 的第一个消费者)
@@ -69,16 +92,11 @@ namespace KeyMouseStats
                 return;
             }
 
-            FlowBoardData data = FlowBoard.Get(_insightDay);
+            FlowBoardData data = _flowData != null && _flowDataDay == _insightDay.Date ? _flowData : null;
             if (data == null || !data.HasData || data.Report == null)
             {
                 DrawFlowCapsule(g, x + 20, y + 42, w - 40);
                 return;
-            }
-            if (!_flowTagged)
-            {
-                FlowBoard.TagSessions(data);
-                _flowTagged = true;
             }
 
             float pad = 20f;
@@ -292,6 +310,12 @@ namespace KeyMouseStats
             return _timelineDrag.HitTrack(cx, cy);
         }
 
-        private void ResetFlowTagCache() { _flowTagged = false; }
+        private void ResetFlowTagCache()
+        {
+            _flowData = null;
+            _flowDataDay = DateTime.MinValue;
+            _flowDataAt = DateTime.MinValue;
+            _flowTaggedDay = DateTime.MinValue;
+        }
     }
 }

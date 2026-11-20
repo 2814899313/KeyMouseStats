@@ -52,7 +52,7 @@ namespace KeyMouseStats
         internal static void Button(Graphics g,RectangleF r,bool selected,bool hover)
         {
             Color glow=selected?ArtTheme.Current.Cyan:hover?ArtTheme.Current.Orange:ArtTheme.Current.Line;
-            using(GraphicsPath p=Dashboard.RoundedRect(r.X,r.Y,r.Width,r.Height,7))
+            using(GraphicsPath p=UiPrimitives.RoundedRect(r.X,r.Y,r.Width,r.Height,7))
             using(LinearGradientBrush fill=new LinearGradientBrush(r,selected?Color.FromArgb(238,17,68,73):Color.FromArgb(226,8,27,38),Color.FromArgb(232,5,15,24),90))
             using(Pen edge=new Pen(Color.FromArgb(selected||hover?225:135,glow),selected?1.8f:1f)){g.FillPath(fill,p);g.DrawPath(edge,p);}
             using(Pen line=new Pen(Color.FromArgb(selected?210:95,glow),1.2f))g.DrawBezier(line,r.X+8,r.Bottom-4,r.X+r.Width*.34f,r.Bottom-8,r.X+r.Width*.66f,r.Bottom,r.Right-8,r.Bottom-4);
@@ -64,7 +64,7 @@ namespace KeyMouseStats
         {
             int ornament=key.Label=="Space"?15:key.Label.StartsWith("F")||key.Label=="Esc"?1:key.Label.Length==1&&char.IsDigit(key.Label[0])?7:key.Label.Length==1&&char.IsLetter(key.Label[0])?0:4;
             float size=Math.Min(rect.Height*.48f,champion?19:13);Ornament(g,ornament,new RectangleF(rect.Right-size-2,rect.Y+2,size,size),champion?.94f:.42f);
-            using(Pen edge=new Pen(Color.FromArgb(champion?230:90,champion?ArtTheme.Current.Orange:ArtTheme.Current.Cyan),champion?1.55f:.8f))g.DrawPath(edge,Dashboard.RoundedRect(rect.X+2,rect.Y+2,Math.Max(1,rect.Width-4),Math.Max(1,rect.Height-4),4));
+            using(Pen edge=new Pen(Color.FromArgb(champion?230:90,champion?ArtTheme.Current.Orange:ArtTheme.Current.Cyan),champion?1.55f:.8f))g.DrawPath(edge,UiPrimitives.RoundedRect(rect.X+2,rect.Y+2,Math.Max(1,rect.Width-4),Math.Max(1,rect.Height-4),4));
         }
         internal static void Loading(Graphics g,float x,float y,int frame)
         {

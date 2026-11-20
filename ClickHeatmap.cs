@@ -686,6 +686,7 @@ namespace KeyMouseStats
         private bool _clickActionView;
         private MouseActionStats _mouseActionCache;
         private int _mouseActionRange = -1;
+        private long _mouseActionSignature;
         private RectangleF _mouseActionInfoRect;
         private bool _mouseActionInfoHover;
 
@@ -885,8 +886,7 @@ namespace KeyMouseStats
             float cellH = Math.Min(120f, Math.Max(56f, gridAvail / 3f));
             float gridY = gridTop + Math.Max(0f, (gridAvail - cellH * 3f) / 2f);
             float gridX = Cx + heatLeft + 28, gridW = Math.Max(72f, Cw - heatLeft - 44f), cellW = gridW / 3f;
-            PointF gridMouse = ToBase(_mouse);
-            gridMouse = new PointF(gridMouse.X - ContentX, gridMouse.Y - ContentY);
+            PointF gridMouse = MouseContent();
             _clickGridRects.Clear();
             _clickGridHover = -1;
             long regionMax = 0;
@@ -965,26 +965,55 @@ namespace KeyMouseStats
             if (aggregate.OffRegion > 0) notes.Add("其他屏幕 " + Analysis.FmtCount(aggregate.OffRegion) + " 次");
             if (aggregate.Vacant > 0) notes.Add("屏幕间空隙 " + Analysis.FmtCount(aggregate.Vacant) + " 次");
             if (aggregate.Outside > 0) notes.Add("旧布局位置 " + Analysis.FmtCount(aggregate.Outside) + " 次");
+            int noteLines = 0;
             if (notes.Count > 0)
-                AppText(g, string.Join(" · ", notes.ToArray()), _fSmall, Csub,
-                    new RectangleF(legendX, rowY + 24, 194, 18), false);
+            {
+                noteLines = Math.Min(3, notes.Count);
+                for (int i = 0; i < noteLines; i++)
+                    AppText(g, notes[i], _fSmall, Csub, new RectangleF(legendX, rowY + 24 + i * 16, legendW, 16), false);
+            }
 
-            // 颜色图例:标出真实次数范围,不用悬停去猜。
-            float legendY = rowY + 44;
-            ChannelScale.Bar(g, new RectangleF(legendX, legendY, 184, 8), _clickChannel);
+            // 颜色图例:标出真实次数范围,不用悬停去猜。图例宽度与标签都跟着右卡宽度走,
+            // 不再把 2K 的「1 次 / 中点 / 最大」钉在左卡上或压出省略号。
+            float legendY = rowY + 24 + noteLines * 16 + (noteLines > 0 ? 8 : 0);
+            float barW = Math.Min(240f, legendW);
+            ChannelScale.Bar(g, new RectangleF(legendX, legendY, barW, 8), _clickChannel);
             long legendMax = aggregate.Max;
             AppText(g, legendMax > 0 ? "1 次" : "0 次", _fSmall, Csub, new RectangleF(legendX, legendY + 10, 40, 16), false);
             AppText(g, legendMax > 1 ? Analysis.FmtCount(Math.Max(1, legendMax / 2)) + " 次" : "", _fSmall, Csub,
-                new RectangleF(Cx + 700, legendY + 10, 50, 16), true);
+                new RectangleF(legendX + barW / 2f - 24, legendY + 10, 52, 16), true);
             AppText(g, legendMax > 0 ? Analysis.FmtCount(legendMax) + " 次" : "--", _fSmall, Csub,
-                new RectangleF(Cx + 784, legendY + 10, 42, 16), true);
+                new RectangleF(legendX + barW - 58, legendY + 10, 58, 16), true);
         }
 
         private MouseActionStats MouseActionData()
         {
-            // 页面在采集期间会持续重绘；直接重建 30 天的轻量聚合，保证样本数不会停留在首帧。
-            _mouseActionCache = MouseActionStats.Build(ClickRangeDays());
+            // 悬停重绘不应反复跑 30 天聚合:按「区间 + 每日 Cross 计数」签名缓存。
+            List<DayRecord> days = new List<DayRecord>(ClickRangeDays());
+            long signature = _clickRange;
+            for (int i = 0; i < days.Count; i++)
+            {
+                DayRecord day = days[i];
+                if (day == null) { signature = signature * 31 + 1; continue; }
+                signature = signature * 31 + day.Date.Ticks;
+                CrossDay c = day.Cross;
+                if (c == null) { signature = signature * 31 + 2; continue; }
+                signature = signature * 31 + c.Packets;
+                signature = signature * 31 + c.CalibratedPackets;
+                signature = signature * 31 + c.Flicks;
+                signature = signature * 31 + c.Reversals;
+                signature = signature * 31 + c.Clicks;
+                signature = signature * 31 + c.MoveClicks;
+                signature = signature * 31 + BitConverter.DoubleToInt64Bits(c.PathCounts);
+                signature = signature * 31 + BitConverter.DoubleToInt64Bits(c.DragCounts);
+                for (int d = 0; d < 4; d++)
+                    signature = signature * 31 + BitConverter.DoubleToInt64Bits(c.Direction[d]);
+            }
+            if (_mouseActionCache != null && _mouseActionRange == _clickRange && _mouseActionSignature == signature)
+                return _mouseActionCache;
+            _mouseActionCache = MouseActionStats.Build(days);
             _mouseActionRange = _clickRange;
+            _mouseActionSignature = signature;
             return _mouseActionCache;
         }
 
@@ -1001,8 +1030,7 @@ namespace KeyMouseStats
             // 样本徽标:版本与过滤规则不再常驻页脚。
             float badgeX = Cx + Cw - 216, badgeY = 150;
             _mouseActionInfoRect = new RectangleF(badgeX, badgeY, 196, 24);
-            PointF badgeMouse = ToBase(_mouse);
-            badgeMouse = new PointF(badgeMouse.X - ContentX, badgeMouse.Y - ContentY);
+            PointF badgeMouse = MouseContent();
             _mouseActionInfoHover = Hit(_mouseActionInfoRect, badgeMouse);
             using (GraphicsPath pill = RoundedRect(badgeX, badgeY, 196, 24, 12))
             using (SolidBrush fill = new SolidBrush(Color.FromArgb(16, Ctext))) g.FillPath(fill, pill);
@@ -1373,7 +1401,7 @@ namespace KeyMouseStats
             key = 0;
             cellX = cellY = 0;
             PointF point = ToBase(_mouse);
-            point = new PointF(point.X - ContentX, point.Y - ContentY);
+            point = ToContent(point);
             if (_clickProjection == null || !_clickTray.Contains(point)) return false;
             int sx, sy;
             if (!_clickProjection.TryUnproject(point, out sx, out sy)) return false;
@@ -1416,7 +1444,7 @@ namespace KeyMouseStats
             _hoverDetail = "点击热区 " + ClickRangeName() + " · " + line1 + " · " + line2;
 
             PointF basePoint = ToBase(_mouse);
-            PointF contentPoint = new PointF(basePoint.X - ContentX, basePoint.Y - ContentY);
+            PointF contentPoint = ToContent(basePoint);
             using (Font font = new Font("Microsoft YaHei UI", 11, FontStyle.Regular, GraphicsUnit.Pixel))
             {
                 SizeF size1 = g.MeasureString(line1, font);

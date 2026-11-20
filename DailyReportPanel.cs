@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
+using System.IO;
 using System.Windows.Forms;
 
 namespace KeyMouseStats
@@ -16,6 +17,7 @@ namespace KeyMouseStats
     internal sealed partial class Dashboard
     {
         private DailyReport _dayReport;
+        private bool _dayReportArchived;
         private DateTime _dayShown = DateTime.MinValue;
         private RectangleF _dayPrevRect, _dayNextRect;
         private readonly List<RectangleF> _dayHoverRects = new List<RectangleF>();
@@ -31,12 +33,19 @@ namespace KeyMouseStats
             if (_dayShown == DateTime.MinValue) _dayShown = DefaultDay;
             if (_dayReport != null && _dayReport.Day == _dayShown) return;
             _dayReport = DailyReport.Build(_dayShown);
+            _dayReportArchived = _dayReport != null && File.Exists(_dayReport.FilePath);
+        }
+
+        /// <summary>切到日报页/换日期时调用;绘制路径只消费已建好的报告。</summary>
+        internal void PrepareDayPage()
+        {
+            EnsureDayReport();
         }
 
         private void ApplyDayChip(int id)
         {
             if (id == 425) { ToggleBattleMask(); return; }
-            if (id == 426) { GenerateBattleReport(); return; }
+            if (id == 426) { ShowReportExportMenu(); return; }
             if (id == 420)
             {
                 if (!CanStepDay(-1)) return;      // 到 364 天下界就停,不再翻进没有数据的年份
@@ -59,6 +68,7 @@ namespace KeyMouseStats
         {
             EnsureDayReport();
             string path = _dayReport.Save();
+            _dayReportArchived = path.Length > 0;
             if (path.Length > 0) SetStatus("已保存至本地日报目录");
             else ThemeMessage.Show(this, "写文件失败，检查数据目录权限。", "日报保存失败",
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -79,8 +89,8 @@ namespace KeyMouseStats
 
         private void PaintDay(Graphics g)
         {
-            EnsureDayReport();
             DailyReport r = _dayReport;
+            if (r == null) return;
             _dayHoverRects.Clear();
             _dayHoverTexts.Clear();
 
@@ -394,6 +404,45 @@ namespace KeyMouseStats
                 for (int i = 0; i < legendLines.Count && i < 2; i++)
                     AppText(g, legendLines[i], _fAxis, Csub,
                         new RectangleF(x + 18, barY + legendGap + i * lineStep, barW, lineStep), false);
+
+                // 2K 下把条形图与页脚之间的余量交给「构成明细」:每类字数与占比逐行列清,
+                // 不再让「字符构成」卡下半张空着。基准高度不进入这段代码,旧截图逐像素不变。
+                if (growth > 80f)
+                {
+                    float tableTop = barY + 8f + legendGap + Math.Min(2, legendLines.Count) * lineStep + 22f;
+                    float tableBottom = y + h - 46f;
+                    int rows = 0;
+                    for (int i = 0; i < r.Composition.Length; i++) if (r.Composition[i] > 0) rows++;
+                    if (rows > 0 && tableBottom - tableTop >= rows * 20f)
+                    {
+                        float rowH = Math.Min(30f, (tableBottom - tableTop) / rows);
+                        int row = 0;
+                        for (int i = 0; i < r.Composition.Length; i++)
+                        {
+                            if (r.Composition[i] <= 0) continue;
+                            float ry = tableTop + row * rowH;
+                            using (SolidBrush dot = new SolidBrush(CompositionColor(i)))
+                                g.FillEllipse(dot, x + 18, ry + rowH / 2f - 3f, 6, 6);
+                            AppText(g, RimeSlice.CompositionNames[i], _fSmall, Ctext,
+                                new RectangleF(x + 32, ry, 90, rowH), false);
+                            AppText(g, Analysis.FmtCount(r.Composition[i]) + " 字", _fSmall, Csub,
+                                new RectangleF(x + 128, ry, 100, rowH), false);
+                            AppText(g, (r.Composition[i] * 100.0 / total).ToString("0.0", CultureInfo.InvariantCulture) + "%",
+                                _fSmall, i == 0 ? Cblue : Csub, new RectangleF(x + w - 74, ry, 56, rowH), true);
+                            row++;
+                        }
+                    }
+                }
+            }
+
+            if (growth > 80f)
+            {
+                string rhythm = "最长连续 " + r.LongestBurstMinutes + " 分钟 · "
+                    + Analysis.FmtCount(r.LongestBurstChars) + " 字 · 峰值 "
+                    + (r.BusiestCharHour >= 0 ? r.BusiestCharHour + " 时 " + Analysis.FmtCount(r.BusiestCharHourChars) + " 字" : "—")
+                    + " · 平均 " + r.AvgCharsPerCommit.ToString("0.0", CultureInfo.InvariantCulture) + " 字/次";
+                AppText(g, rhythm, _fAxis, Csub, new RectangleF(x + 18, y + h - 92, w - 36, 16), false);
+                using (Pen pen = new Pen(Cline)) g.DrawLine(pen, x + 18, y + h - 68, x + w - 18, y + h - 68);
             }
 
             if (r.TopChars.Count > 0)
@@ -437,6 +486,7 @@ namespace KeyMouseStats
             float spread = LayoutFrame.Clamp(growth / 300f, 0f, 1f);
             float gap = 6f + (fillGap - 6f) * spread;
             if (gap < 6f) gap = 6f;
+            if (gap > 40f) gap = 40f;   // 条目间距有上限,余量交给整体居中,不再把两条提醒拉到卡片两端
 
             float ry = top;
             float slack = body - (totalLines * lineH + (items - 1) * gap);
@@ -460,6 +510,28 @@ namespace KeyMouseStats
                     ry += lineH;
                 }
                 ry += gap;
+            }
+
+            // 大屏上把卡片底部余量交给「今日主题词」,与日报/长图使用同一套实词过滤结果。
+            if (growth > 80f && ry < y + h - 96f)
+            {
+                List<string> words = r.TopPhrases.Count > 0 ? r.TopPhrases : r.TopContentChars;
+                if (words.Count > 0)
+                {
+                    AppText(g, "今日主题词", _fSmall, Csub, new RectangleF(x + 18, y + h - 74, w - 36, 16), false);
+                    float cx = x + 18;
+                    for (int i = 0; i < words.Count && i < 3; i++)
+                    {
+                        float cw = Math.Min(w - 36, g.MeasureString(words[i], _fAxis).Width + 16);
+                        if (cx + cw > x + w - 18) break;
+                        using (GraphicsPath chip = RoundedRect(cx, y + h - 52, cw, 22, 11))
+                        using (SolidBrush fill = new SolidBrush(Color.FromArgb(26, Cblue))) g.FillPath(fill, chip);
+                        AppText(g, words[i], _fAxis, Ctext, new RectangleF(cx, y + h - 52, cw, 22), true);
+                        cx += cw + 6;
+                    }
+                }
+                AppText(g, "提醒按当日数据生成 · 仅本地", _fAxis, Csub,
+                    new RectangleF(x + 18, y + h - 24, w - 36, 14), false);
             }
         }
         // ---------------------------------------------------------------- 每日自动生成
@@ -488,7 +560,6 @@ namespace KeyMouseStats
         /// <summary>页脚一句话:看的是哪一天、跟谁比、存到哪。</summary>
         private string DayFooterHint()
         {
-            EnsureDayReport();
             DailyReport r = _dayReport;
             if (r == null) return "日报 · 正在生成";
             string hint = "日报 · " + r.Day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);

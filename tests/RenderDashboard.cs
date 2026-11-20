@@ -209,8 +209,8 @@ internal static class RenderDashboard
             typeof(Dashboard).GetMethod("OnKeyDown",Private).Invoke(form,new object[]{new KeyEventArgs(Keys.Right)});
             if((int)Enum.ToObject(tabField.FieldType,tabField.GetValue(form))==before)
                 throw new Exception("the right arrow did not change page");
-            // 1.8.0:换页淡入的关键帧预览。离屏渲染默认不做动效,这里用假时钟显式推进时间轴,
-            // 于是同一段动画可以稳定地取到 0% / 50% / 100% 三帧。
+            // 3.0:换页直接纯矢量重绘,不再有整页快照。这里仍取 0% / 50% / 100% 三帧,
+            // 用于确认换页过程中不会重新出现旧页残影。
             Motion.ResetForTests();
             Motion.UseFakeClock(100000);
             Motion.Live = true;

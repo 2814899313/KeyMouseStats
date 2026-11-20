@@ -593,6 +593,8 @@ internal static class SegmentTrayTests
         SetField(form, "_s", 1f);
         form.ClientSize = new Size(1072, 724);
         SetField(form, "_tab", Enum.ToObject(typeof(Dashboard).GetNestedType("TabId", BindingFlags.NonPublic), tab));
+        if (tab == 6) form.PrepareTextPage();
+        else if (tab == 7) form.PrepareDayPage();
         return form;
     }
 

@@ -331,7 +331,7 @@ namespace KeyMouseStats
 
             string detail = count == 0 ? "所选日期没有此指标的小时记录。" : lines.Count == 1
                 ? "当前小时未走完，以空心环标注「进行中」；阴影区域尚未来到。" : "每个日期一条曲线；所选日加粗，摘要以其余日期的同期均值为基准。";
-            PointF mouse = ToBase(_mouse); mouse = new PointF(mouse.X - ContentX, mouse.Y - ContentY);
+            PointF mouse = MouseContent();
             if (new RectangleF(left - 8, top, right - left + 16, bottom - top + 24).Contains(mouse))
             {
                 int h = Math.Max(0, Math.Min(23, (int)Math.Round((mouse.X - left) / (right - left) * 23)));
@@ -408,7 +408,7 @@ namespace KeyMouseStats
             {
                 float ry = y + pad + i * rowH;
                 RectangleF row = new RectangleF(x + 6, ry, w - 12, rowH - 2);
-                bool hover = Hit(row, new PointF(ToBase(_mouse).X - ContentX, ToBase(_mouse).Y - ContentY));
+                bool hover = Hit(row, MouseContent());
                 if (hover || selected == i)
                 {
                     using (GraphicsPath path = RoundedRect(row.X, row.Y, row.Width, row.Height, 7))

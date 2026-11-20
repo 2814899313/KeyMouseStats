@@ -11,7 +11,7 @@ using System.Reflection;
 [assembly: AssemblyVersion(KeyMouseStats.BuildInfo.FileVersion)]
 [assembly: AssemblyFileVersion(KeyMouseStats.BuildInfo.FileVersion)]
 #if CLEAN_EDITION
-[assembly: AssemblyInformationalVersion(KeyMouseStats.BuildInfo.Version + "-clean")]
+[assembly: AssemblyInformationalVersion(KeyMouseStats.BuildInfo.Version)]
 #else
 [assembly: AssemblyInformationalVersion(KeyMouseStats.BuildInfo.Version)]
 #endif

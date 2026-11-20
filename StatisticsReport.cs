@@ -136,7 +136,7 @@ namespace KeyMouseStats
             }
             List<double> prior=PersonalStats.History(date.AddDays(-1),30,delegate(DayRecord d){return d.Keys;});observed=prior.Count;priorMean=PersonalStats.Mean(prior);
             long bestPeak=0;DateTime bestPeakDate=DateTime.MinValue;
-            foreach(DayRecord record in Store.History.Values)
+            foreach(DayRecord record in Store.SnapshotHistory())
             {
                 if(record==null||record.PeakApm<=bestPeak)continue;
                 bestPeak=record.PeakApm;bestPeakDate=record.Date;

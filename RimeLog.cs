@@ -137,6 +137,8 @@ namespace KeyMouseStats
         public string Path = "";
         public long Chars, Commits, Hanzi;
         public readonly Dictionary<int, long> CharCounts = new Dictionary<int, long>();
+        /// <summary>该应用自己的 2–4 字词组频次，用于「输出应用」的特征词胶囊。</summary>
+        public readonly Dictionary<string, long> PhraseCounts = new Dictionary<string, long>(StringComparer.Ordinal);
 
         public List<KeyValuePair<int, long>> TopChars(int limit)
         {
@@ -148,6 +150,121 @@ namespace KeyMouseStats
             });
             if (limit > 0 && list.Count > limit) list.RemoveRange(limit, list.Count - limit);
             return list;
+        }
+
+        /// <summary>
+        /// 输出应用卡片上的特征词:先取 2–4 字词组(过滤虚词与互相包含的 n-gram),
+        /// 不够 limit 个时用实词单字兜底。返回顺序即胶囊展示顺序。
+        /// </summary>
+        public List<KeyValuePair<string, long>> FeatureWords(int limit)
+        {
+            List<KeyValuePair<string, long>> picked = RimePhraseFilter.PickPhrases(PhraseCounts, limit);
+            if (picked.Count >= limit) return picked;
+            HashSet<string> contained = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < picked.Count; i++)
+                for (int k = 0; k < picked[i].Key.Length; k++) contained.Add(picked[i].Key.Substring(k, 1));
+            List<KeyValuePair<int, long>> chars = TopChars(32);
+            for (int i = 0; i < chars.Count && picked.Count < limit; i++)
+            {
+                int code = chars[i].Key;
+                if (!RimeText.IsCjk(code)) continue;
+                string name = RimeText.DisplayName(code);
+                if (name.Length != 1 || contained.Contains(name)) continue;
+                if (RimePhraseFilter.IsFunctionChar(name[0])) continue;
+                contained.Add(name);
+                picked.Add(new KeyValuePair<string, long>(name, chars[i].Value));
+            }
+            return picked;
+        }
+
+        /// <summary>悬停画像里的实词单字 Top N(不排除词组中已出现的字)。</summary>
+        public List<KeyValuePair<string, long>> ContentChars(int limit)
+        {
+            List<KeyValuePair<string, long>> list = new List<KeyValuePair<string, long>>();
+            List<KeyValuePair<int, long>> chars = TopChars(48);
+            for (int i = 0; i < chars.Count && list.Count < limit; i++)
+            {
+                int code = chars[i].Key;
+                if (!RimeText.IsCjk(code)) continue;
+                string name = RimeText.DisplayName(code);
+                if (name.Length != 1 || RimePhraseFilter.IsFunctionChar(name[0])) continue;
+                list.Add(new KeyValuePair<string, long>(name, chars[i].Value));
+            }
+            return list;
+        }
+    }
+
+    /// <summary>
+    /// 词组级虚词过滤与 n-gram 去重。日报「主题词」与字符页「输出应用」共用同一套规则,
+    /// 避免同一个词在一处被当成特征词、在另一处又被当成虚词。
+    /// </summary>
+    internal static class RimePhraseFilter
+    {
+        private const string FunctionChars =
+            "的了是在我你他她它这那有和与就都也不吗呢吧啊一上个上下中大小到说要会着过很还被把让给对从而为以于之其或及等能可没好又再最更如若但因所但然后现今明昨";
+
+        private static readonly HashSet<string> FunctionPhrases = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "今天", "明天", "昨天", "现在", "我们", "你们", "他们", "这个", "那个", "什么",
+            "怎么", "可以", "因为", "所以", "但是", "如果", "然后", "已经", "还是", "就是",
+            "没有", "不是", "一个", "一下", "这样", "那样", "时候", "自己", "大家", "东西",
+            "问题", "觉得", "知道", "看到", "起来", "出来", "一些", "这些", "那些", "的话",
+            "之后", "之前", "以及", "或者", "而且", "不过", "只是", "真是", "有点", "非常",
+            "可能", "应该", "需要", "进行", "通过", "对于", "关于", "由于", "因此", "其实",
+            "其中", "目前", "今年", "去年", "明年"
+        };
+
+        internal static bool IsFunctionChar(char c)
+        {
+            return FunctionChars.IndexOf(c) >= 0;
+        }
+
+        internal static bool IsFunctionPhrase(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return true;
+            if (FunctionPhrases.Contains(text)) return true;
+            for (int i = 0; i < text.Length; i++)
+                if (!IsFunctionChar(text[i])) return false;
+            return true;
+        }
+
+        internal static bool Overlaps(List<string> picked, string text)
+        {
+            for (int i = 0; i < picked.Count; i++)
+            {
+                if (picked[i].IndexOf(text, StringComparison.Ordinal) >= 0) return true;
+                if (text.IndexOf(picked[i], StringComparison.Ordinal) >= 0) return true;
+            }
+            return false;
+        }
+
+        internal static List<KeyValuePair<string, long>> PickPhrases(Dictionary<string, long> counts, int limit)
+        {
+            List<KeyValuePair<string, long>> picked = new List<KeyValuePair<string, long>>();
+            if (counts == null || counts.Count == 0 || limit <= 0) return picked;
+            List<KeyValuePair<string, long>> candidates = new List<KeyValuePair<string, long>>();
+            foreach (KeyValuePair<string, long> pair in counts)
+            {
+                if (string.IsNullOrEmpty(pair.Key) || pair.Key.Length < 2 || pair.Key.Length > 4) continue;
+                if (pair.Value <= 0) continue;
+                if (IsFunctionPhrase(pair.Key)) continue;
+                candidates.Add(pair);
+            }
+            candidates.Sort(delegate(KeyValuePair<string, long> a, KeyValuePair<string, long> b)
+            {
+                int byCount = b.Value.CompareTo(a.Value);
+                if (byCount != 0) return byCount;
+                int byLength = b.Key.Length.CompareTo(a.Key.Length);
+                return byLength != 0 ? byLength : string.CompareOrdinal(a.Key, b.Key);
+            });
+            List<string> texts = new List<string>();
+            for (int i = 0; i < candidates.Count && picked.Count < limit; i++)
+            {
+                if (Overlaps(texts, candidates[i].Key)) continue;
+                texts.Add(candidates[i].Key);
+                picked.Add(candidates[i]);
+            }
+            return picked;
         }
     }
 
@@ -321,7 +438,14 @@ namespace KeyMouseStats
         /// <summary>把一次上屏文本切成 2–4 字词组;只取连续汉字段,标点/字母处断开。</summary>
         public static void AddPhrases(string text, RimeSlice slice)
         {
-            if (string.IsNullOrEmpty(text) || slice == null) return;
+            if (slice == null) return;
+            AddPhrases(text, slice.PhraseCounts);
+        }
+
+        /// <summary>同一套切词规则写入任意频次字典(区间总表或单个应用的特征词表)。</summary>
+        internal static void AddPhrases(string text, Dictionary<string, long> target)
+        {
+            if (string.IsNullOrEmpty(text) || target == null) return;
             List<int> points = RimeText.CodePoints(text);
             List<int> run = new List<int>();
             for (int i = 0; i <= points.Count; i++)
@@ -337,8 +461,8 @@ namespace KeyMouseStats
                             for (int k = 0; k < length; k++) phrase.Append(char.ConvertFromUtf32(run[start + k]));
                             string key = phrase.ToString();
                             long value;
-                            slice.PhraseCounts.TryGetValue(key, out value);
-                            slice.PhraseCounts[key] = value + 1;
+                            target.TryGetValue(key, out value);
+                            target[key] = value + 1;
                         }
                 }
                 run.Clear();
@@ -851,6 +975,7 @@ namespace KeyMouseStats
                 }
 
                 RimeSlice.AddPhrases(commit.Text, slice);
+                RimeSlice.AddPhrases(commit.Text, app.PhraseCounts);
 
                 int length = points.Count;
                 if (length > 0)

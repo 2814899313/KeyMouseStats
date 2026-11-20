@@ -47,6 +47,10 @@ namespace KeyMouseStats
         public long BusiestCharHourChars;
         public readonly long[] Composition = new long[5];
         public readonly List<string> TopChars = new List<string>();
+        /// <summary>v3.0.1:相对前 7 天更有辨识度的 2–4 字词组,给日报/长图做「主题词」。</summary>
+        public readonly List<string> TopPhrases = new List<string>();
+        /// <summary>没有足够有辨识度的词组时,至少把「的/是/了」这类虚字剔掉,留下实字。</summary>
+        public readonly List<string> TopContentChars = new List<string>();
         public double AvgCharsPerCommit;
         public int LongestBurstMinutes;
         public long LongestBurstChars;
@@ -198,6 +202,95 @@ namespace KeyMouseStats
             List<KeyValuePair<int, long>> top = slice.TopChars(5);
             for (int i = 0; i < top.Count; i++)
                 report.TopChars.Add(RimeText.DisplayName(top[i].Key) + " " + Analysis.FmtCount(top[i].Value));
+
+            List<KeyValuePair<int, long>> content = slice.TopChars(24);
+            int contentAdded = 0;
+            for (int i = 0; i < content.Count && contentAdded < 3; i++)
+            {
+                if (!RimeText.IsCjk(content[i].Key)) continue;
+                string name = RimeText.DisplayName(content[i].Key);
+                if (name.Length == 1 && RimePhraseFilter.IsFunctionChar(name[0])) continue;
+                report.TopContentChars.Add(name + " " + Analysis.FmtCount(content[i].Value));
+                contentAdded++;
+            }
+
+            ReadPhrases(report, rime, slice);
+        }
+
+        private sealed class PhraseCandidate
+        {
+            public string Text = "";
+            public long Count;
+            public double Score;
+        }
+
+        /// <summary>
+        /// 从当天 2–4 字词组里挑「比平常更常出现」的词,避开虚词和上下重叠的 n-gram。
+        /// 没有足够有辨识度的词组时不填,由调用方回退到 TopChars。
+        /// </summary>
+        private static void ReadPhrases(DailyReport report, RimeTextStats rime, RimeSlice today)
+        {
+            if (today == null || today.PhraseCounts == null || today.PhraseCounts.Count == 0) return;
+
+            Dictionary<string, long> baseline = new Dictionary<string, long>(StringComparer.Ordinal);
+            try
+            {
+                RimeSlice previous = rime.Slice(report.Day.AddDays(-7), report.Day.AddDays(-1));
+                if (previous != null && previous.PhraseCounts != null) baseline = previous.PhraseCounts;
+            }
+            catch (Exception) { /* 基线读不到就按「今天第一次出现」算 */ }
+
+            List<PhraseCandidate> candidates = new List<PhraseCandidate>();
+            foreach (KeyValuePair<string, long> pair in today.PhraseCounts)
+            {
+                string text = pair.Key;
+                if (string.IsNullOrEmpty(text) || text.Length < 2 || text.Length > 4) continue;
+                if (pair.Value < 2) continue;
+                if (RimePhraseFilter.IsFunctionPhrase(text)) continue;
+
+                long baseCount;
+                baseline.TryGetValue(text, out baseCount);
+                double expected = baseCount / 7.0;
+                PhraseCandidate candidate = new PhraseCandidate();
+                candidate.Text = text;
+                candidate.Count = pair.Value;
+                candidate.Score = pair.Value / (expected + 1.0);
+                candidates.Add(candidate);
+            }
+
+            candidates.Sort(delegate(PhraseCandidate a, PhraseCandidate b)
+            {
+                int byScore = b.Score.CompareTo(a.Score);
+                if (byScore != 0) return byScore;
+                int byCount = b.Count.CompareTo(a.Count);
+                if (byCount != 0) return byCount;
+                int byLength = b.Text.Length.CompareTo(a.Text.Length);
+                if (byLength != 0) return byLength;
+                return string.CompareOrdinal(a.Text, b.Text);
+            });
+
+            List<string> picked = new List<string>();
+            for (int i = 0; i < candidates.Count && picked.Count < 3; i++)
+            {
+                if (RimePhraseFilter.Overlaps(picked, candidates[i].Text)) continue;
+                picked.Add(candidates[i].Text);
+                report.TopPhrases.Add(candidates[i].Text + " " + Analysis.FmtCount(candidates[i].Count));
+            }
+        }
+
+        private static bool IsFunctionChar(char c)
+        {
+            return RimePhraseFilter.IsFunctionChar(c);
+        }
+
+        private static bool IsFunctionPhrase(string text)
+        {
+            return RimePhraseFilter.IsFunctionPhrase(text);
+        }
+
+        private static bool Overlaps(List<string> picked, string text)
+        {
+            return RimePhraseFilter.Overlaps(picked, text);
         }
 
         /// <summary>前 7 个「有数据」的日子做日均;缺失的日子不计入分母,免得休假被算成退步。</summary>
@@ -299,7 +392,7 @@ namespace KeyMouseStats
             }
             if (lateSeconds >= 20 * 60)
                 report.Reminders.Add("22 点后还活跃了 " + ActivityMonitor.FormatDuration(lateSeconds)
-                    + "，明天的你会感谢今天的你吗。");
+                    + "，明天的你不会感谢今天的你吗。");
 
             // 主应用集中度
             if (report.Apps.Count > 0 && report.ActiveSeconds > 0)

@@ -392,11 +392,12 @@ namespace KeyMouseStats
                     if (preview.Data.Total.HoldActiveSeconds > Store.Total.HoldActiveSeconds) Store.Total.HoldActiveSeconds = preview.Data.Total.HoldActiveSeconds;
                     if (preview.Data.Total.HoldDiscarded > Store.Total.HoldDiscarded) Store.Total.HoldDiscarded = preview.Data.Total.HoldDiscarded;
                 }
+                Store.InvalidateHistorySnapshot();
                 Store.RollDay(DateTime.Today);
             }
 
             Store.Save();
-            result.TotalDays = Store.History.Count;
+            result.TotalDays = Store.SnapshotHistory().Length;
             result.KeysAfter = Store.Total.Keys;
             return result;
         }
@@ -406,13 +407,14 @@ namespace KeyMouseStats
         {
             List<ValidationIssue> issues = new List<ValidationIssue>();
             DateTime today = DateTime.Today;
-            List<DateTime> dates = new List<DateTime>(Store.History.Keys);
-            dates.Sort();
-            dates.Reverse();
+            List<DayRecord> records = new List<DayRecord>(Store.SnapshotHistory());
+            records.Sort(delegate(DayRecord a, DayRecord b) { return a.Date.CompareTo(b.Date); });
+            records.Reverse();
 
-            foreach (DateTime date in dates)
+            for (int i = 0; i < records.Count; i++)
             {
-                DayRecord day = Store.History[date];
+                DayRecord day = records[i];
+                DateTime date = day.Date;
                 ValidationIssue.Level error = ValidationIssue.Level.Error;
                 ValidationIssue.Level warning = ValidationIssue.Level.Warning;
 

@@ -60,7 +60,7 @@ namespace KeyMouseStats
             int col = kind % 6, row = kind / 6;
             Rectangle source = Rectangle.FromLTRB(col * atlas.Width / 6, row * atlas.Height / 4, (col + 1) * atlas.Width / 6, (row + 1) * atlas.Height / 4);
             GraphicsState state=g.Save();
-            using(GraphicsPath clip=Dashboard.RoundedRect(bounds.X,bounds.Y,bounds.Width,bounds.Height,Math.Min(6,Math.Min(bounds.Width,bounds.Height)*.18f)))g.SetClip(clip,CombineMode.Intersect);
+            using(GraphicsPath clip=UiPrimitives.RoundedRect(bounds.X,bounds.Y,bounds.Width,bounds.Height,Math.Min(6,Math.Min(bounds.Width,bounds.Height)*.18f)))g.SetClip(clip,CombineMode.Intersect);
             NikkiArt.DrawCached(g, atlas, source, bounds, opacity, "wuxia-ui-" + kind);g.Restore(state);
         }
 
@@ -80,7 +80,7 @@ namespace KeyMouseStats
         internal static void Button(Graphics g, RectangleF r, bool selected, bool hover)
         {
             Color edge = selected ? ArtTheme.Current.Red : hover ? ArtTheme.Current.Green : ArtTheme.Current.Orange;
-            using (GraphicsPath p = Dashboard.RoundedRect(r.X, r.Y, r.Width, r.Height, 4))
+            using (GraphicsPath p = UiPrimitives.RoundedRect(r.X, r.Y, r.Width, r.Height, 4))
             using (LinearGradientBrush fill = new LinearGradientBrush(r,
                 Color.FromArgb(selected ? 238 : 220, selected ? Color.FromArgb(93, 31, 27) : Color.FromArgb(18, 39, 39)),
                 Color.FromArgb(selected ? 232 : 220, selected ? Color.FromArgb(45, 17, 18) : Color.FromArgb(11, 24, 28)), 90))

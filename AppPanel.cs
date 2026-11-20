@@ -184,7 +184,7 @@ namespace KeyMouseStats
         private void AppChip(Graphics g, int id, float x, float y, float width, string text, bool selected)
         {
             RectangleF rect = new RectangleF(x, y, width, 30);
-            _chips.Add(rect); _chipIds.Add(id);
+            _chipLedger.Add(id, rect);
             PaintChip(g, rect, text, selected, null);
         }
 
@@ -299,9 +299,8 @@ namespace KeyMouseStats
         private void AppActionChip(Graphics g, int id, float x, float y, float width, string text)
         {
             RectangleF rect = new RectangleF(x, y, width, 30);
-            _chips.Add(rect); _chipIds.Add(id);
-            PointF mouse = ToBase(_mouse);
-            bool hover = Hit(rect, new PointF(mouse.X - ContentX, mouse.Y - ContentY));
+            _chipLedger.Add(id, rect);
+            bool hover = Hit(rect, MouseContent());
             using (GraphicsPath path = RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, 8))
             {
                 using (SolidBrush fill = new SolidBrush(hover ? Color.FromArgb(30, Cblue) : Color.FromArgb(10, Cblue))) g.FillPath(fill, path);
@@ -499,7 +498,7 @@ namespace KeyMouseStats
                     new RectangleF(Cx + 100, bodyTop + 100f + emptyShift, Cw - 200, 30), false);
             }
             string reason = "点击“手动分类”直接选用途；高级规则支持标题关键词。APM 页可看各应用的输入效率。";
-            PointF mouse = ToBase(_mouse); mouse = new PointF(mouse.X - ContentX, mouse.Y - ContentY);
+            PointF mouse = MouseContent();
             // 键位构成:记录悬停命中的行与分段,统一在行循环之后画浮动气泡(不再占用页脚)。
             AppActivity.Row keyHoverRow = null;
             long[] keyHoverGroups = null;
@@ -752,7 +751,7 @@ namespace KeyMouseStats
             AppText(g, "相对全局", _fSmall, Csub, new RectangleF(620, 300, 140, 18), false);
             using (Pen pen = new Pen(Cline)) g.DrawLine(pen, Cx + 16, 320, Cx + Cw - 16, 320);
 
-            PointF mouse = ToBase(_mouse); mouse = new PointF(mouse.X - ContentX, mouse.Y - ContentY);
+            PointF mouse = MouseContent();
             string reason = "APM = 每分钟击键 + 点击。切到「时长占比」可以看时间都花在哪儿。";
             // 与「次数」列表同一套行区口径:表头 235→322 固定,页脚 548→586 钉在卡底,
             // 中间的行距 31 → 44、行数 7 → 21,不再写死 7 行后留半屏空壳。
@@ -823,7 +822,7 @@ namespace KeyMouseStats
             Color[] colors = AppShareColors();
             PointF center = new PointF(Cx + 150, 424);
 
-            PointF mouse = ToBase(_mouse); mouse = new PointF(mouse.X - ContentX, mouse.Y - ContentY);
+            PointF mouse = MouseContent();
             int hover = ShareHoverIndex(center, 92, 24, slices, mouse);
             int legendHover = -1;
             for (int i = 0; i < slices.Count; i++)
@@ -1110,7 +1109,7 @@ namespace KeyMouseStats
                 if (!valid) { preview.Text = "输入一个稳定关键词，同一应用中包含它的标题都能匹配。\n精确窗口或更长关键词规则仍优先。"; return; }
                 HashSet<string> titles = new HashSet<string>(StringComparer.Ordinal);
                 long keys = 0; List<string> examples = new List<string>();
-                foreach (DayRecord day in Store.History.Values) foreach (AppUsage app in day.Apps.Values)
+                foreach (DayRecord day in Store.SnapshotHistory()) foreach (AppUsage app in day.Apps.Values)
                 {
                     if (!string.Equals(app.ProcessPath, path, StringComparison.OrdinalIgnoreCase)) continue;
                     if (scope.SelectedIndex == 1 && app.Title.IndexOf(keyword.Text.Trim(), StringComparison.OrdinalIgnoreCase) < 0) continue;

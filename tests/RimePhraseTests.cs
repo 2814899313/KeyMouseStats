@@ -41,6 +41,40 @@ internal static class RimePhraseTests
         Check(top.Count == 2 && top[0].Key == "键盘" && top[1].Key == "好的", "TopPhrases sorts by count and respects the limit");
         Check(slice.TopPhrases(0).Count >= 6, "no limit returns every phrase");
 
+        // 输出应用特征词:词组优先、虚词过滤、n-gram 去重、实词单字兜底。
+        RimeAppSummary app = new RimeAppSummary();
+        app.PhraseCounts["审计报告"] = 5;
+        app.PhraseCounts["审计"] = 4;       // 被「审计报告」包含,不应同时出现
+        app.PhraseCounts["性能优化"] = 3;
+        app.PhraseCounts["组合键"] = 2;
+        app.PhraseCounts["今天"] = 9;       // 全虚词,必须被过滤
+        app.CharCounts['键'] = 20;
+        app.CharCounts['鼠'] = 18;
+        app.CharCounts['审'] = 16;
+        app.CharCounts['数'] = 14;
+        app.CharCounts['据'] = 12;
+        app.CharCounts['的'] = 30;          // 虚字,不能作为单字兜底
+        app.CharCounts['，'] = 12;          // 标点,不能作为单字兜底
+        List<KeyValuePair<string, long>> words = app.FeatureWords(5);
+        Check(words.Count == 5, "feature words fill the requested slots");
+        Check(words[0].Key == "审计报告" && words[0].Value == 5, "the strongest phrase comes first");
+        bool hasOverlap = false, hasFunction = false, hasPunct = false, hasSingleFallback = false;
+        for (int i = 0; i < words.Count; i++)
+        {
+            if (words[i].Key == "审计") hasOverlap = true;
+            if (words[i].Key == "今天") hasFunction = true;
+            if (words[i].Key == "的" || words[i].Key == "，") hasPunct = true;
+            if (words[i].Key.Length == 1) hasSingleFallback = true;
+        }
+        Check(!hasOverlap, "overlapping n-grams are de-duplicated");
+        Check(!hasFunction, "function phrases never become feature words");
+        Check(!hasPunct, "function chars and punctuation never fall back into chips");
+        Check(hasSingleFallback, "single content chars fill the remaining slots");
+        List<KeyValuePair<string, long>> content = app.ContentChars(5);
+        bool contentHasFunction = false;
+        for (int i = 0; i < content.Count; i++) if (content[i].Key == "的") contentHasFunction = true;
+        Check(!contentHasFunction && content.Count > 0, "single-char profiles exclude function chars");
+
         Console.WriteLine("Rime phrases: " + checks + " checks passed");
     }
 

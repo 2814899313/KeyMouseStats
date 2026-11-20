@@ -100,14 +100,15 @@ namespace KeyMouseStats
             DateTime to = DateTime.Today;
             data.DayRange = from.ToString("yyyy-MM-dd") + ".." + to.ToString("yyyy-MM-dd");
 
-            List<DateTime> days = new List<DateTime>(Store.History.Keys);
-            days.Sort();
+            List<DayRecord> days = new List<DayRecord>(Store.SnapshotHistory());
+            days.Sort(delegate(DayRecord a, DayRecord b) { return a.Date.CompareTo(b.Date); });
             for (int i = 0; i < days.Count; i++)
             {
-                DateTime day = days[i];
+                DayRecord record = days[i];
+                if (record == null) continue;
+                DateTime day = record.Date;
                 if (day.Date < from || day.Date > to) continue;
-                DayRecord record = Store.History[day];
-                if (record == null || record.IsEmpty) continue;
+                if (record.IsEmpty) continue;
                 KmsDayRecord row = new KmsDayRecord();
                 row.Day = day.ToString("yyyy-MM-dd");
                 row.Keys = record.Keys;
@@ -156,12 +157,14 @@ namespace KeyMouseStats
                 if (!DateTime.TryParse(row.Day, out day)) continue;
                 if (Store.History.ContainsKey(day.Date)) continue;
                 DayRecord record = new DayRecord();
+                record.Date = day.Date;
                 record.Keys = row.Keys;
                 record.Clicks = row.Clicks;
                 record.Wheel = row.Wheel;
                 record.ActiveSeconds = row.ActiveSeconds;
                 Store.History[day.Date] = record;
             }
+            Store.InvalidateHistorySnapshot();
             try { Store.Save(); } catch { }
         }
     }

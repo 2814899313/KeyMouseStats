@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -8,6 +9,16 @@ using System.Text;
 
 namespace KeyMouseStats
 {
+    /// <summary>C# 5 / .NET 4.0 的 ConcurrentDictionary 只有 TryRemove;保留旧调用点的 Remove(key) 写法。</summary>
+    internal static class ConcurrentDictionaryCompat
+    {
+        internal static bool Remove<TKey, TValue>(this ConcurrentDictionary<TKey, TValue> dictionary, TKey key)
+        {
+            TValue value;
+            return dictionary.TryRemove(key, out value);
+        }
+    }
+
     internal sealed class AppUsage
     {
         public string ProcessPath = "";
@@ -413,7 +424,11 @@ namespace KeyMouseStats
             "编程", "游戏", "视频", "其他", "未分类", "办公",
             "科研", "写作", "沟通", "娱乐"
         };
-        public static readonly Dictionary<string, int> Rules = new Dictionary<string, int>(StringComparer.Ordinal);
+        // C2:UI 菜单会写规则,DbWriter 后台线程会遍历规则做窗口分类;
+        // ConcurrentDictionary 让 TryGetValue/foreach 与 Clear/Remove 并发安全,
+        // 不引入全局锁,也不改变序列化格式(每条规则仍是一行 app_rule=...)。
+        public static readonly ConcurrentDictionary<string, int> Rules =
+            new ConcurrentDictionary<string, int>(StringComparer.Ordinal);
         public const string UnattributedId = "__unattributed__";
         public const string OverflowTitle = "其他窗口（当日标题数量已达上限）";
 

@@ -124,7 +124,7 @@ internal static class MotionTests
         // ---- 帧间隔:目标 16–40 ms,慢帧留余量 ----
         Check(Motion.FrameInterval(0) == 16, "an unknown frame time floors the interval");
         Check(Motion.FrameInterval(1) == 16, "a cheap frame does not spin faster than 60 fps");
-        Check(Motion.FrameInterval(20) == 28, "the next interval follows the measured frame cost");
+        Check(Motion.FrameInterval(20) == 25, "the next interval follows the measured frame cost");
         Check(Motion.FrameInterval(1000) == 40, "an expensive frame falls back to 25 fps");
 
         // ---- 追值:按半衰期收敛,与帧率无关 ----

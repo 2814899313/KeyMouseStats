@@ -27,7 +27,7 @@ namespace KeyMouseStats
         /// <summary>示例覆盖的天数(含今天)。</summary>
         internal const int DayCount = 14;
 
-        private static Dictionary<DateTime, DayRecord> _savedHistory;
+        private static HistoryMap _savedHistory;
         private static DayRecord _savedToday;
         private static Counters _savedTotal;
         private static DateTime _savedDay;
@@ -44,8 +44,9 @@ namespace KeyMouseStats
             _savedTotal = Store.Total;
             _savedDay = Store.Day;
 
-            Dictionary<DateTime, DayRecord> built = Build();
+            HistoryMap built = Build();
             Store.History = built;
+            Store.InvalidateHistorySnapshot();
             Store.Total = Sum(built);
             Store.Day = DateTime.Today;
             DayRecord live;
@@ -64,6 +65,7 @@ namespace KeyMouseStats
         {
             if (!Active) return;
             Store.History = _savedHistory;
+            Store.InvalidateHistorySnapshot();
             Store.Today = _savedToday;
             Store.Total = _savedTotal;
             Store.Day = _savedDay;
@@ -99,14 +101,14 @@ namespace KeyMouseStats
         internal static bool IsFreshNow()
         {
             if (Active) return false;
-            return IsFreshEmpty(Store.History.Values, Store.Total.Keys);
+            return IsFreshEmpty(Store.SnapshotHistory(), Store.Total.Keys);
         }
 
         // ---------------------------------------------------------------- 生成
 
-        private static Dictionary<DateTime, DayRecord> Build()
+        private static HistoryMap Build()
         {
-            Dictionary<DateTime, DayRecord> map = new Dictionary<DateTime, DayRecord>();
+            HistoryMap map = new HistoryMap();
             Random random = new Random(20261216);
             DateTime today = DateTime.Today;
             for (int back = DayCount - 1; back >= 0; back--)

@@ -276,10 +276,10 @@ namespace KeyMouseStats
             return any ? union : Rectangle.Empty;
         }
 
-        /// <summary>按下一次重绘的实测耗时换算下一帧间隔:实测耗时 ×1.4 后夹在 16–40 ms(最快约 60 FPS,最慢 25 FPS),给慢帧留余量。</summary>
+        /// <summary>按下一次重绘的实测耗时换算下一帧间隔:实测耗时 ×1.25 后夹在 16–40 ms(最快约 60 FPS,最慢 25 FPS),给慢帧留余量。</summary>
         public static int FrameInterval(double lastFrameMs)
         {
-            double interval = lastFrameMs <= 0 ? 16 : lastFrameMs * 1.4;
+            double interval = lastFrameMs <= 0 ? 16 : lastFrameMs * 1.25;
             if (interval < 16) interval = 16;
             if (interval > 40) interval = 40;
             return (int)Math.Round(interval);

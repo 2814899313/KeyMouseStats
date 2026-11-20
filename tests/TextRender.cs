@@ -89,6 +89,7 @@ internal static class TextRender
                 SetField(form, "_tab", text);
                 SetField(form, "_textRange", 1);   // 近 7 天
                 SetField(form, "_textChart", 0);
+                form.PrepareTextPage();
 
                 SetField(form, "_textWordTab", 0);
                 SetField(form, "_textCharFilter", 0);
@@ -110,6 +111,7 @@ internal static class TextRender
 
                 SetField(form, "_textRange", 0);   // 今日:应自动切到时段
                 SetField(form, "_textChart", 1);
+                form.PrepareTextPage();
                 Render(form, "text-today", 1f);
 
                 typeof(Dashboard).GetMethod("OnFormClosed", Private).Invoke(form, new object[] { new FormClosedEventArgs(CloseReason.None) });

@@ -179,10 +179,7 @@ namespace KeyMouseStats
         internal static uint IdleMilliseconds(uint currentTick, uint lastInputTick) { return unchecked(currentTick - lastInputTick); }
         private static DayRecord GetDay(DateTime date)
         {
-            DayRecord day;
-            if (!Store.History.TryGetValue(date, out day))
-            { day = new DayRecord { Date = date }; Store.History[date] = day; }
-            return day;
+            return Store.GetOrCreateDay(date);
         }
         public static bool Tick()
         {

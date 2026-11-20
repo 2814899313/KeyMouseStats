@@ -64,14 +64,16 @@ namespace KeyMouseStats
         private void ApplyInsightChip(int id)
         {
             if (id == 204) return;   // 报告页已退役
-            if (id >= 200 && id <= 202) { _tab = TabId.Insights; _insightView = id - 200; }
+            if (id >= 200 && id <= 202) { _tab = TabId.Insights; _insightView = id - 200; PrepareFlowData(true); }
             if (id == 210 || id == 211) _calendarMetric = id - 210;
         if (id >= 212 && id <= 214) { _calendarSpan = id - 212; return; }
+            bool dayChanged = id >= 220 && id <= 222;
             if (id == 220) _insightDay = _insightDay.AddDays(-1);
             if (id == 221) _insightDay = _insightDay.AddDays(1);
             if (id == 222) _insightDay = DateTime.Today;
             if (_insightDay < DateTime.Today.AddDays(-InsightHistoryDays)) _insightDay = DateTime.Today.AddDays(-InsightHistoryDays);
             if (_insightDay > DateTime.Today) _insightDay = DateTime.Today;
+            if (dayChanged) PrepareFlowData(true);
             if (id == 230) _sessionPage = Math.Max(0, _sessionPage - 1);
             else if (id == 231) _sessionPage++;
             else _sessionPage = 0;
@@ -80,7 +82,7 @@ namespace KeyMouseStats
         private bool HandleInsightClick(PointF point)
         {
             foreach (KeyValuePair<RectangleF, DateTime> cell in _insightDates)
-                if (cell.Key.Contains(point)) { _insightDay = cell.Value; _insightView = 1; _sessionPage = 0; return true; }
+                if (cell.Key.Contains(point)) { _insightDay = cell.Value; _insightView = 1; _sessionPage = 0; PrepareFlowData(true); return true; }
             return false;
         }
 
@@ -186,7 +188,7 @@ namespace KeyMouseStats
                 InsightText(g, chipTexts[i], pill.X + 10, pill.Y + 8, chipW - 20, _fSmall, chipInks[i]);
             }
 
-            PointF mouse = ToBase(_mouse); mouse = new PointF(mouse.X - ContentX, mouse.Y - ContentY);
+            PointF mouse = MouseContent();
             string detail = "";
             string[] weekdayNames = { "一", "二", "三", "四", "五", "六", "日" };
             for (int row = 0; row < 7; row++)
@@ -244,6 +246,94 @@ namespace KeyMouseStats
                 string habit = "最长连续 " + bestStreak + " 天 · 周末活跃率 " + weekend + " · 主力 " + weekdayNames[busiest];
                 InsightText(g, habit, Cx + 18, detailY + 26, Cw - 36, _fBody, Cgreen);
             }
+
+            // 年度日历是 53 周 × 7 天的宽扁形状,高度天然无法铺满 16:10 的 2K 画布。
+            // 把卡片下方余量交给「区间摘要 + 月度活跃」,不再让整页下半屏留黑。
+            float summaryTop = 145f + cardH + 14f;
+            float summaryH = PageBottom - summaryTop;
+            if (summaryH >= 74f)
+                PaintCalendarSummary(g, summaryTop, summaryH, total, knownDays, activeDays, bestStreak,
+                    weekendKnown, weekendActive, weekdayNames, busiest);
+        }
+
+        /// <summary>摘要卡用的紧凑时长:超过 100 小时不再带分钟,避免 1072 宽下压到相邻列。</summary>
+        private static string SummaryDuration(double seconds)
+        {
+            int total = (int)Math.Round(Math.Max(0, seconds));
+            int hours = total / 3600, minutes = (total % 3600) / 60;
+            if (hours >= 100) return hours + " 时";
+            return hours > 0 ? hours + " 时 " + minutes.ToString("00", CultureInfo.InvariantCulture) + " 分"
+                : minutes.ToString(CultureInfo.InvariantCulture) + " 分";
+        }
+
+        /// <summary>年度日历下方的摘要卡:四项区间指标 + (高度足够时) 12 个月活跃柱。</summary>
+        private void PaintCalendarSummary(Graphics g, float y, float h, double total, int knownDays, int activeDays,
+            int bestStreak, int weekendKnown, int weekendActive, string[] weekdayNames, int busiest)
+        {
+            PaintCardBase(g, Cx, y, Cw, h);
+            bool keys = _calendarMetric == 1;
+            InsightText(g, "区间摘要", Cx + 18, y + 9, 240, _fH2, Ctext);
+            InsightText(g, keys ? "累计击键 · 月度活跃" : "累计活跃 · 月度活跃", Cx + Cw - 260, y + 12, 240, _fAxis, Csub);
+
+            string[] labels = { keys ? "累计击键" : "累计活跃", "日均", "最长连续", "活跃覆盖" };
+            string[] values =
+            {
+                keys ? Analysis.FmtCount((long)total) : SummaryDuration(total),
+                knownDays > 0 ? (keys ? Analysis.FmtCount((long)(total / knownDays)) : SummaryDuration(total / knownDays)) : "--",
+                bestStreak + " 天",
+                knownDays > 0 ? (activeDays * 100 / knownDays) + "%" : "--"
+            };
+            string[] notes =
+            {
+                "记录 " + knownDays + " 天",
+                "按有记录日计",
+                weekendKnown > 0 ? "周末活跃 " + (weekendActive * 100 / weekendKnown) + "%" : "周末暂无样本",
+                "主力 " + weekdayNames[busiest]
+            };
+            float gap = 16f;
+            float tileW = (Cw - 36f - gap * 3f) / 4f;
+            for (int i = 0; i < 4; i++)
+            {
+                float x = Cx + 18f + i * (tileW + gap);
+                InsightText(g, labels[i], x, y + 34, tileW, _fSmall, Csub);
+                InsightText(g, values[i], x, y + 52, tileW, _fNum2, i == 0 ? Cblue : Ctext);
+                if (h >= 110f) InsightText(g, notes[i], x, y + 78, tileW, _fAxis, Csub);
+            }
+
+            if (h < 190f) return;
+            // 月度活跃柱:只画今年已经过去的月份,缺失月留空槽。
+            DateTime today = DateTime.Today;
+            double[] months = new double[12];
+            for (int m = 1; m <= today.Month; m++)
+            {
+                DateTime from = new DateTime(today.Year, m, 1);
+                DateTime to = from.AddMonths(1).AddDays(-1);
+                if (to > today) to = today;
+                foreach (DayRecord day in Store.SnapshotHistory())
+                {
+                    if (day == null || day.Date < from || day.Date > to) continue;
+                    months[m - 1] += keys ? day.Keys : day.ActiveSeconds;
+                }
+            }
+            double peak = 1;
+            for (int m = 0; m < 12; m++) if (months[m] > peak) peak = months[m];
+            float chartTop = y + 108f, chartBottom = y + h - 30f;
+            float chartH = Math.Max(30f, chartBottom - chartTop);
+            float chartX = Cx + 70f, chartW = Cw - 100f;
+            float slot = chartW / 12f;
+            using (Pen baseline = new Pen(Color.FromArgb(30, Csub))) g.DrawLine(baseline, chartX, chartBottom, chartX + chartW, chartBottom);
+            for (int m = 0; m < 12; m++)
+            {
+                float bx = chartX + m * slot + slot * 0.22f;
+                float bw = slot * 0.56f;
+                float bh = (float)(chartH * months[m] / peak);
+                if (months[m] > 0 && bh < 3f) bh = 3f;
+                using (GraphicsPath bar = RoundedRect(bx, chartBottom - bh, bw, Math.Max(0.1f, bh), 4))
+                using (SolidBrush fill = new SolidBrush(months[m] > 0 ? ArtTheme.Mix(Cblue, Cpurple, m / 11f) : Color.FromArgb(22, Csub)))
+                    g.FillPath(fill, bar);
+                InsightText(g, (m + 1) + "月", chartX + m * slot, chartBottom + 6, slot, _fAxis, Csub);
+            }
+            InsightText(g, keys ? "击键" : "时长", Cx + 18, chartTop + chartH / 2 - 8, 46, _fAxis, Csub);
         }
 
         private void PaintSessionTimeline(Graphics g)
@@ -327,7 +417,7 @@ namespace KeyMouseStats
 
         private void PaintPeriods(Graphics g, List<ActiveSession> periods, RectangleF track, Color color, string label, ref string detail)
         {
-            PointF mouse = ToBase(_mouse); mouse = new PointF(mouse.X - ContentX, mouse.Y - ContentY);
+            PointF mouse = MouseContent();
             foreach (ActiveSession s in periods)
             {
                 double from = Math.Max(0, (s.Start - _insightDay).TotalSeconds);
@@ -355,7 +445,7 @@ namespace KeyMouseStats
             double busiest = 0, bestHour = 0; DateTime bestDay = DateTime.Today; int peak = 0, sampled = 0;
             double[] hours = new double[24];
             string detail = "蓝 → 红：活跃分钟数线性增加（0—60）；灰色：零值；斜线：无记录 / 尚未来到。";
-            PointF mouse = ToBase(_mouse); mouse = new PointF(mouse.X - ContentX, mouse.Y - ContentY);
+            PointF mouse = MouseContent();
             // 网格几何:横向 24 列占满「日期列右侧 → 时长列左侧」,纵向由明细行反推;
             // 正方形格距取两者较小值(基准 25 → 2K 87),剩下的高度把整块网格居中,不再贴顶。
             float gridX = Cx + 112f, gridRight = ContentRight - 120f;   // 基准 136 → 736

@@ -1,12 +1,11 @@
 // ============================================================================
-//  KeyMouseStats v3.0 · Milestone 3 / Step 3c  DailyReportBattle.cs
+//  KeyMouseStats v3.0.1 · DailyReportBattle.cs
 //
-//  「日报」页的战报长图入口:打码开关 + 生成长图(复制到剪贴板)。
-//  只接线,不重算:数据取自 Store.Today / Store.Total / FlowBoard。
+//  「日报」页的长图入口:打码开关 + 日报/周报/月报 3× 高清 PNG。
+//  点击「生成战报长图」弹出小菜单,不改变底栏布局。
 // ============================================================================
 
 using System;
-using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -14,6 +13,9 @@ namespace KeyMouseStats
 {
     internal sealed partial class Dashboard
     {
+        /// <summary>导出长图菜单。不能在 Closed 里立即 Dispose,否则菜单点击回程会访问已释放对象。</summary>
+        private ContextMenuStrip _reportMenu;
+
         /// <summary>切换战报打码开关;状态栏杆立即反映。</summary>
         private void ToggleBattleMask()
         {
@@ -21,115 +23,150 @@ namespace KeyMouseStats
             SetStatus(PrivacyMask.Enabled ? "战报打码已开启" : "战报打码已关闭");
         }
 
-        /// <summary>组装战报模型。清爽版没有事件库时心流卡片整段不占位。</summary>
-        private BattleReportModel BuildBattleModel()
+        /// <summary>日报/周报/月报的统一入口。</summary>
+        private void ShowReportExportMenu()
         {
-            BattleReportModel model = new BattleReportModel();
-            DayRecord day = Store.Today;
-            model.Headline = "今日战报";
-            model.Subtitle = DateTime.Now.ToString("yyyy-MM-dd ddd");
-            model.Honor = PrivacyMask.Enabled ? "江湖称号 · 匿名" : "江湖称号 · 键指如飞";
-
-            model.Metrics.Add(Metric("今日击键", Analysis.FmtCount(day.Keys), "次"));
-            model.Metrics.Add(Metric("今日点击", Analysis.FmtCount(day.Clicks), "次"));
-            model.Metrics.Add(Metric("有效活跃", ActivityMonitor.FormatDuration(day.ActiveSeconds), "今日"));
-            model.Metrics.Add(Metric("累计击键", Analysis.FmtCount(Store.Total.Keys), Store.History.Count + " 天记录"));
-
-            FlowBoardData flow = FlowBoard.Get(DateTime.Today);
-            if (flow != null && flow.HasData && flow.Report != null)
+            if (_reportMenu != null)
             {
-                model.HasFlow = true;
-                model.FlowScore = flow.Report.FocusScore;
-                model.DeepText = BattleDuration(flow.DeepMs);
-                model.NormalText = BattleDuration(flow.NormalMs);
-                model.FragmentedText = BattleDuration(flow.FragmentedMs);
-                model.LongestFlow = BattleDuration(flow.Report.LongestDeepMs);
+                try { _reportMenu.Dispose(); } catch (Exception) { }
+                _reportMenu = null;
             }
-            model.Footer = "键鼠统计 v3.0 · " + (PrivacyMask.Enabled ? "隐私打码已开启" : "原始记录");
-            FillBattleApps(model, day);
-            FillBattleChars(model);
-            return model;
+
+            ArtTheme theme = ArtTheme.Current;
+            ContextMenuStrip menu = new ContextMenuStrip();
+            menu.ShowImageMargin = false;
+            menu.Font = new Font("Microsoft YaHei UI", 9f);
+            menu.BackColor = theme.Card;
+            menu.ForeColor = theme.Text;
+            menu.Renderer = new ToolStripProfessionalRenderer(new ReportMenuColors(theme));
+
+            ToolStripMenuItem header = new ToolStripMenuItem("导出为高清 PNG");
+            header.Enabled = false;
+            header.ForeColor = theme.Muted;
+            menu.Items.Add(header);
+            menu.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem daily = new ToolStripMenuItem("日报长图  ·  4320px");
+            daily.ForeColor = theme.Text;
+            daily.Click += delegate { GenerateBattleReport(); };
+            menu.Items.Add(daily);
+
+            ToolStripMenuItem weekly = new ToolStripMenuItem("周报长图  ·  4320px");
+            weekly.ForeColor = theme.Text;
+            weekly.Click += delegate { GenerateWeeklyReport(); };
+            menu.Items.Add(weekly);
+
+            ToolStripMenuItem monthly = new ToolStripMenuItem("月报长图  ·  4320px");
+            monthly.ForeColor = theme.Text;
+            monthly.Click += delegate { GenerateMonthlyReport(); };
+            menu.Items.Add(monthly);
+
+            _reportMenu = menu;
+            // FrameRight / FrameH 是逻辑坐标;Show 需要客户区像素,DPI 下要乘 _s。
+            int x = (int)((FrameRight - 476f) * _s);
+            int y = (int)((FrameH - 44f) * _s);
+            menu.Show(this, new Point(x, y), ToolStripDropDownDirection.AboveRight);
         }
 
-        /// <summary>
-        /// 常用应用榜。旧版这里什么都没填,长图上只剩一个空的「常用应用 Top 1」标题 ——
-        /// 也就是点了「生成战报长图」看起来像坏了。数据直接取当天的 AppUsage,不读盘、不重算。
-        /// </summary>
-        private static void FillBattleApps(BattleReportModel model, DayRecord day)
-        {
-            if (day == null || day.Apps == null) return;
-            List<KeyValuePair<string, long>> ranked = new List<KeyValuePair<string, long>>();
-            foreach (AppUsage usage in day.Apps.Values)
-            {
-                if (usage == null || usage.Keys <= 0) continue;
-                string path = usage.ProcessPath;
-                if (string.IsNullOrEmpty(path)) path = usage.Title;
-                if (string.IsNullOrEmpty(path)) continue;
-                ranked.Add(new KeyValuePair<string, long>(path, usage.Keys));
-            }
-            ranked.Sort(delegate(KeyValuePair<string, long> a, KeyValuePair<string, long> b)
-            {
-                return b.Value.CompareTo(a.Value);
-            });
-            for (int i = 0; i < ranked.Count && i < 5; i++)
-                model.TopApps.Add(AppActivity.FriendlyName(ranked[i].Key) + "   " + Analysis.FmtCount(ranked[i].Value) + " 键");
-        }
-
-        /// <summary>输入法亮点:复用「字符内容」页已经解析好的 Rime 快照,只取今天的高频汉字。</summary>
-        private void FillBattleChars(BattleReportModel model)
-        {
-            try
-            {
-                EnsureTextData();
-                if (_rimeStats == null) return;
-                RimeSlice today = _rimeStats.Slice(DateTime.Today, DateTime.Today);
-                if (today == null) return;
-                List<KeyValuePair<int, long>> chars = today.TopChars(16);
-                string text = "";
-                for (int i = 0; i < chars.Count && text.Length < 16; i++)
-                {
-                    if (!RimeText.IsCjk(chars[i].Key)) continue;
-                    text += RimeText.DisplayName(chars[i].Key);
-                }
-                model.TopChars = text;
-            }
-            catch (Exception) { }
-        }
-
-        private static BattleReportMetric Metric(string label, string value, string hint)
-        {
-            BattleReportMetric metric = new BattleReportMetric();
-            metric.Label = label;
-            metric.Value = value;
-            metric.Hint = hint;
-            return metric;
-        }
-
-        private static string BattleDuration(long ms)
-        {
-            if (ms <= 0) return "0m";
-            long minutes = ms / 60000;
-            if (minutes < 60) return minutes + "m";
-            return (minutes / 60) + "h" + (minutes % 60 == 0 ? "" : (minutes % 60) + "m");
-        }
-
-        /// <summary>生成 1080px 战报长图并放进剪贴板;Bitmap 用完立即释放。</summary>
+        /// <summary>日报:当前选中日期的 3× 高清 PNG。</summary>
         private void GenerateBattleReport()
         {
             try
             {
-                BattleReportModel model = BuildBattleModel();
-                using (Bitmap bitmap = BattleReport.Render(model, PrivacyMask.Enabled))
+                EnsureDayReport();
+                DailyReport report = _dayReport;
+                DayRecord record = Analysis.GetDay(report.Day);
+
+                using (Bitmap bitmap = DailyReportPoster.Render(report, record, PrivacyMask.Enabled))
                 {
-                    try
-                    {
-                        Clipboard.SetImage(bitmap);
-                        SetStatus("战报长图已复制到剪贴板(" + bitmap.Width + "×" + bitmap.Height + ")");
-                    }
-                    catch (Exception) { SetStatus("剪贴板不可用,战报未复制"); }
+                    string path = "";
+                    try { path = DailyReportPoster.Save(bitmap, report.Day); }
+                    catch (Exception) { }
+
+                    bool copied = false;
+                    try { Clipboard.SetImage(bitmap); copied = true; }
+                    catch (Exception) { }
+
+                    SetImageStatus("日报", bitmap, path, copied);
                 }
             }
-            catch (Exception) { SetStatus("战报生成失败"); }
+            catch (Exception) { SetStatus("日报长图生成失败"); }
+        }
+
+        /// <summary>周报:以当前选中日为最后一天的最近 7 天。</summary>
+        private void GenerateWeeklyReport()
+        {
+            try
+            {
+                EnsureDayReport();
+                PeriodReport report = PeriodReport.BuildWeek(_dayReport.Day);
+                using (Bitmap bitmap = PeriodPoster.Render(report, PrivacyMask.Enabled))
+                {
+                    string path = "";
+                    try { path = PeriodPoster.Save(bitmap, report); }
+                    catch (Exception) { }
+                    bool copied = false;
+                    try { Clipboard.SetImage(bitmap); copied = true; }
+                    catch (Exception) { }
+                    SetImageStatus("周报", bitmap, path, copied);
+                }
+            }
+            catch (Exception) { SetStatus("周报长图生成失败"); }
+        }
+
+        /// <summary>月报:当前选中日所在月份,当月统计到今天。</summary>
+        private void GenerateMonthlyReport()
+        {
+            try
+            {
+                EnsureDayReport();
+                PeriodReport report = PeriodReport.BuildMonth(_dayReport.Day);
+                using (Bitmap bitmap = PeriodPoster.Render(report, PrivacyMask.Enabled))
+                {
+                    string path = "";
+                    try { path = PeriodPoster.Save(bitmap, report); }
+                    catch (Exception) { }
+                    bool copied = false;
+                    try { Clipboard.SetImage(bitmap); copied = true; }
+                    catch (Exception) { }
+                    SetImageStatus("月报", bitmap, path, copied);
+                }
+            }
+            catch (Exception) { SetStatus("月报长图生成失败"); }
+        }
+
+        private void SetImageStatus(string label, Bitmap bitmap, string path, bool copied)
+        {
+            string size = bitmap.Width + "×" + bitmap.Height;
+            if (path.Length > 0 && copied) SetStatus(label + "长图已保存并复制 (" + size + ")");
+            else if (path.Length > 0) SetStatus(label + "长图已保存 (" + size + ")");
+            else if (copied) SetStatus(label + "长图已复制 (" + size + ")");
+            else SetStatus(label + "长图生成失败");
+        }
+
+        /// <summary>让右键菜单在当前主题下不突兀。</summary>
+        private sealed class ReportMenuColors : ProfessionalColorTable
+        {
+            private readonly ArtTheme _theme;
+
+            internal ReportMenuColors(ArtTheme theme)
+            {
+                _theme = theme;
+            }
+
+            public override Color ToolStripDropDownBackground { get { return _theme.Card; } }
+            public override Color MenuBorder { get { return _theme.Line; } }
+            public override Color MenuItemBorder { get { return _theme.Line; } }
+            public override Color MenuItemSelected { get { return _theme.Raised; } }
+            public override Color MenuItemSelectedGradientBegin { get { return _theme.Raised; } }
+            public override Color MenuItemSelectedGradientEnd { get { return _theme.Raised; } }
+            public override Color MenuItemPressedGradientBegin { get { return _theme.Raised; } }
+            public override Color MenuItemPressedGradientEnd { get { return _theme.Raised; } }
+            public override Color ImageMarginGradientBegin { get { return _theme.Card; } }
+            public override Color ImageMarginGradientMiddle { get { return _theme.Card; } }
+            public override Color ImageMarginGradientEnd { get { return _theme.Card; } }
+            public override Color SeparatorDark { get { return _theme.Line; } }
+            public override Color SeparatorLight { get { return _theme.Line; } }
         }
     }
 }

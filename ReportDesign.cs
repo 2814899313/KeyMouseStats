@@ -180,7 +180,7 @@ namespace KeyMouseStats
         private readonly Font _titleFont=new Font("Microsoft YaHei UI",18f,FontStyle.Bold,GraphicsUnit.Pixel);
         private readonly Font _bodyFont=new Font("Microsoft YaHei UI",12f,GraphicsUnit.Pixel);
         private readonly Font _smallFont=new Font("Microsoft YaHei UI",11f,GraphicsUnit.Pixel);
-        private Bitmap _backdrop;private Control _source;private float _progress,_scroll,_scale=1;
+        private float _progress,_scroll,_scale=1;
         private int _direction;private string _title="",_scope="",_note="";
         private RectangleF _closeRect,_drawerRect;private float _contentHeight;
         internal ReportHelpOverlay()
@@ -191,14 +191,13 @@ namespace KeyMouseStats
             {
                 _progress+=_direction*0.12f;
                 if(_direction>0&&_progress>=1){_progress=1;_timer.Stop();}
-                if(_direction<0&&_progress<=0){_progress=0;_timer.Stop();DisposeBackdrop();Close();}
+                if(_direction<0&&_progress<=0){_progress=0;_timer.Stop();Close();}
                 Invalidate();
             };
         }
         private void Prepare(Control source,string title,string scope,string note,float scale)
         {
-            _source=source;_title=title??"";_scope=scope??"";_note=note??"";_scale=scale>0?scale:1;_scroll=0;_direction=1;_progress=0;
-            CaptureBackdrop();
+            _title=title??"";_scope=scope??"";_note=note??"";_scale=scale>0?scale:1;_scroll=0;_direction=1;_progress=0;
             Form owner=source==null?null:source.FindForm();
             ClientSize=owner==null?new Size(900,700):owner.ClientSize;
             if(owner!=null)Location=owner.PointToScreen(Point.Empty);
@@ -222,70 +221,12 @@ namespace KeyMouseStats
             if(!Visible)return;
             _direction=-1;_timer.Start();
         }
-        private void DisposeBackdrop()
-        {
-            if(_backdrop!=null){_backdrop.Dispose();_backdrop=null;}
-        }
-        private void CaptureBackdrop()
-        {
-            DisposeBackdrop();
-            if(_source==null||_source.Width<=0||_source.Height<=0)return;
-            try
-            {
-                using(Bitmap full=new Bitmap(_source.Width,_source.Height))
-                {
-                    _source.DrawToBitmap(full,new Rectangle(0,0,full.Width,full.Height));
-                    int smallW=Math.Max(1,full.Width/8),smallH=Math.Max(1,full.Height/8);
-                    using(Bitmap small=new Bitmap(smallW,smallH))
-                    {
-                        using(Graphics g=Graphics.FromImage(small))
-                        {
-                            g.InterpolationMode=InterpolationMode.HighQualityBilinear;
-                            g.PixelOffsetMode=PixelOffsetMode.HighQuality;
-                            g.DrawImage(full,new Rectangle(0,0,smallW,smallH));
-                        }
-                        BoxBlur(small,2);BoxBlur(small,1);
-                        _backdrop=new Bitmap(small);
-                    }
-                }
-            }
-            catch(Exception){DisposeBackdrop();}
-        }
-        private static void BoxBlur(Bitmap bitmap,int radius)
-        {
-            if(radius<=0)return;
-            int w=bitmap.Width,h=bitmap.Height;
-            BitmapData data=bitmap.LockBits(new Rectangle(0,0,w,h),ImageLockMode.ReadWrite,PixelFormat.Format32bppArgb);
-            try
-            {
-                int stride=data.Stride;byte[] source=new byte[stride*h];Marshal.Copy(data.Scan0,source,0,source.Length);
-                byte[] target=new byte[source.Length];
-                for(int y=0;y<h;y++)
-                    for(int x=0;x<w;x++)
-                    {
-                        int a=0,r=0,g=0,b=0,count=0;
-                        for(int dy=-radius;dy<=radius;dy++)
-                        {
-                            int sy=y+dy;if(sy<0||sy>=h)continue;
-                            for(int dx=-radius;dx<=radius;dx++)
-                            {
-                                int sx=x+dx;if(sx<0||sx>=w)continue;int p=sy*stride+sx*4;
-                                b+=source[p];g+=source[p+1];r+=source[p+2];a+=source[p+3];count++;
-                            }
-                        }
-                        int q=y*stride+x*4;target[q]=(byte)(b/count);target[q+1]=(byte)(g/count);target[q+2]=(byte)(r/count);target[q+3]=(byte)(a/count);
-                    }
-                Marshal.Copy(target,0,data.Scan0,target.Length);
-            }
-            finally{bitmap.UnlockBits(data);}
-        }
         private float Ease(float t){return t*t*(3-2*t);}
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g=e.Graphics;g.SmoothingMode=SmoothingMode.AntiAlias;g.TextRenderingHint=System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
             float s=_scale>0?_scale:1,p=Ease(Math.Max(0,Math.Min(1,_progress)));
-            if(_backdrop!=null)g.DrawImage(_backdrop,ClientRectangle);
-            else using(SolidBrush bg=new SolidBrush(ArtTheme.Current.Background))g.FillRectangle(bg,ClientRectangle);
+            using(SolidBrush bg=new SolidBrush(ArtTheme.Current.Background))g.FillRectangle(bg,ClientRectangle);
             using(SolidBrush scrim=new SolidBrush(Color.FromArgb((int)(155*p),0,0,0)))g.FillRectangle(scrim,ClientRectangle);
             float drawerW=Math.Min(470*s,Width*0.9f),drawerX=Width-drawerW*p;
             _drawerRect=new RectangleF(drawerX,0,drawerW,Height);
@@ -353,7 +294,7 @@ namespace KeyMouseStats
         }
         protected override void Dispose(bool disposing)
         {
-            if(disposing){_timer.Dispose();_titleFont.Dispose();_bodyFont.Dispose();_smallFont.Dispose();DisposeBackdrop();}
+            if(disposing){_timer.Dispose();_titleFont.Dispose();_bodyFont.Dispose();_smallFont.Dispose();}
             base.Dispose(disposing);
         }
     }

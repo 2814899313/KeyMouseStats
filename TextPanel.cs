@@ -105,6 +105,12 @@ namespace KeyMouseStats
             _textPrev = PreviousSlice();
         }
 
+        /// <summary>在切页、切区间、定时刷新时调用;绘制路径只消费这里准备好的内存切片。</summary>
+        internal void PrepareTextPage()
+        {
+            EnsureTextData();
+        }
+
         private void TextRangeBounds(out DateTime from, out DateTime to)
         {
             to = DateTime.Today;
@@ -132,6 +138,7 @@ namespace KeyMouseStats
                 if (_textRange == 0) _textChart = 1;
                 else if (previous == 0) _textChart = 0;
                 _rimeSlice = null;
+                PrepareTextPage();
                 Motion.Start(EnterMotionKey, 280, Ease.OutCubic);
                 return;
             }
@@ -140,6 +147,7 @@ namespace KeyMouseStats
                 _rimeStats = null;
                 _rimeSlice = null;
                 _rimeSliceRange = -1;
+                PrepareTextPage();
                 return;
             }
             if (id == 405)   // 刷新频率
@@ -178,6 +186,7 @@ namespace KeyMouseStats
                 _rimeStats = null;
                 _rimeSlice = null;
                 _rimeSliceRange = -1;
+                PrepareTextPage();
                 SetStatus("已重新读取 Rime 上屏日志");
                 Invalidate();
             };
@@ -197,6 +206,7 @@ namespace KeyMouseStats
                     _rimeStats = null;
                     _rimeSlice = null;
                     _rimeSliceRange = -1;
+                    PrepareTextPage();
                     SetStatus("刷新间隔：" + RimeTextStats.RefreshLabel(value));
                     Invalidate();
                 };
@@ -237,8 +247,8 @@ namespace KeyMouseStats
 
         private void PaintText(Graphics g)
         {
-            EnsureTextData();
-            RimeSlice slice = _rimeSlice ?? new RimeSlice();
+            RimeSlice slice = _rimeSlice != null && _rimeSliceRange == _textRange
+                ? _rimeSlice : new RimeSlice();
 
             if (_rimeStats != null && _rimeStats.Missing)
             {
@@ -268,7 +278,6 @@ namespace KeyMouseStats
                 _rimeStats.DayChars.TryGetValue(DateTime.Today, out value);
                 todayChars = value;
             }
-            _textPrev = PreviousSlice();
             PaintTextMetric(g, Cx, Cy + 8, tileW, "区间上屏字数", Analysis.FmtCount(slice.Chars), Cblue,
                 DeltaText(_textPrev, slice.Chars, false));
             PaintTextMetric(g, Cx + (tileW + gap), Cy + 8, tileW, "上屏次数", Analysis.FmtCount(slice.Commits), Cgreen,
@@ -675,6 +684,14 @@ namespace KeyMouseStats
             return LayoutFrame.ClampInt((int)((w + 6f) / 49f), 10, 30);
         }
 
+        /// <summary>字符格里的频次紧凑格式:四位数在 1072 的窄格里会压出省略号。</summary>
+        private static string CompactCount(long value)
+        {
+            if (value >= 10000) return (value / 10000.0).ToString("0.#", CultureInfo.InvariantCulture) + "万";
+            if (value >= 1000) return (value / 1000.0).ToString("0.#", CultureInfo.InvariantCulture) + "k";
+            return value.ToString(CultureInfo.InvariantCulture);
+        }
+
         /// <summary>
         /// 字符网格的行数:按可用高度反推。基准 118 高 = 2 行,2K 自动扩到 8~10 行。
         /// 高度不足 76px 时退到 1 行 —— 低于设计最小的逻辑画布(175% 1080p)上,
@@ -742,8 +759,7 @@ namespace KeyMouseStats
             float cellW = (w - (columns - 1) * gap) / columns;
             float cellH = (h - 20f - (gridRows - 1) * gap) / gridRows;
             long highest = Math.Max(1, _textTopValues[0]);
-            PointF mouse = ToBase(_mouse);
-            mouse = new PointF(mouse.X - ContentX, mouse.Y - ContentY);
+            PointF mouse = MouseContent();
 
             for (int i = 0; i < _textTopLabels.Count; i++)
             {
@@ -769,7 +785,7 @@ namespace KeyMouseStats
                     using (SolidBrush glyph = new SolidBrush(ink))
                         g.DrawString(_textTopLabels[i], single ? glyphFont : _fSmall, glyph, new RectangleF(cx + 2, cy + 2, cellW - 4, 24), center);
                     using (SolidBrush count = new SolidBrush(Csub))
-                        g.DrawString(Analysis.FmtCount(_textTopValues[i]) + " 次", _fAxis, count,
+                        g.DrawString(CompactCount(_textTopValues[i]) + " 次", _fAxis, count,
                             new RectangleF(cx + 2, cy + 25, cellW - 4, 14), center);
                 }
                 float trackW = cellW - 14;
@@ -807,13 +823,10 @@ namespace KeyMouseStats
             long total = Math.Max(1, slice.Chars);
             float rowH = LayoutFrame.CalcRowHeight(h, 0f, 0f, 21f, 44f, apps.Count);
             float nameW = 140, charsW = 110;
-            // 3.0:高频字从 3 个加到 5 个。单字胶囊宽度是统一的,按实测值给足 5 个的列宽,
-            // 免得第 4、5 个胶囊压到「字数 / 占比」两列上。
-            int tagSlots = 5;
-            float oneTag = Math.Min(34f, g.MeasureString("字", _fAxis).Width + 12f);
-            float tagsW = oneTag * tagSlots + 3f * (tagSlots - 1) + 6f;
-            float barX = x + nameW + 8;
-            float barW = Math.Max(24f, w - nameW - charsW - tagsW - 24);
+            // 特征词优先展示 2–4 字词组,不足时用实词单字兜底;胶囊宽度按实际字数测量,
+            // 数量再按卡片剩余宽度动态收敛 —— 1072 与 2560 下都不会压到字数/占比两列。
+            const int tagSlots = 5;
+            const float minBarW = 48f;
             for (int i = 0; i < apps.Count; i++)
             {
                 RimeAppSummary app = apps[i];
@@ -834,6 +847,27 @@ namespace KeyMouseStats
                 AppText(g, appName, _fSmall, i == 0 ? Ctext : Csub,
                     new RectangleF(x + 22, ry, nameW - 24, rowH), false);
 
+                // 先算出真正能放下的胶囊数量与总宽,再把剩余宽度全部留给频次条。
+                List<KeyValuePair<string, long>> words = app.FeatureWords(tagSlots);
+                float maxTagsW = Math.Max(84f, w - nameW - charsW - minBarW - 24f);
+                float[] widths = new float[words.Count];
+                int shown = 0;
+                float used = 0;
+                for (int k = 0; k < words.Count; k++)
+                {
+                    string label = words[k].Key;
+                    float cw = Math.Min(64f, Math.Max(22f, g.MeasureString(label, _fAxis).Width + 12f));
+                    float next = used + (shown > 0 ? 3f : 0f) + cw;
+                    if (shown >= 2 && next > maxTagsW) break;
+                    if (shown == 0 && next > maxTagsW) { cw = Math.Max(18f, maxTagsW); }
+                    widths[k] = cw;
+                    used = shown == 0 ? cw : used + 3f + cw;
+                    shown++;
+                    if (used >= maxTagsW) break;
+                }
+                float tagsW = used;
+                float barX = x + nameW + 8;
+                float barW = Math.Max(24f, w - nameW - charsW - tagsW - 24);
                 using (GraphicsPath track = RoundedRect(barX, ry + rowH / 2 - 3, barW, 6, 3))
                 using (SolidBrush fill = new SolidBrush(Color.FromArgb(22, Csub))) g.FillPath(fill, track);
                 float share = (float)(app.Chars / (double)total);
@@ -846,20 +880,14 @@ namespace KeyMouseStats
                 AppText(g, (share * 100).ToString("0.#", CultureInfo.InvariantCulture) + "%", _fAxis, Csub,
                     new RectangleF(x + w - tagsW - 46, ry, 42, rowH), true);
 
-                // 只展示真实汉字徽章，纯标点/空白不进入胶囊。
-                List<KeyValuePair<int, long>> chars = app.TopChars(12);
                 float tagX = x + w - tagsW;
-                int shown = 0;
-                for (int k = 0; k < chars.Count && shown < tagSlots; k++)
+                for (int k = 0; k < shown; k++)
                 {
-                    if (!RimeText.IsCjk(chars[k].Key)) continue;
-                    string label = RimeText.DisplayName(chars[k].Key);
-                    float tagW = Math.Min(34f, g.MeasureString(label, _fAxis).Width + 12f);
+                    float tagW = widths[k];
                     using (GraphicsPath tag = RoundedRect(tagX, ry + rowH / 2 - 8, tagW, 16, 8))
                     using (SolidBrush fill = new SolidBrush(Color.FromArgb(26, Cblue))) g.FillPath(fill, tag);
-                    AppText(g, label, _fAxis, Ctext, new RectangleF(tagX, ry + rowH / 2 - 8, tagW, 16), true);
-                    tagX += tagW + 3;
-                    shown++;
+                    AppText(g, words[k].Key, _fAxis, Ctext, new RectangleF(tagX, ry + rowH / 2 - 8, tagW, 16), true);
+                    tagX += tagW + 3f;
                 }
             }
         }
@@ -874,8 +902,7 @@ namespace KeyMouseStats
             }
             int rows = LayoutFrame.CalcVisibleRows(h, 0f, 0f, 22f, 30f, slice.Recent.Count);
             float rowHeight = LayoutFrame.CalcRowHeight(h, 0f, 0f, 22f, 30f, rows);
-            PointF mouse = ToBase(_mouse);
-            mouse = new PointF(mouse.X - ContentX, mouse.Y - ContentY);
+            PointF mouse = MouseContent();
             for (int i = 0; i < rows; i++)
             {
                 RimeCommit commit = slice.Recent[i];
@@ -939,8 +966,7 @@ namespace KeyMouseStats
                 _fSmall, Csub, new RectangleF(x, y + 172, w, 20), false);
 
             RectangleF refresh = new RectangleF(Cx + Cw - 132, Cy + 12, 108, ToggleChipHeight);
-            _chips.Add(refresh);
-            _chipIds.Add(404);
+            _chipLedger.Add(404, refresh);
             AddTextHit(refresh, 7, 0);
             PaintChip(g, refresh, "重新读取", false, null);
         }
@@ -1117,8 +1143,7 @@ namespace KeyMouseStats
         /// </summary>
         internal void UpdateTextHover(bool invalidate)
         {
-            PointF mouse = ToBase(_mouse);
-            PointF point = new PointF(mouse.X - ContentX, mouse.Y - ContentY);
+            PointF point = MouseContent();
             int kind = -1, index = -1;
             for (int i = 0; i < _textBars.Count; i++)
             {
@@ -1175,8 +1200,40 @@ namespace KeyMouseStats
                     List<RimeAppSummary> apps = slice.TopApps(5);
                     if (index >= apps.Count) return "";
                     RimeAppSummary app = apps[index];
-                    return AppActivity.FriendlyName(app.Path) + " · " + Analysis.FmtCount(app.Chars)
-                        + " 字 / " + app.Commits + " 次 · 汉字 " + Analysis.FmtCount(app.Hanzi);
+                    StringBuilder text = new StringBuilder();
+                    text.Append(AppActivity.FriendlyName(app.Path)).Append(" · ")
+                        .Append(Analysis.FmtCount(app.Chars)).Append(" 字 / ")
+                        .Append(app.Commits).Append(" 次 · 汉字 ").Append(Analysis.FmtCount(app.Hanzi));
+                    List<KeyValuePair<string, long>> phrases = RimePhraseFilter.PickPhrases(app.PhraseCounts, 5);
+                    if (phrases.Count > 0)
+                    {
+                        text.AppendLine();
+                        text.Append("词组 Top ").Append(phrases.Count);
+                        for (int i = 0; i < phrases.Count; i++)
+                        {
+                            text.AppendLine();
+                            text.Append("· ").Append(phrases[i].Key).Append("  ")
+                                .Append(Analysis.FmtCount(phrases[i].Value)).Append(" 次");
+                        }
+                    }
+                    else
+                    {
+                        text.AppendLine();
+                        text.Append("词组：暂无（已用实词单字兜底）");
+                    }
+                    List<KeyValuePair<string, long>> singles = app.ContentChars(5);
+                    if (singles.Count > 0)
+                    {
+                        text.AppendLine();
+                        text.Append("单字 Top ").Append(singles.Count);
+                        for (int i = 0; i < singles.Count; i++)
+                        {
+                            text.AppendLine();
+                            text.Append("· ").Append(singles[i].Key).Append("  ")
+                                .Append(Analysis.FmtCount(singles[i].Value)).Append(" 次");
+                        }
+                    }
+                    return text.ToString();
                 }
                 case 6:
                     return "应用来自 Rime 的前台进程名 · 不记录窗口标题或应用内容";
@@ -1204,13 +1261,15 @@ namespace KeyMouseStats
         private void PaintTextTooltip(Graphics g)
         {
             if (_textHoverText.Length == 0) return;
-            PointF mouse = ToBase(_mouse);
-            float x = mouse.X - ContentX + 16;
-            float y = mouse.Y - ContentY + 18;
+            PointF mouse = MouseContent();
+            float x = mouse.X + 16;
+            float y = mouse.Y + 18;
             SizeF size = g.MeasureString(_textHoverText, _fSmall);
             float w = size.Width + 16, h = size.Height + 10;
             x = Math.Max(Cx, Math.Min(x, Cx + Cw - w));
-            y = Math.Max(Cy, Math.Min(y, Cy + 488 - h));
+            float maxY = Cy + 488 - h;
+            if (maxY < Cy + 8) maxY = Cy + 8;
+            y = Math.Max(Cy + 8, Math.Min(y, maxY));
 
             using (GraphicsPath path = RoundedRect(x, y, w, h, 6))
             {

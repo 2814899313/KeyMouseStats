@@ -136,6 +136,8 @@ internal static class KmsPackageTests
         try
         {
             KmsPackageData pkg = KmsPackage.Import(KmsPackage.Export(Sample()));
+            // 原生库必须释放到沙盒,绝不触碰 %LOCALAPPDATA%\KeyMouseStats。
+            NativeBoot.RootOverride = System.IO.Path.Combine(dir, "native");
             // 该用例需要原生 SQLite;测试二进制若未链入原生资源,则只验证「优雅降级」而不假绿。
             if (!NativeBoot.TryEnsure())
             {
@@ -177,6 +179,7 @@ internal static class KmsPackageTests
         }
         finally
         {
+            NativeBoot.RootOverride = null;
             try { System.IO.Directory.Delete(dir, true); } catch { }
         }
     }

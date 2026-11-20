@@ -255,8 +255,6 @@ namespace KeyMouseStats
         }
         private readonly List<RectangleF> _keyboardHoverRects=new List<RectangleF>();
         private Bitmap _keyboardPlate;
-        /// <summary>1.8.0:上一张键位板,用于换口径/换区间时的交叉淡入。</summary>
-        private Bitmap _keyboardPlatePrev;
         private string _keyboardPlateStamp;
         private bool _keyboardDevicesRead;
         /// <summary>1.8.0:与 _keyboardHoverRects 同序的扫描码,供点击下钻使用。</summary>
@@ -434,27 +432,21 @@ namespace KeyMouseStats
             float originY=plateTop+(plateH-height*row)/2f;
             _keyboardHoverRects.Clear();
             _keyboardScans.Clear();
-            PointF mouse=ToBase(_mouse);mouse=new PointF(mouse.X-ContentX,mouse.Y-ContentY);
+            PointF mouse=MouseContent();
             HeatKey hover=null;long hoverCount=0;KeyHold hoverHold=null;
             RectangleF hoverRect=RectangleF.Empty;
             RectangleF plateBounds=new RectangleF(Cx+22,plateTop,Cw-44,plateH);
             Graphics keyGraphics=g;
             if(ThemeArt.Active)
             {
-                System.Text.StringBuilder stamp=new System.Text.StringBuilder(ThemeImages.Revision+":"+Store.ThemeId+":"+layout+":"+_s.ToString(CultureInfo.InvariantCulture)+":"+(holdMode?"hold":"count"));
+                // 键帽板只依赖主题色/配列/缩放/口径与计数;主题图片异步完成不应让静态板无谓重建。
+                System.Text.StringBuilder stamp=new System.Text.StringBuilder(Store.ThemeId+":"+layout+":"+_s.ToString(CultureInfo.InvariantCulture)+":"+(holdMode?"hold":"count"));
                 foreach(HeatKey key in keys)stamp.Append(':').Append(key.Scan).Append('=').Append(holdMode?(long)KeyboardHeat.HoldMs(holds,key.Scan):KeyboardHeat.Count(counts,key.Scan));
                 string signature=stamp.ToString();
                 keyGraphics=null;
                 if(_keyboardPlate==null || _keyboardPlateStamp!=signature)
                 {
-                    // 1.8.0:重建时把旧板留下来做交叉淡入,让换口径/换区间的颜色变化是渐变而不是跳变。
-                    // 注意:只保留一张旧板(不做逐帧重建),所以动画期间不会重复解码或反复分配位图。
-                    if(_keyboardPlate!=null)
-                    {
-                        if(_keyboardPlatePrev!=null)_keyboardPlatePrev.Dispose();
-                        _keyboardPlatePrev=_keyboardPlate;
-                        if(Visible)Motion.Start("platefade",200,Ease.OutCubic);
-                    }
+                    if(_keyboardPlate!=null){_keyboardPlate.Dispose();_keyboardPlate=null;}
                     _keyboardPlate=new Bitmap((int)Math.Ceiling(plateBounds.Width*_s),(int)Math.Ceiling(plateBounds.Height*_s),System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
                     _keyboardPlateStamp=signature;
                     keyGraphics=Graphics.FromImage(_keyboardPlate);keyGraphics.Clear(tray);
@@ -501,26 +493,6 @@ namespace KeyMouseStats
                 if(keyGraphics!=null)keyGraphics.Dispose();
                 PointF[] corner={plateBounds.Location};using(Matrix matrix=g.Transform)matrix.TransformPoints(corner);
                 GraphicsState state=g.Save();g.ResetTransform();g.DrawImageUnscaled(_keyboardPlate,(int)Math.Round(corner[0].X),(int)Math.Round(corner[0].Y));g.Restore(state);
-                // 1.8.0:旧板按 alpha 渐隐,和上新板叠成一次交叉淡入;动画跑完就释放,不留额外常驻内存。
-                if(_keyboardPlatePrev!=null)
-                {
-                    double fade=Motion.Progress("platefade");
-                    if(fade>=1){_keyboardPlatePrev.Dispose();_keyboardPlatePrev=null;}
-                    else
-                    {
-                        state=g.Save();g.ResetTransform();
-                        using(System.Drawing.Imaging.ImageAttributes attributes=new System.Drawing.Imaging.ImageAttributes())
-                        {
-                            float alpha=(float)(1-fade);
-                            System.Drawing.Imaging.ColorMatrix matrix=new System.Drawing.Imaging.ColorMatrix();
-                            matrix.Matrix33=alpha;
-                            attributes.SetColorMatrix(matrix);
-                            g.DrawImage(_keyboardPlatePrev,new Rectangle((int)Math.Round(corner[0].X),(int)Math.Round(corner[0].Y),_keyboardPlatePrev.Width,_keyboardPlatePrev.Height),
-                                0,0,_keyboardPlatePrev.Width,_keyboardPlatePrev.Height,GraphicsUnit.Pixel,attributes);
-                        }
-                        g.Restore(state);
-                    }
-                }
                 if(hover!=null)using(GraphicsPath outline=RoundedRect(hoverRect.X,hoverRect.Y,hoverRect.Width,hoverRect.Height,8))using(Pen pen=new Pen(Cblue,1.6f))g.DrawPath(pen,outline);
             }
             // 1.8.0:下钻选中的键位加一圈描边,淡入由 keydetail 通道驱动。

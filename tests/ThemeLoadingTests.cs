@@ -40,8 +40,8 @@ internal static class ThemeLoadingTests
                     Stopwatch watch=Stopwatch.StartNew();
                     for(int frame=0;frame<6;frame++){graphics.ResetTransform();paint.Invoke(form,args);}
                     watch.Stop();slowest=Math.Max(slowest,watch.Elapsed.TotalMilliseconds/6);
-                    // 1.8.0:动效中间帧的帧预算。换页淡入只多一次半透明填充,所以必须留在
-                    // 静态帧的 1.6 倍以内(上限 33 ms ≈ 30 FPS)。用假时钟把时间轴钉在 50%。
+                    // 1.8.0:动效中间帧的帧预算。换页直接纯矢量重绘,中间帧不应比静态帧更贵,
+                    // 仍按 1.6 倍留出余量(上限 33 ms ≈ 30 FPS)。用假时钟把时间轴钉在 50%。
                     Motion.ResetForTests();
                     Motion.UseFakeClock(1000000);
                     Motion.Start("page",150,Ease.Linear);

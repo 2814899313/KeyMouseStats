@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark" data-report="daily">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>键鼠统计 · 报告设计原型</title>
+  <link rel="stylesheet" href="styles.css?v=6">
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"></div>
+
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span class="brand-copy">
+          <strong>键鼠统计</strong>
+          <small>ACTIVITY MONITOR</small>
+        </span>
+      </div>
+
+      <nav class="report-nav" aria-label="报告类型">
+        <button class="nav-item is-active" data-target="daily" aria-current="page">
+          <span class="nav-num">01</span>
+          <span class="nav-copy"><strong>日报</strong><small>一天的活动切面</small></span>
+          <span class="nav-line" aria-hidden="true"></span>
+        </button>
+        <button class="nav-item" data-target="weekly">
+          <span class="nav-num">02</span>
+          <span class="nav-copy"><strong>周报</strong><small>七天的节奏与惯性</small></span>
+          <span class="nav-line" aria-hidden="true"></span>
+        </button>
+        <button class="nav-item" data-target="monthly">
+          <span class="nav-num">03</span>
+          <span class="nav-copy"><strong>月报</strong><small>一个月的形状</small></span>
+          <span class="nav-line" aria-hidden="true"></span>
+        </button>
+      </nav>
+
+      <div class="rail-quote">
+        <span class="quote-mark">“</span>
+        <p>数字不是成绩单，<br>是你把时间花在哪里的证据。</p>
+      </div>
+
+      <div class="rail-foot">
+        <span class="live-dot" aria-hidden="true"></span>
+        <span>本地记录 365 天</span>
+        <span class="rail-version">v3.0 · 原型</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="crumb">工作空间 <span class="slash">/</span> <b id="crumbReport">日报</b></div>
+        <div class="top-actions">
+          <span class="live"><i aria-hidden="true"></i>本地数据 · 18:43 更新</span>
+          <div class="theme-toggle" role="group" aria-label="切换主题">
+            <button data-theme-set="dark" class="is-active">午夜</button>
+            <button data-theme-set="light">纸张</button>
+          </div>
+          <button class="btn-primary" id="exportBtn">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1v9m0 0 3.2-3.2M8 10 4.8 6.8M2 11.5v1.8A1.7 1.7 0 0 0 3.7 15h8.6a1.7 1.7 0 0 0 1.7-1.7v-1.8"/></svg>
+            导出报告
+          </button>
+        </div>
+      </header>
+
+      <!-- ============================================================ 日报 -->
+      <section class="report is-active" id="daily" aria-labelledby="dailyTitle">
+        <div class="sheet">
+          <header class="report-head">
+            <div class="eyebrow"><span class="eyebrow-dot"></span>DAILY / 日报 <span class="sep">·</span> 第 47 周</div>
+
+            <div class="date-row">
+              <div class="date-lockup">
+                <span class="date-big">17</span>
+                <div class="date-stack"><strong>十一月</strong><span>2026 · 星期二</span></div>
+              </div>
+              <div class="head-actions">
+                <span class="status-pill done"><i aria-hidden="true"></i>已结束</span>
+                <div class="stepper">
+                  <button class="icon-btn" data-fake aria-label="前一天">‹</button>
+                  <span class="stepper-label">2026.11.17</span>
+                  <button class="icon-btn" data-fake aria-label="后一天">›</button>
+                </div>
+              </div>
+            </div>
+
+            <h1 class="headline" id="dailyTitle">敲了 <em>1.3 万</em> 次键，<br>把 <em>9 小时 23 分</em> 留在屏幕前。</h1>
+            <p class="lede">上午留给写作，下午被消息切碎，晚上又回到了游戏。这是你本周最专注的一天。</p>
+          </header>
+
+          <div class="metric-row">
+            <div class="metric">
+              <div class="metric-label"><span>点击</span><span class="metric-en">CLICKS</span></div>
+              <div class="metric-value">3,387</div>
+              <div class="metric-foot"><span class="delta up">▲ 69%</span><span>较前 7 天日均</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label"><span>上屏</span><span class="metric-en">TEXT</span></div>
+              <div class="metric-value">766<span class="unit">字</span></div>
+              <div class="metric-foot"><span class="delta up">▲ 20%</span><span>较前 7 天日均</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label"><span>峰值 APM</span><span class="metric-en">PEAK APM</span></div>
+              <div class="metric-value">237</div>
+              <div class="metric-foot"><span>单日峰值</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label"><span>最长连续</span><span class="metric-en">LONGEST</span></div>
+              <div class="metric-value">3<span class="unit">时</span>10<span class="unit">分</span></div>
+              <div class="metric-foot"><span>最长一段</span></div>
+            </div>
+          </div>
+
+          <section class="section">
+            <div class="section-head">
+              <div><h2 class="section-title">一天的活动脉搏</h2><p class="section-sub">每小时击键次数 · 24 小时</p></div>
+              <div class="legend legend-inline">
+                <span><i class="dot accent"></i>击键</span>
+                <span><i class="dot mint"></i>活跃时段</span>
+              </div>
+            </div>
+            <div id="dailyPulse" class="chart-wrap" aria-label="24 小时击键分布图与活跃时段"></div>
+          </section>
+
+          <div class="grid-2">
+            <section class="section inner">
+              <div class="section-head">
+                <div><h2 class="section-title">时间去向</h2><p class="section-sub">TOP 5 · 按活跃时长</p></div>
+                <span class="ghost-num">01</span>
+              </div>
+              <div class="app-list">
+                <div class="app-row" data-tip="Microsoft Edge · 5 小时 0 分 · 占今日 53%">
+                  <span class="app-rank">01</span>
+                  <span class="app-mark" style="--hue:210">E</span>
+                  <span class="app-name">Microsoft Edge</span>
+                  <span class="app-track"><i class="app-fill" style="--w:100%;--o:.92"></i></span>
+                  <span class="app-time">5.0h</span>
+                  <span class="app-pct">53%</span>
+                </div>
+                <div class="app-row" data-tip="Visual Studio Code · 1 小时 18 分 · 占今日 14%">
+                  <span class="app-rank">02</span>
+                  <span class="app-mark" style="--hue:190">V</span>
+                  <span class="app-name">Visual Studio Code</span>
+                  <span class="app-track"><i class="app-fill" style="--w:26%;--o:.55"></i></span>
+                  <span class="app-time">1.3h</span>
+                  <span class="app-pct">14%</span>
+                </div>
+                <div class="app-row" data-tip="ChatGPT · 43 分钟 · 占今日 8%">
+                  <span class="app-rank">03</span>
+                  <span class="app-mark" style="--hue:160">C</span>
+                  <span class="app-name">ChatGPT</span>
+                  <span class="app-track"><i class="app-fill" style="--w:14%;--o:.45"></i></span>
+                  <span class="app-time">43m</span>
+                  <span class="app-pct">8%</span>
+                </div>
+                <div class="app-row" data-tip="文件资源管理器 · 30 分钟 · 占今日 5%">
+                  <span class="app-rank">04</span>
+                  <span class="app-mark" style="--hue:40">F</span>
+                  <span class="app-name">文件资源管理器</span>
+                  <span class="app-track"><i class="app-fill" style="--w:10%;--o:.35"></i></span>
+                  <span class="app-time">30m</span>
+                  <span class="app-pct">5%</span>
+                </div>
+                <div class="app-row" data-tip="一个名字很长的写作工具 · 23 分钟 · 占今日 4%">
+                  <span class="app-rank">05</span>
+                  <span class="app-mark" style="--hue:280">写</span>
+                  <span class="app-name">一个名字很长的写作工具</span>
+                  <span class="app-track"><i class="app-fill" style="--w:8%;--o:.28"></i></span>
+                  <span class="app-time">23m</span>
+                  <span class="app-pct">4%</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="section inner">
+              <div class="section-head">
+                <div><h2 class="section-title">今日注脚</h2><p class="section-sub">由这一天的数字生成</p></div>
+                <span class="ghost-num">02</span>
+              </div>
+              <ul class="notes">
+                <li><i class="note-dot good"></i><p>击键比日均高 124%，今天是真在干活。</p></li>
+                <li><i class="note-dot accent"></i><p>14 点最忙，1,912 次击键，像是把所有消息都回完了。</p></li>
+                <li><i class="note-dot accent"></i><p>最长连续 3 小时 10 分，键盘替你喊过累。</p></li>
+                <li><i class="note-dot warn"></i><p>浏览器占了 53%，今天基本住在那儿。</p></li>
+              </ul>
+              <p class="pull-quote">“今天是真在干活。”</p>
+            </section>
+          </div>
+
+          <div class="grid-3 bottom-grid">
+            <section class="section inner compact">
+              <div class="section-head"><div><h2 class="section-title">操作习惯</h2><p class="section-sub">组合键与按键</p></div></div>
+              <div class="habit-list">
+                <div class="habit-row"><span class="habit-key">CTRL + V</span><span class="habit-count">95</span></div>
+                <div class="habit-row"><span class="habit-key">CTRL + C</span><span class="habit-count">55</span></div>
+                <div class="habit-row"><span class="habit-key">CTRL + ALT + A</span><span class="habit-count">42</span></div>
+                <div class="habit-row"><span class="habit-key">ALT + TAB</span><span class="habit-count">37</span></div>
+              </div>
+              <p class="micro-line">按键 Top：I 1,247 · 空格 1,018 · A 980</p>
+            </section>
+
+            <section class="section inner compact">
+              <div class="section-head"><div><h2 class="section-title">文字产出</h2><p class="section-sub">上屏 766 字 · 276 次</p></div></div>
+              <div class="inline-big"><strong>2.8</strong><span>字 / 次</span></div>
+              <div class="stack-bar" aria-label="字符构成">
+                <i style="--w:78%;--c:var(--accent)"></i>
+                <i style="--w:8%;--c:var(--mint)"></i>
+                <i style="--w:5%;--c:var(--violet)"></i>
+                <i style="--w:4%;--c:var(--warm)"></i>
+                <i style="--w:5%;--c:var(--muted)"></i>
+              </div>
+              <div class="legend legend-stack">
+                <span><i class="dot" style="background:var(--accent)"></i>汉字 78%</span>
+                <span><i class="dot" style="background:var(--mint)"></i>标点 8%</span>
+                <span><i class="dot" style="background:var(--violet)"></i>字母数字 5%</span>
+                <span><i class="dot" style="background:var(--warm)"></i>空白 4%</span>
+                <span><i class="dot" style="background:var(--muted)"></i>其他 5%</span>
+              </div>
+              <p class="micro-line">高频词：键鼠 12 · 统计 9 · 日报 7</p>
+            </section>
+
+            <section class="section inner compact">
+              <div class="section-head"><div><h2 class="section-title">会话侧写</h2><p class="section-sub">鼠标与分段</p></div></div>
+              <div class="stat-grid">
+                <div class="stat"><b>864<span class="stat-unit">m</span></b><span>鼠标移动</span></div>
+                <div class="stat"><b>18<span class="stat-unit">段</span></b><span>会话段数</span></div>
+                <div class="stat"><b>31<span class="stat-unit">分</span></b><span>平均每段</span></div>
+              </div>
+              <p class="micro-line micro-line-read">鼠标距离按当前 DPI 估算</p>
+            </section>
+          </div>
+
+          <footer class="report-foot">
+            <span>由本地数据生成 · 2026.11.18 18:43</span>
+            <span>对比基准：前 7 个有数据的日子</span>
+          </footer>
+        </div>
+      </section>
+
+      <!-- ============================================================ 周报 -->
+      <section class="report" id="weekly" aria-labelledby="weeklyTitle" hidden>
+        <div class="sheet">
+          <header class="report-head">
+            <div class="eyebrow"><span class="eyebrow-dot"></span>WEEKLY / 周报 <span class="sep">·</span> 2026</div>
+
+            <div class="date-row">
+              <div class="date-lockup">
+                <span class="date-big">7</span>
+                <div class="date-stack"><strong>十一月</strong><span>2026 · 11.11 — 11.17</span></div>
+              </div>
+              <div class="head-actions">
+                <span class="status-pill done"><i aria-hidden="true"></i>已结束</span>
+                <div class="stepper">
+                  <button class="icon-btn" data-fake aria-label="上一周">‹</button>
+                  <span class="stepper-label">近 7 天</span>
+                  <button class="icon-btn" data-fake aria-label="下一周">›</button>
+                </div>
+              </div>
+            </div>
+
+            <h1 class="headline" id="weeklyTitle">这 7 天，你把最好的状态<br>留给了 <em>周五</em>。</h1>
+            <p class="lede">7 天全部有记录，周五冲到 9 小时 54 分；周末主动降速 22%，收尾得体。</p>
+          </header>
+
+          <div class="metric-row">
+            <div class="metric">
+              <div class="metric-label"><span>总击键</span><span class="metric-en">KEYS</span></div>
+              <div class="metric-value">78,420</div>
+              <div class="metric-foot"><span class="delta up">▲ 18%</span><span>较上一周</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label"><span>总点击</span><span class="metric-en">CLICKS</span></div>
+              <div class="metric-value">19,860</div>
+              <div class="metric-foot"><span class="delta up">▲ 12%</span><span>较上一周</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label"><span>有效使用</span><span class="metric-en">FOCUS</span></div>
+              <div class="metric-value">48<span class="unit">时</span>48<span class="unit">分</span></div>
+              <div class="metric-foot"><span class="delta up">▲ 9%</span><span>较上一周</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label"><span>日均专注</span><span class="metric-en">AVG / DAY</span></div>
+              <div class="metric-value">6<span class="unit">时</span>58<span class="unit">分</span></div>
+              <div class="metric-foot"><span class="delta up">▲ 9%</span><span>较上一周</span></div>
+            </div>
+          </div>
+
+          <section class="section">
+            <div class="section-head">
+              <div><h2 class="section-title">一周的轮廓</h2><p class="section-sub">每天的有效使用时长 · 7 天</p></div>
+              <div class="legend legend-inline"><span><i class="dot accent"></i>本周</span><span><i class="dot faint"></i>上一周</span></div>
+            </div>
+            <div class="week-layout">
+              <div id="weekStrip" class="week-strip" aria-label="一周活跃时长柱状图"></div>
+              <aside class="week-aside">
+                <div class="consistency">
+                  <strong>7<span>/7</span></strong>
+                  <span>天有记录</span>
+                </div>
+                <div class="aside-list">
+                  <div><span>最高单日</span><b>9h 54m</b><small>11.13 周五</small></div>
+                  <div><span>最低单日</span><b>4h 12m</b><small>11.16 周一</small></div>
+                  <div><span>周末降速</span><b>−22%</b><small>对比工作日</small></div>
+                </div>
+              </aside>
+            </div>
+          </section>
+
+          <section class="section">
+            <div class="section-head">
+              <div><h2 class="section-title">一周轨迹</h2><p class="section-sub">每日击键次数 · 与上一周对照</p></div>
+              <div class="legend legend-inline"><span><i class="line-key accent"></i>本周</span><span><i class="line-key faint"></i>上一周</span></div>
+            </div>
+            <div id="weekTrend" class="chart-wrap" aria-label="一周击键趋势图"></div>
+          </section>
+
+          <div class="grid-2">
+            <section class="section inner">
+              <div class="section-head"><div><h2 class="section-title">节奏分布</h2><p class="section-sub">上午 / 下午 / 晚上</p></div><span class="ghost-num">01</span></div>
+              <div class="rhythm-bars">
+                <div class="rhythm-row"><span>上午</span><div class="rhythm-track"><i style="--w:38%"></i></div><b>38%</b></div>
+                <div class="rhythm-row"><span>下午</span><div class="rhythm-track"><i style="--w:42%"></i></div><b>42%</b></div>
+                <div class="rhythm-row"><span>晚上</span><div class="rhythm-track"><i style="--w:20%"></i></div><b>20%</b></div>
+              </div>
+              <div class="split-note">
+                <div><span>工作日</span><b>7h 26m</b></div>
+                <div><span>周末</span><b>5h 48m</b></div>
+              </div>
+            </section>
+
+            <section class="section inner">
+              <div class="section-head"><div><h2 class="section-title">应用版图</h2><p class="section-sub">TOP 5 · 按活跃时长</p></div><span class="ghost-num">02</span></div>
+              <div class="app-list compact">
+                <div class="app-row" data-tip="Visual Studio Code · 18 小时 24 分 · 占本周 38%">
+                  <span class="app-rank">01</span><span class="app-mark" style="--hue:190">V</span><span class="app-name">Visual Studio Code</span>
+                  <span class="app-track"><i class="app-fill" style="--w:100%;--o:.9"></i></span><span class="app-time">18.4h</span><span class="app-pct">38%</span>
+                </div>
+                <div class="app-row" data-tip="Microsoft Edge · 12 小时 12 分 · 占本周 25%">
+                  <span class="app-rank">02</span><span class="app-mark" style="--hue:210">E</span><span class="app-name">Microsoft Edge</span>
+                  <span class="app-track"><i class="app-fill" style="--w:66%;--o:.55"></i></span><span class="app-time">12.2h</span><span class="app-pct">25%</span>
+                </div>
+                <div class="app-row" data-tip="ChatGPT · 5 小时 18 分 · 占本周 11%">
+                  <span class="app-rank">03</span><span class="app-mark" style="--hue:160">C</span><span class="app-name">ChatGPT</span>
+                  <span class="app-track"><i class="app-fill" style="--w:29%;--o:.42"></i></span><span class="app-time">5.3h</span><span class="app-pct">11%</span>
+                </div>
+                <div class="app-row" data-tip="微信 · 3 小时 6 分 · 占本周 6%">
+                  <span class="app-rank">04</span><span class="app-mark" style="--hue:130">微</span><span class="app-name">微信</span>
+                  <span class="app-track"><i class="app-fill" style="--w:17%;--o:.32"></i></span><span class="app-time">3.1h</span><span class="app-pct">6%</span>
+                </div>
+                <div class="app-row" data-tip="Counter-Strike 2 · 2 小时 36 分 · 占本周 5%">
+                  <span class="app-rank">05</span><span class="app-mark" style="--hue:20">C</span><span class="app-name">Counter-Strike 2</span>
+                  <span class="app-track"><i class="app-fill" style="--w:14%;--o:.28"></i></span><span class="app-time">2.6h</span><span class="app-pct">5%</span>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div class="highlight-row">
+            <article class="highlight">
+              <span class="highlight-kicker">连续记录</span>
+              <strong>7 天</strong>
+              <p>这是本月最长的一次连续记录，没有断档。</p>
+            </article>
+            <article class="highlight">
+              <span class="highlight-kicker">单日峰值</span>
+              <strong>16,840 <small>次</small></strong>
+              <p>周五的击键量，也是十月的单日最高值。</p>
+            </article>
+            <article class="highlight">
+              <span class="highlight-kicker">主动降速</span>
+              <strong>−22%</strong>
+              <p>周六、周日的平均专注时间，比工作日短。</p>
+            </article>
+          </div>
+
+          <footer class="report-foot">
+            <span>由本地数据生成 · 2026.11.18 18:43</span>
+            <span>对比基准：上一周（11.04 — 11.10）</span>
+          </footer>
+        </div>
+      </section>
+
+      <!-- ============================================================ 月报 -->
+      <section class="report" id="monthly" aria-labelledby="monthlyTitle" hidden>
+        <div class="sheet">
+          <header class="report-head">
+            <div class="eyebrow"><span class="eyebrow-dot"></span>MONTHLY / 月报 <span class="sep">·</span> 2026</div>
+
+            <div class="date-row">
+              <div class="date-lockup">
+                <span class="date-big">10</span>
+                <div class="date-stack"><strong>十月</strong><span>2026 · 10.01 — 10.31</span></div>
+              </div>
+              <div class="head-actions">
+                <span class="status-pill done"><i aria-hidden="true"></i>已归档</span>
+                <div class="stepper">
+                  <button class="icon-btn" data-fake aria-label="上个月">‹</button>
+                  <span class="stepper-label">2026 年 10 月</span>
+                  <button class="icon-btn" data-fake aria-label="下个月">›</button>
+                </div>
+              </div>
+            </div>
+
+            <h1 class="headline" id="monthlyTitle">十月，键盘敲了 <em>24.6 万</em> 次，<br>夜晚比九月安静了一些。</h1>
+            <p class="lede">31 天里有 30 天留下记录，最长连续 27 天。把最多的时间给了写作，也把最晚的一次留在了 23:41。</p>
+          </header>
+
+          <div class="metric-row">
+            <div class="metric">
+              <div class="metric-label"><span>总击键</span><span class="metric-en">KEYS</span></div>
+              <div class="metric-value">246,000</div>
+              <div class="metric-foot"><span class="delta up">▲ 12%</span><span>较九月</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label"><span>总点击</span><span class="metric-en">CLICKS</span></div>
+              <div class="metric-value">62,400</div>
+              <div class="metric-foot"><span class="delta down">▼ 3%</span><span>较九月</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label"><span>有效使用</span><span class="metric-en">FOCUS</span></div>
+              <div class="metric-value">168<span class="unit">时</span></div>
+              <div class="metric-foot"><span class="delta up">▲ 6%</span><span>较九月</span></div>
+            </div>
+            <div class="metric">
+              <div class="metric-label"><span>日均专注</span><span class="metric-en">AVG / DAY</span></div>
+              <div class="metric-value">5<span class="unit">时</span>25<span class="unit">分</span></div>
+              <div class="metric-foot"><span class="delta up">▲ 6%</span><span>较九月</span></div>
+            </div>
+          </div>
+
+          <section class="section">
+            <div class="section-head">
+              <div><h2 class="section-title">这个月的形状</h2><p class="section-sub">每一天的有效使用时长</p></div>
+              <div class="legend legend-inline"><span class="cal-legend">少</span><i class="cal-swatch l1"></i><i class="cal-swatch l2"></i><i class="cal-swatch l3"></i><i class="cal-swatch l4"></i><span class="cal-legend">多</span></div>
+            </div>
+            <div class="month-layout">
+              <div id="monthCalendar" class="calendar" aria-label="十月活跃热力图"></div>
+              <aside class="month-aside">
+                <div class="consistency"><strong>30<span>/31</span></strong><span>天有记录</span></div>
+                <div class="aside-list">
+                  <div><span>最长连续</span><b>27 天</b><small>10.01 — 10.27</small></div>
+                  <div><span>最高单日</span><b>9h 48m</b><small>10.22 周四</small></div>
+                  <div><span>最晚结束</span><b>23:41</b><small>10.18 周日</small></div>
+                </div>
+              </aside>
+            </div>
+          </section>
+
+          <section class="section">
+            <div class="section-head">
+              <div><h2 class="section-title">30 天轨迹</h2><p class="section-sub">每日活跃时长 · 7 日均线</p></div>
+              <div class="legend legend-inline"><span><i class="line-key accent"></i>每日</span><span><i class="line-key faint"></i>7 日均线</span></div>
+            </div>
+            <div id="monthTrend" class="chart-wrap" aria-label="十月每日活跃时长趋势图"></div>
+          </section>
+
+          <section class="section">
+            <div class="section-head">
+              <div><h2 class="section-title">四周</h2><p class="section-sub">按自然周拆分</p></div>
+              <span class="ghost-num">01</span>
+            </div>
+            <div class="week-cards" id="weekCards"></div>
+          </section>
+
+          <div class="grid-2">
+            <section class="section inner">
+              <div class="section-head"><div><h2 class="section-title">应用版图</h2><p class="section-sub">TOP 5 · 按活跃时长</p></div><span class="ghost-num">02</span></div>
+              <div class="app-list compact">
+                <div class="app-row" data-tip="Visual Studio Code · 62 小时 24 分 · 占本月 37%">
+                  <span class="app-rank">01</span><span class="app-mark" style="--hue:190">V</span><span class="app-name">Visual Studio Code</span>
+                  <span class="app-track"><i class="app-fill" style="--w:100%;--o:.9"></i></span><span class="app-time">62.4h</span><span class="app-pct">37%</span>
+                </div>
+                <div class="app-row" data-tip="Microsoft Edge · 41 小时 48 分 · 占本月 25%">
+                  <span class="app-rank">02</span><span class="app-mark" style="--hue:210">E</span><span class="app-name">Microsoft Edge</span>
+                  <span class="app-track"><i class="app-fill" style="--w:67%;--o:.55"></i></span><span class="app-time">41.8h</span><span class="app-pct">25%</span>
+                </div>
+                <div class="app-row" data-tip="ChatGPT · 18 小时 12 分 · 占本月 11%">
+                  <span class="app-rank">03</span><span class="app-mark" style="--hue:160">C</span><span class="app-name">ChatGPT</span>
+                  <span class="app-track"><i class="app-fill" style="--w:29%;--o:.42"></i></span><span class="app-time">18.2h</span><span class="app-pct">11%</span>
+                </div>
+                <div class="app-row" data-tip="微信 · 12 小时 24 分 · 占本月 7%">
+                  <span class="app-rank">04</span><span class="app-mark" style="--hue:130">微</span><span class="app-name">微信</span>
+                  <span class="app-track"><i class="app-fill" style="--w:20%;--o:.34"></i></span><span class="app-time">12.4h</span><span class="app-pct">7%</span>
+                </div>
+                <div class="app-row" data-tip="Counter-Strike 2 · 9 小时 36 分 · 占本月 6%">
+                  <span class="app-rank">05</span><span class="app-mark" style="--hue:20">C</span><span class="app-name">Counter-Strike 2</span>
+                  <span class="app-track"><i class="app-fill" style="--w:15%;--o:.28"></i></span><span class="app-time">9.6h</span><span class="app-pct">6%</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="section inner">
+              <div class="section-head"><div><h2 class="section-title">月度之最</h2><p class="section-sub">被数字记住的四个瞬间</p></div><span class="ghost-num">03</span></div>
+              <div class="extreme-grid">
+                <div class="extreme"><span class="extreme-label">最高单日</span><b>9h 48m</b><small>10.22 · 18,940 次击键</small></div>
+                <div class="extreme"><span class="extreme-label">最长连续</span><b>4h 02m</b><small>10.15 下午，没有离开</small></div>
+                <div class="extreme"><span class="extreme-label">最忙时段</span><b>15:00</b><small>整个月最密集的一小时</small></div>
+                <div class="extreme"><span class="extreme-label">上屏</span><b>18,420 字</b><small>平均 2.6 字 / 次提交</small></div>
+              </div>
+            </section>
+          </div>
+
+          <footer class="report-foot">
+            <span>由本地数据生成 · 2026.11.18 18:43</span>
+            <span>对比基准：2026 年 9 月</span>
+          </footer>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="tooltip" id="tooltip" role="tooltip"></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js?v=8"></script>
+</body>
+</html>
