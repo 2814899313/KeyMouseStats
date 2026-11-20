@@ -20,11 +20,11 @@ if not exist "%CSC%" (
 )
 pushd "%~dp0"
 
-set "SRC=%~dp0KeyMouseWidget.cs %~dp0Dashboard.cs %~dp0MouseDistance.cs %~dp0AppActivity.cs %~dp0AppFlow.cs %~dp0TrendCutoff.cs %~dp0AxisScale.cs %~dp0AppPanel.cs %~dp0ActivityTime.cs %~dp0ShortcutStats.cs %~dp0Insights.cs %~dp0Themes.cs %~dp0HourlyTrend.cs %~dp0HourProfile.cs %~dp0AppTelemetry.cs %~dp0ReportDesign.cs %~dp0ReportHabits.cs %~dp0StatisticsReport.cs %~dp0KeyboardHeatmap.cs %~dp0ClickHeatmap.cs %~dp0NikkiTheme.cs %~dp0HaloTheme.cs %~dp0ResidentTheme.cs %~dp0GameHud.cs %~dp0MinecraftTheme.cs %~dp0ReleaseAnalytics.cs %~dp0ReleaseReport.cs %~dp0WuxiaTheme.cs %~dp0EuroTruckTheme.cs %~dp0OriTheme.cs %~dp0GujianTheme.cs %~dp0WeeklyReview.cs %~dp0RangeAnalysis.cs %~dp0RangeReport.cs %~dp0DataManagement.cs %~dp0DataSettingsDialog.cs %~dp0Wellbeing.cs %~dp0WellbeingSettingsDialog.cs %~dp0StorageUsage.cs %~dp0Version.cs %~dp0Motion.cs %~dp0KeyPalette.cs %~dp0PressDuration.cs %~dp0PressReport.cs %~dp0HoldTrendReport.cs %~dp0RimeLog.cs %~dp0TextPanel.cs %~dp0AutoStart.cs %~dp0DailyReport.cs %~dp0DailyReportPanel.cs %~dp0DailyReportPoster.cs %~dp0PeriodReport.cs %~dp0PeriodPoster.cs %~dp0tests\TestDiagnostics.cs %~dp0AssemblyInfo.cs %~dp0StatsStore.cs %~dp0NativeBoot.cs %~dp0KmsDb.cs %~dp0KmsSchema.cs %~dp0EventRing.cs %~dp0DbWriter.cs %~dp0V2Migrator.cs %~dp0CategoryService.cs %~dp0SampleData.cs %~dp0LayoutFrame.cs %~dp0FlowAnalyzer.cs %~dp0ContextCost.cs %~dp0TimelineWindow.cs %~dp0PrivacyMask.cs %~dp0ShellNotification.cs %~dp0AutomationTrigger.cs %~dp0TimelineDrag.cs %~dp0FlowBoard.cs %~dp0InsightsFlow.cs %~dp0KmsPackage.cs %~dp0BattleReport.cs %~dp0DailyReportBattle.cs %~dp0KmsUi.cs %~dp0LayoutFlow.cs %~dp0UiPrimitives.cs %~dp0ChipLedger.cs"
-set "RES=/resource:"%~dp0assets\eurotruck-overview.jpg",EuroTruckOverview /resource:"%~dp0assets\eurotruck-trend.jpg",EuroTruckTrend /resource:"%~dp0assets\eurotruck-hours.jpg",EuroTruckHours /resource:"%~dp0assets\eurotruck-keys.jpg",EuroTruckKeys /resource:"%~dp0assets\eurotruck-apps.jpg",EuroTruckApps /resource:"%~dp0assets\eurotruck-insights.jpg",EuroTruckInsights /resource:"%~dp0assets\eurotruck-widget.jpg",EuroTruckWidget /resource:"%~dp0assets\eurotruck-icons.png",EuroTruckIcons /resource:"%~dp0assets\wuxia-backgrounds.jpg",WuxiaBackgrounds /resource:"%~dp0assets\wuxia-widget.jpg",WuxiaWidget /resource:"%~dp0assets\wuxia-ui.png",WuxiaUi /resource:"%~dp0assets\balatro-backgrounds.jpg",BalatroBackgrounds /resource:"%~dp0assets\balatro-icons.png",BalatroIcons /resource:"%~dp0assets\nikki-dream.jpg",NikkiDream /resource:"%~dp0assets\nikki-emotes.png",NikkiEmotes /resource:"%~dp0assets\nikki-pose-trend.jpg",NikkiPoseTrend /resource:"%~dp0assets\nikki-pose-hours.jpg",NikkiPoseHours /resource:"%~dp0assets\nikki-pose-keys.jpg",NikkiPoseKeys /resource:"%~dp0assets\nikki-pose-apps.jpg",NikkiPoseApps /resource:"%~dp0assets\nikki-pose-insights.jpg",NikkiPoseInsights /resource:"%~dp0assets\halo-icons.png",HaloIcons /resource:"%~dp0assets\halo-overview.jpg",HaloOverview /resource:"%~dp0assets\halo-trend.jpg",HaloTrend /resource:"%~dp0assets\halo-hours.jpg",HaloHours /resource:"%~dp0assets\halo-keys.jpg",HaloKeys /resource:"%~dp0assets\halo-apps.jpg",HaloApps /resource:"%~dp0assets\halo-insights.jpg",HaloInsights /resource:"%~dp0assets\resident-overview.jpg",ResidentOverview /resource:"%~dp0assets\resident-trend.jpg",ResidentTrend /resource:"%~dp0assets\resident-hours.jpg",ResidentHours /resource:"%~dp0assets\resident-keys.jpg",ResidentKeys /resource:"%~dp0assets\resident-apps.jpg",ResidentApps /resource:"%~dp0assets\resident-insights.jpg",ResidentInsights /resource:"%~dp0assets\resident-icons.png",ResidentIcons /resource:"%~dp0assets\minecraft-overview.jpg",MinecraftOverview /resource:"%~dp0assets\minecraft-trend.jpg",MinecraftTrend /resource:"%~dp0assets\minecraft-hours.jpg",MinecraftHours /resource:"%~dp0assets\minecraft-keys.jpg",MinecraftKeys /resource:"%~dp0assets\minecraft-apps.jpg",MinecraftApps /resource:"%~dp0assets\minecraft-insights.jpg",MinecraftInsights /resource:"%~dp0assets\minecraft-icons.png",MinecraftIcons /resource:"%~dp0assets\ori-overview.jpg",OriOverview /resource:"%~dp0assets\ori-trend.jpg",OriTrend /resource:"%~dp0assets\ori-hours.jpg",OriHours /resource:"%~dp0assets\ori-keys.jpg",OriKeys /resource:"%~dp0assets\ori-apps.jpg",OriApps /resource:"%~dp0assets\ori-insights.jpg",OriInsights /resource:"%~dp0assets\ori-text.jpg",OriText /resource:"%~dp0assets\ori-day.jpg",OriDay /resource:"%~dp0assets\ori-widget.jpg",OriWidget /resource:"%~dp0assets\ori-icons.png",OriIcons /resource:"%~dp0assets\ori-key-ornaments.png",OriKeyOrnaments /resource:"%~dp0assets\ori-report.jpg",OriReport /resource:"%~dp0assets\app-icon.ico",AppIcon"
-set "RES=%RES% @"%~dp0theme-extra-resources.rsp""
+set "SRC=KeyMouseWidget.cs Dashboard.cs MouseDistance.cs AppActivity.cs AppFlow.cs TrendCutoff.cs AxisScale.cs AppPanel.cs ActivityTime.cs ShortcutStats.cs Insights.cs Themes.cs HourlyTrend.cs HourProfile.cs AppTelemetry.cs ReportDesign.cs ReportHabits.cs StatisticsReport.cs KeyboardHeatmap.cs ClickHeatmap.cs NikkiTheme.cs HaloTheme.cs ResidentTheme.cs GameHud.cs MinecraftTheme.cs ReleaseAnalytics.cs ReleaseReport.cs WuxiaTheme.cs EuroTruckTheme.cs OriTheme.cs GujianTheme.cs WeeklyReview.cs RangeAnalysis.cs RangeReport.cs DataManagement.cs DataSettingsDialog.cs Wellbeing.cs WellbeingSettingsDialog.cs StorageUsage.cs Version.cs Motion.cs KeyPalette.cs PressDuration.cs PressReport.cs HoldTrendReport.cs RimeLog.cs TextPanel.cs AutoStart.cs DailyReport.cs DailyReportPanel.cs DailyReportPoster.cs PeriodReport.cs PeriodPoster.cs tests\TestDiagnostics.cs AssemblyInfo.cs StatsStore.cs NativeBoot.cs KmsDb.cs KmsSchema.cs EventRing.cs DbWriter.cs V2Migrator.cs CategoryService.cs SampleData.cs LayoutFrame.cs FlowAnalyzer.cs ContextCost.cs TimelineWindow.cs PrivacyMask.cs ShellNotification.cs AutomationTrigger.cs TimelineDrag.cs FlowBoard.cs InsightsFlow.cs KmsPackage.cs BattleReport.cs DailyReportBattle.cs KmsUi.cs LayoutFlow.cs UiPrimitives.cs ChipLedger.cs"
+set "RES=/resource:"assets\eurotruck-overview.jpg",EuroTruckOverview /resource:"assets\eurotruck-trend.jpg",EuroTruckTrend /resource:"assets\eurotruck-hours.jpg",EuroTruckHours /resource:"assets\eurotruck-keys.jpg",EuroTruckKeys /resource:"assets\eurotruck-apps.jpg",EuroTruckApps /resource:"assets\eurotruck-insights.jpg",EuroTruckInsights /resource:"assets\eurotruck-widget.jpg",EuroTruckWidget /resource:"assets\eurotruck-icons.png",EuroTruckIcons /resource:"assets\wuxia-backgrounds.jpg",WuxiaBackgrounds /resource:"assets\wuxia-widget.jpg",WuxiaWidget /resource:"assets\wuxia-ui.png",WuxiaUi /resource:"assets\balatro-backgrounds.jpg",BalatroBackgrounds /resource:"assets\balatro-icons.png",BalatroIcons /resource:"assets\nikki-dream.jpg",NikkiDream /resource:"assets\nikki-emotes.png",NikkiEmotes /resource:"assets\nikki-pose-trend.jpg",NikkiPoseTrend /resource:"assets\nikki-pose-hours.jpg",NikkiPoseHours /resource:"assets\nikki-pose-keys.jpg",NikkiPoseKeys /resource:"assets\nikki-pose-apps.jpg",NikkiPoseApps /resource:"assets\nikki-pose-insights.jpg",NikkiPoseInsights /resource:"assets\halo-icons.png",HaloIcons /resource:"assets\halo-overview.jpg",HaloOverview /resource:"assets\halo-trend.jpg",HaloTrend /resource:"assets\halo-hours.jpg",HaloHours /resource:"assets\halo-keys.jpg",HaloKeys /resource:"assets\halo-apps.jpg",HaloApps /resource:"assets\halo-insights.jpg",HaloInsights /resource:"assets\resident-overview.jpg",ResidentOverview /resource:"assets\resident-trend.jpg",ResidentTrend /resource:"assets\resident-hours.jpg",ResidentHours /resource:"assets\resident-keys.jpg",ResidentKeys /resource:"assets\resident-apps.jpg",ResidentApps /resource:"assets\resident-insights.jpg",ResidentInsights /resource:"assets\resident-icons.png",ResidentIcons /resource:"assets\minecraft-overview.jpg",MinecraftOverview /resource:"assets\minecraft-trend.jpg",MinecraftTrend /resource:"assets\minecraft-hours.jpg",MinecraftHours /resource:"assets\minecraft-keys.jpg",MinecraftKeys /resource:"assets\minecraft-apps.jpg",MinecraftApps /resource:"assets\minecraft-insights.jpg",MinecraftInsights /resource:"assets\minecraft-icons.png",MinecraftIcons /resource:"assets\ori-overview.jpg",OriOverview /resource:"assets\ori-trend.jpg",OriTrend /resource:"assets\ori-hours.jpg",OriHours /resource:"assets\ori-keys.jpg",OriKeys /resource:"assets\ori-apps.jpg",OriApps /resource:"assets\ori-insights.jpg",OriInsights /resource:"assets\ori-text.jpg",OriText /resource:"assets\ori-day.jpg",OriDay /resource:"assets\ori-widget.jpg",OriWidget /resource:"assets\ori-icons.png",OriIcons /resource:"assets\ori-key-ornaments.png",OriKeyOrnaments /resource:"assets\ori-report.jpg",OriReport /resource:"assets\app-icon.ico",AppIcon"
+set "RES=%RES% @"theme-extra-resources.rsp""
 rem v3.0: 原生 SQLite 引擎只给数据库用例编译,避免每个测试 exe 都背上 2.9 MB。
-set "RESNATIVE=/resource:"%~dp0assets\native\x64\e_sqlite3.dll",KmsNativeX64 /resource:"%~dp0assets\native\x86\e_sqlite3.dll",KmsNativeX86"
+set "RESNATIVE=/resource:"assets\native\x64\e_sqlite3.dll",KmsNativeX64 /resource:"assets\native\x86\e_sqlite3.dll",KmsNativeX86"
 set "OUT=%TEMP%\KeyMouseStatsTests"
 if not exist "%OUT%" mkdir "%OUT%"
 set "FAIL=0"
@@ -33,31 +33,31 @@ if defined THEME_ONLY set "TESTS=ThemeLoadingTests WuxiaThemeTests OriThemeTests
 
 for %%T in (%TESTS%) do (
     if /I "%%T"=="ThemeLoadingTests" (
-        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RES% %SRC% "%~dp0tests\%%T.cs"
+        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RES% %SRC% "tests\%%T.cs"
     ) else if /I "%%T"=="ThemeOwnershipTests" (
-        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RES% %SRC% "%~dp0tests\%%T.cs"
+        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RES% %SRC% "tests\%%T.cs"
     ) else if /I "%%T"=="WuxiaThemeTests" (
-        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RES% %SRC% "%~dp0tests\%%T.cs"
+        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RES% %SRC% "tests\%%T.cs"
     ) else if /I "%%T"=="OriThemeTests" (
-        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RES% %SRC% "%~dp0tests\%%T.cs"
+        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RES% %SRC% "tests\%%T.cs"
     ) else if /I "%%T"=="GujianThemeTests" (
-        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RES% %SRC% "%~dp0tests\%%T.cs"
+        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RES% %SRC% "tests\%%T.cs"
     ) else if /I "%%T"=="DbBootTests" (
-        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RESNATIVE% %SRC% "%~dp0tests\%%T.cs"
+        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RESNATIVE% %SRC% "tests\%%T.cs"
     ) else if /I "%%T"=="DbSchemaTests" (
-        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RESNATIVE% %SRC% "%~dp0tests\%%T.cs"
+        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RESNATIVE% %SRC% "tests\%%T.cs"
     ) else if /I "%%T"=="DbWriterTests" (
-        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RESNATIVE% %SRC% "%~dp0tests\%%T.cs"
+        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RESNATIVE% %SRC% "tests\%%T.cs"
     ) else if /I "%%T"=="MigrationTests" (
-        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RESNATIVE% %SRC% "%~dp0tests\%%T.cs"
+        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RESNATIVE% %SRC% "tests\%%T.cs"
     ) else if /I "%%T"=="SampleModeTests" (
-        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RESNATIVE% %SRC% "%~dp0tests\%%T.cs"
+        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RESNATIVE% %SRC% "tests\%%T.cs"
     ) else if /I "%%T"=="KmsPackageTests" (
-        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RESNATIVE% %SRC% "%~dp0tests\%%T.cs"
+        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RESNATIVE% %SRC% "tests\%%T.cs"
     ) else if /I "%%T"=="LayoutFlowTests" (
-        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RESNATIVE% %SRC% "%~dp0tests\%%T.cs"
+        "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %RESNATIVE% %SRC% "tests\%%T.cs"
     ) else (
-    "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %SRC% "%~dp0tests\%%T.cs"
+    "%CSC%" /nologo /target:exe /optimize+ /main:%%T /out:"%OUT%\%%T.exe" %SRC% "tests\%%T.cs"
     )
     if !ERRORLEVEL! neq 0 (
         echo [COMPILE FAIL] %%T
@@ -75,7 +75,7 @@ for %%T in (%TESTS%) do (
 
 if defined LOGIC_ONLY goto skipvisual
 echo [Render] RenderDashboard (refreshes previews/)
-"%CSC%" /nologo /target:exe /optimize+ /main:RenderDashboard /out:"%OUT%\RenderDashboard.exe" %RES% %SRC% "%~dp0tests\RenderDashboard.cs"
+"%CSC%" /nologo /target:exe /optimize+ /main:RenderDashboard /out:"%OUT%\RenderDashboard.exe" %RES% %SRC% "tests\RenderDashboard.cs"
 if !ERRORLEVEL! neq 0 (
     echo [COMPILE FAIL] RenderDashboard
     set "FAIL=1"
@@ -93,7 +93,7 @@ if !ERRORLEVEL! neq 0 (
 )
 
 echo [Render] DashboardAdditionsRender (dashboard-hours-intensity-*.png 等)
-"%CSC%" /nologo /target:exe /optimize+ /main:DashboardAdditionsRender /out:"%OUT%\DashboardAdditionsRender.exe" %RES% %SRC% "%~dp0tests\DashboardAdditionsRender.cs"
+"%CSC%" /nologo /target:exe /optimize+ /main:DashboardAdditionsRender /out:"%OUT%\DashboardAdditionsRender.exe" %RES% %SRC% "tests\DashboardAdditionsRender.cs"
 if !ERRORLEVEL! neq 0 (
     echo [COMPILE FAIL] DashboardAdditionsRender
     set "FAIL=1"
@@ -111,7 +111,7 @@ if !ERRORLEVEL! neq 0 (
 )
 
 echo [Render] ClickHeatRender (previews/click-heat-*.png)
-"%CSC%" /nologo /target:exe /optimize+ /main:ClickHeatRender /out:"%OUT%\ClickHeatRender.exe" %RES% %SRC% "%~dp0tests\ClickHeatRender.cs"
+"%CSC%" /nologo /target:exe /optimize+ /main:ClickHeatRender /out:"%OUT%\ClickHeatRender.exe" %RES% %SRC% "tests\ClickHeatRender.cs"
 if !ERRORLEVEL! neq 0 (
     echo [COMPILE FAIL] ClickHeatRender
     set "FAIL=1"
@@ -129,7 +129,7 @@ if !ERRORLEVEL! neq 0 (
 )
 
 echo [Render] AppsRender (previews/apps-*.png)
-"%CSC%" /nologo /target:exe /optimize+ /main:AppsRender /out:"%OUT%\AppsRender.exe" %RES% %SRC% "%~dp0tests\AppsRender.cs"
+"%CSC%" /nologo /target:exe /optimize+ /main:AppsRender /out:"%OUT%\AppsRender.exe" %RES% %SRC% "tests\AppsRender.cs"
 if !ERRORLEVEL! neq 0 (
     echo [COMPILE FAIL] AppsRender
     set "FAIL=1"
@@ -147,7 +147,7 @@ if !ERRORLEVEL! neq 0 (
 )
 
 echo [Render] TrendRender (previews/trend-partial*.png)
-"%CSC%" /nologo /target:exe /optimize+ /main:TrendRender /out:"%OUT%\TrendRender.exe" %RES% %SRC% "%~dp0tests\TrendRender.cs"
+"%CSC%" /nologo /target:exe /optimize+ /main:TrendRender /out:"%OUT%\TrendRender.exe" %RES% %SRC% "tests\TrendRender.cs"
 if !ERRORLEVEL! neq 0 (
     echo [COMPILE FAIL] TrendRender
     set "FAIL=1"
@@ -165,7 +165,7 @@ if !ERRORLEVEL! neq 0 (
 )
 
 echo [Render] HoursRender (previews/hours-*.png)
-"%CSC%" /nologo /target:exe /optimize+ /main:HoursRender /out:"%OUT%\HoursRender.exe" %RES% %SRC% "%~dp0tests\HoursRender.cs"
+"%CSC%" /nologo /target:exe /optimize+ /main:HoursRender /out:"%OUT%\HoursRender.exe" %RES% %SRC% "tests\HoursRender.cs"
 if !ERRORLEVEL! neq 0 (
     echo [COMPILE FAIL] HoursRender
     set "FAIL=1"
@@ -183,7 +183,7 @@ if !ERRORLEVEL! neq 0 (
 )
 
 echo [Render] KeysRender (previews/keys-*.png)
-"%CSC%" /nologo /target:exe /optimize+ /main:KeysRender /out:"%OUT%\KeysRender.exe" %RES% %SRC% "%~dp0tests\KeysRender.cs"
+"%CSC%" /nologo /target:exe /optimize+ /main:KeysRender /out:"%OUT%\KeysRender.exe" %RES% %SRC% "tests\KeysRender.cs"
 if !ERRORLEVEL! neq 0 (
     echo [COMPILE FAIL] KeysRender
     set "FAIL=1"
@@ -201,7 +201,7 @@ if !ERRORLEVEL! neq 0 (
 )
 
 echo [Render] InsightsRender (previews/insights-*.png)
-"%CSC%" /nologo /target:exe /optimize+ /main:InsightsRender /out:"%OUT%\InsightsRender.exe" %RES% %SRC% "%~dp0tests\InsightsRender.cs"
+"%CSC%" /nologo /target:exe /optimize+ /main:InsightsRender /out:"%OUT%\InsightsRender.exe" %RES% %SRC% "tests\InsightsRender.cs"
 if !ERRORLEVEL! neq 0 (
     echo [COMPILE FAIL] InsightsRender
     set "FAIL=1"
@@ -219,7 +219,7 @@ if !ERRORLEVEL! neq 0 (
 )
 
 echo [Render] TextRender (previews/text-*.png)
-"%CSC%" /nologo /target:exe /optimize+ /main:TextRender /out:"%OUT%\TextRender.exe" %RES% %SRC% "%~dp0tests\TextRender.cs"
+"%CSC%" /nologo /target:exe /optimize+ /main:TextRender /out:"%OUT%\TextRender.exe" %RES% %SRC% "tests\TextRender.cs"
 if !ERRORLEVEL! neq 0 (
     echo [COMPILE FAIL] TextRender
     set "FAIL=1"
@@ -237,7 +237,7 @@ if !ERRORLEVEL! neq 0 (
 )
 
 echo [Render] WidgetStorageRender (previews/widget-storage-preview.png)
-"%CSC%" /nologo /target:exe /optimize+ /main:WidgetStorageRender /out:"%OUT%\WidgetStorageRender.exe" %RES% %SRC% "%~dp0tests\WidgetStorageRender.cs"
+"%CSC%" /nologo /target:exe /optimize+ /main:WidgetStorageRender /out:"%OUT%\WidgetStorageRender.exe" %RES% %SRC% "tests\WidgetStorageRender.cs"
 if !ERRORLEVEL! neq 0 (
     echo [COMPILE FAIL] WidgetStorageRender
     set "FAIL=1"
@@ -255,7 +255,7 @@ if !ERRORLEVEL! neq 0 (
 )
 
 echo [Render] ReportHabitRender (previews/report-habit*.png)
-"%CSC%" /nologo /target:exe /optimize+ /main:ReportHabitRender /out:"%OUT%\ReportHabitRender.exe" %SRC% "%~dp0tests\ReportHabitRender.cs"
+"%CSC%" /nologo /target:exe /optimize+ /main:ReportHabitRender /out:"%OUT%\ReportHabitRender.exe" %SRC% "tests\ReportHabitRender.cs"
 if !ERRORLEVEL! neq 0 (
     echo [COMPILE FAIL] ReportHabitRender
     set "FAIL=1"
@@ -273,7 +273,7 @@ if !ERRORLEVEL! neq 0 (
 )
 
 echo [Render] ReportLiveRender (previews/report-live.png)
-"%CSC%" /nologo /target:exe /optimize+ /main:ReportLiveRender /out:"%OUT%\ReportLiveRender.exe" %SRC% "%~dp0tests\ReportLiveRender.cs"
+"%CSC%" /nologo /target:exe /optimize+ /main:ReportLiveRender /out:"%OUT%\ReportLiveRender.exe" %SRC% "tests\ReportLiveRender.cs"
 if !ERRORLEVEL! neq 0 (
     echo [COMPILE FAIL] ReportLiveRender
     set "FAIL=1"
@@ -292,7 +292,7 @@ if !ERRORLEVEL! neq 0 (
 
 echo.
 echo [Bench] ThemePerf (keyboard heatmap frames, informational only)
-"%CSC%" /nologo /target:exe /optimize+ /main:ThemePerf /out:"%OUT%\ThemePerf.exe" %RES% %SRC% "%~dp0tests\ThemePerf.cs"
+"%CSC%" /nologo /target:exe /optimize+ /main:ThemePerf /out:"%OUT%\ThemePerf.exe" %RES% %SRC% "tests\ThemePerf.cs"
 if !ERRORLEVEL! equ 0 (
     pushd "%~dp0"
     "%OUT%\ThemePerf.exe"
