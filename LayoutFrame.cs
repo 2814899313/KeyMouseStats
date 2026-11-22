@@ -126,8 +126,10 @@ namespace KeyMouseStats
             int height = wantH > 0 ? wantH : min.Height;
             if (width < min.Width) width = min.Width;
             if (height < min.Height) height = min.Height;
-            if (workArea.Width > min.Width && width > workArea.Width) width = workArea.Width;
-            if (workArea.Height > min.Height && height > workArea.Height) height = workArea.Height;
+            // 工作区小于设计最小尺寸时,也必须无条件夹紧;否则 150%/175%
+            // 1080p 上会把 1608/1876 × 1086/1267 的窗口顶到屏幕外。
+            if (workArea.Width > 0 && width > workArea.Width) width = workArea.Width;
+            if (workArea.Height > 0 && height > workArea.Height) height = workArea.Height;
             return new Size(width, height);
         }
 

@@ -52,6 +52,7 @@ internal static class WellbeingAutomationTests
             WellbeingSettings.FullscreenDnd = true;
             WellbeingSettings.ScriptPath = "";
             WellbeingSettings.WebhookUrl = "";
+            WellbeingSettings.FocusBreakEnabled = true;
         }
     }
 
@@ -68,6 +69,8 @@ internal static class WellbeingAutomationTests
         Check(WellbeingSettings.FullscreenDnd, "缺失的 DND 段保持默认(开)");
         Same(WellbeingSettings.ScriptPath, "sentinel", "缺失的脚本段不覆盖既有值");
         Same(WellbeingSettings.WebhookUrl, "sentinel", "缺失的 Webhook 段不覆盖既有值");
+        Check(WellbeingSettings.FocusPillEnabled, "旧格式缺 Focus Pill 段时保持默认(开)");
+        Check(WellbeingSettings.FocusBreakEnabled, "旧格式缺 Focus Break 段时保持默认(开)");
 
         WellbeingSettings.Load("");
         Check(true, "空串加载不抛");
@@ -81,9 +84,16 @@ internal static class WellbeingAutomationTests
         WellbeingSettings.FullscreenDnd = false;
         WellbeingSettings.ScriptPath = @"C:\tools\提醒 脚本.bat";
         WellbeingSettings.WebhookUrl = "https://example.com/hook";
+        WellbeingSettings.FocusPillEnabled = false;
+        WellbeingSettings.FocusPillAfterMinutes = 6;
+        WellbeingSettings.FocusBreakEnabled = false;
+        WellbeingSettings.FocusBreakAfterMinutes = 50;
+        WellbeingSettings.FocusBreakIdleSeconds = 20;
+        WellbeingSettings.BreakSnoozeUntil = new DateTime(2026, 9, 9, 10, 45, 0);
+        WellbeingSettings.BreakMutedDay = "2026-09-09";
         string text = WellbeingSettings.Encode();
         string[] parts = text.Split('|');
-        Equal(parts.Length, 13, "新格式应为 13 段");
+        Equal(parts.Length, 20, "新格式应为 20 段");
 
         WellbeingSettings.FullscreenDnd = true;
         WellbeingSettings.ScriptPath = "";
@@ -92,6 +102,11 @@ internal static class WellbeingAutomationTests
         Check(!WellbeingSettings.FullscreenDnd, "DND 往返一致");
         Same(WellbeingSettings.ScriptPath, @"C:\tools\提醒 脚本.bat", "脚本路径往返一致(含中文与空格)");
         Same(WellbeingSettings.WebhookUrl, "https://example.com/hook", "Webhook 往返一致");
+        Check(!WellbeingSettings.FocusPillEnabled && WellbeingSettings.FocusPillAfterMinutes == 6, "Focus Pill 往返一致");
+        Check(!WellbeingSettings.FocusBreakEnabled && WellbeingSettings.FocusBreakAfterMinutes == 50, "Focus Break 往返一致");
+        Check(WellbeingSettings.FocusBreakIdleSeconds == 20, "Focus Break 缓冲往返一致");
+        Check(WellbeingSettings.BreakSnoozeUntil == new DateTime(2026, 9, 9, 10, 45, 0), "Snooze 往返一致");
+        Same(WellbeingSettings.BreakMutedDay, "2026-09-09", "MutedDay 往返一致");
 
         string again = WellbeingSettings.Encode();
         Same(again, text, "编码幂等");
@@ -103,7 +118,7 @@ internal static class WellbeingAutomationTests
         WellbeingSettings.ScriptPath = @"C:\a|b\c.bat";
         WellbeingSettings.WebhookUrl = "https://x/y?a=1|2";
         string text = WellbeingSettings.Encode();
-        Equal(text.Split('|').Length, 13, "含分隔符的路径不得增加字段数");
+        Equal(text.Split('|').Length, 20, "含分隔符的路径不得增加字段数");
         WellbeingSettings.ScriptPath = "";
         WellbeingSettings.WebhookUrl = "";
         WellbeingSettings.Load(text);
@@ -150,6 +165,7 @@ internal static class WellbeingAutomationTests
         WellbeingSettings.ContinuousMinutes = 90;
         WellbeingSettings.CooldownMinutes = 30;
         WellbeingSettings.LastReminder = DateTime.MinValue;
+        WellbeingSettings.FocusBreakEnabled = false;   // 本用例验证旧版连续提醒本身
 
         ActiveSession session = new ActiveSession();
         session.Seconds = 120 * 60;   // 2 小时

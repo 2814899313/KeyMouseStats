@@ -441,6 +441,12 @@ namespace KeyMouseStats
             {
                 // 键帽板只依赖主题色/配列/缩放/口径与计数;主题图片异步完成不应让静态板无谓重建。
                 System.Text.StringBuilder stamp=new System.Text.StringBuilder(Store.ThemeId+":"+layout+":"+_s.ToString(CultureInfo.InvariantCulture)+":"+(holdMode?"hold":"count"));
+                // 底板位图必须和 plateBounds 一起缓存:同 DPI 下只改窗口尺寸时,
+                // 旧图会被原样贴回,导致键帽与悬停命中矩形错位。
+                stamp.Append(":g").Append(plateBounds.X.ToString("0.##",CultureInfo.InvariantCulture))
+                     .Append(',').Append(plateBounds.Y.ToString("0.##",CultureInfo.InvariantCulture))
+                     .Append(',').Append(plateBounds.Width.ToString("0.##",CultureInfo.InvariantCulture))
+                     .Append(',').Append(plateBounds.Height.ToString("0.##",CultureInfo.InvariantCulture));
                 foreach(HeatKey key in keys)stamp.Append(':').Append(key.Scan).Append('=').Append(holdMode?(long)KeyboardHeat.HoldMs(holds,key.Scan):KeyboardHeat.Count(counts,key.Scan));
                 string signature=stamp.ToString();
                 keyGraphics=null;

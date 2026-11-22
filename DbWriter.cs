@@ -39,7 +39,7 @@ namespace KeyMouseStats
         internal EventClock()
         {
             _anchorTicks = Stopwatch.GetTimestamp();
-            _anchorMs = DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond;
+            _anchorMs = UnixTime.NowMs();
             _ticksPerMs = Stopwatch.Frequency / 1000.0;
         }
 
@@ -178,8 +178,6 @@ namespace KeyMouseStats
         /// <summary>单日窗口标题上限;超出部分塌缩到 (process_key, "") 并标记 overflow。</summary>
         internal const int WindowTitleLimitPerDay = 2000;
 
-        private static readonly DateTime UnixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-
         private readonly KmsDb _db;
         private readonly EventRing _ring;
         private readonly EventClock _clock = new EventClock();
@@ -191,6 +189,7 @@ namespace KeyMouseStats
         private Thread _thread;
         private volatile bool _stop;
         private int _busy;
+        private int _wakeArmed;
         private string _day = "";
         private LiveSession _session;
         private LiveBurst _burst;
@@ -295,8 +294,9 @@ namespace KeyMouseStats
         {
             while (!_stop)
             {
-                try { _signal.WaitOne(1000); }
+                try { _signal.WaitOne(200); }
                 catch { }
+                Interlocked.Exchange(ref _wakeArmed, 0);
                 if (_stop) break;
                 try { DrainOnce(); }
                 catch (Exception error) { AppendDiag("写线程异常:" + error.GetType().Name + " · " + error.Message); }
@@ -336,9 +336,10 @@ namespace KeyMouseStats
             AppendDiag("环满丢弃累计 " + dropped + " 条(写线程跟不上,计数可能偏小)");
         }
 
-        /// <summary>信号量唤醒写线程(由 Flush/定时器调用)。</summary>
+        /// <summary>信号量唤醒写线程(由 Flush/定时器调用)。重复调用合并成一次 Set。</summary>
         internal void Wake()
         {
+            if (Interlocked.Exchange(ref _wakeArmed, 1) != 0) return;
             try { _signal.Set(); } catch { }
         }
 
@@ -884,12 +885,12 @@ namespace KeyMouseStats
 
         private static DateTime ToLocal(long ms)
         {
-            return UnixEpoch.AddMilliseconds(ms).ToLocalTime();
+            return UnixTime.ToLocal(ms);
         }
 
         private static long NowMs()
         {
-            return DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond;
+            return UnixTime.NowMs();
         }
 
         private void AppendDiag(string message)
@@ -978,6 +979,14 @@ namespace KeyMouseStats
             item.Y = y;
             item.Delta = delta;
             ring.TryEnqueue(ref item);
+            if (ring.IsBacklogged) Wake();
+        }
+
+        /// <summary>主动唤醒写线程;重复调用由 DbWriter.Wake 合并。</summary>
+        internal static void Wake()
+        {
+            DbWriter writer = _writer;
+            if (writer != null) writer.Wake();
         }
 
         internal static bool Flush(int timeoutMs)
@@ -1127,6 +1136,8 @@ namespace KeyMouseStats
         internal static void Enqueue(int kind, IntPtr hwnd, int vkOrButton, int x, int y, int delta, long ticks)
         {
         }
+
+        internal static void Wake() { }
 
         internal static bool Flush(int timeoutMs) { return true; }
         internal static void Stop() { }

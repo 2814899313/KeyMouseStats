@@ -99,6 +99,20 @@ internal static class LayoutMetricsTests
         Equal(min175.Height, 1040, "175% 最小高应夹到工作区高");
         Check(min175.Height <= work1080.Height, "175% 最小尺寸不得超出工作区");
 
+        // P1-01:工作区小于设计最小尺寸时,FitClientSize 也必须无条件夹紧。
+        Size fit150 = LayoutFrame.FitClientSize(0, 0, 1.5f, work1080);
+        Size fit175 = LayoutFrame.FitClientSize(0, 0, 1.75f, work1080);
+        Size fit200 = LayoutFrame.FitClientSize(0, 0, 2f, work1080);
+        Check(fit150.Width <= work1080.Width && fit150.Height <= work1080.Height,
+            "150% 默认窗口必须夹进 1080p 工作区");
+        Check(fit175.Width <= work1080.Width && fit175.Height <= work1080.Height,
+            "175% 默认窗口必须夹进 1080p 工作区");
+        Check(fit200.Width <= work1080.Width && fit200.Height <= work1080.Height,
+            "200% 默认窗口必须夹进 1080p 工作区");
+        Size huge150 = LayoutFrame.FitClientSize(4000, 3000, 1.5f, work1080);
+        Check(huge150.Width <= work1080.Width && huge150.Height <= work1080.Height,
+            "150% 超大记忆尺寸也必须夹进工作区");
+
         // 工作区足够大时不夹紧,口径与旧版一致。
         Size roomy = LayoutFrame.MinClientSize(1.5f, new Size(2560, 1440));
         Equal(roomy.Width, 1608, "工作区充裕时 150% 最小宽不变");
@@ -260,5 +274,19 @@ internal static class LayoutMetricsTests
         // 基准尺寸下弹性必须恰好为 0(旧布局逐像素不变)
         Near(Math.Max(0f, LayoutFrame.Cb(724, 1f) - 586f), 0f, 0.01f, "基准高度弹性为 0");
         Near(234f + Math.Max(0f, LayoutFrame.Cb(724, 1f) - 586f), 234f, 0.01f, "基准主视觉卡高度不变");
+
+        // P1-02:负 ElasticH(150%/175% @ 1080p)走紧凑总览,胶囊与摘要都不得越过卡片底边。
+        float[] compactHeights = { 203f, 104f };
+        for (int i = 0; i < compactHeights.Length; i++)
+        {
+            float h = compactHeights[i];
+            for (int chip = 0; chip < 4; chip++)
+            {
+                RectangleF r = Dashboard.CompactOverviewChipRect(24f, 306f, 404f, chip);
+                Check(r.Bottom <= 306f + h + 0.01f, "紧凑周期胶囊不得越过卡片底边 h=" + h);
+            }
+            RectangleF summary = Dashboard.CompactOverviewSummaryRect(24f, 306f, 404f, h);
+            Check(summary.Bottom <= 306f + h + 0.01f, "紧凑摘要不得越过卡片底边 h=" + h);
+        }
     }
 }

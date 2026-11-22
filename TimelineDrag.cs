@@ -18,6 +18,8 @@ namespace KeyMouseStats
         internal const int StepSeconds = 60;
         internal const int FastStepSeconds = 600;
         internal const int DefaultSpanSeconds = TimelineWindow.DaySeconds;
+        internal const int FocusPaddingSeconds = 1800;
+        internal const int FocusMinSpanSeconds = 7200;
 
         public bool Active;
         public RectangleF Track;
@@ -82,6 +84,25 @@ namespace KeyMouseStats
             if (second == CursorSec) return false;
             CursorSec = second;
             return true;
+        }
+
+        /// <summary>
+        /// 自动聚焦活跃区间:前后各留 30 分钟,最小跨度 2 小时。
+        /// 双击仍由 ResetView 复位为 24 小时全天。
+        /// </summary>
+        public bool FocusRange(int firstSec, int lastSec)
+        {
+            int start, span;
+            TimelineWindow.FocusRange(firstSec, lastSec, FocusPaddingSeconds, FocusMinSpanSeconds,
+                out start, out span);
+            bool changed = StartSec != start || SpanSec != span || CursorSec >= 0 || HoverSec >= 0;
+            StartSec = start;
+            SpanSec = span;
+            CursorSec = -1;
+            HoverSec = -1;
+            Active = false;
+            _moved = false;
+            return changed;
         }
 
         /// <summary>双击复位:回到全天 [0, 86400] 并清除游标。返回是否需要重绘。</summary>

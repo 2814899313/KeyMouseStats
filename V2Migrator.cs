@@ -806,7 +806,7 @@ namespace KeyMouseStats
 
         private static long NowMs()
         {
-            return DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond;
+            return UnixTime.NowMs();
         }
 
         private static void LogDiag(string dbRoot, string message)

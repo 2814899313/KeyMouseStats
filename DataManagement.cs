@@ -81,7 +81,7 @@ namespace KeyMouseStats
     internal sealed class MonthArchive
     {
         public int Year, Month, Days, Sessions;
-        public long Keys, Clicks, Wheel, Combos;
+        public long Keys, Clicks, Wheel, HWheel, Combos;
         public double ActiveSeconds, MoveMeters;
         /// <summary>1.7.6:归档也保留按住时长,避免超期后这一维度凭空消失。</summary>
         public long HoldCount, HoldDiscarded;
@@ -111,6 +111,7 @@ namespace KeyMouseStats
             archive.Keys += day.Keys;
             archive.Clicks += day.Clicks;
             archive.Wheel += day.Wheel;
+            archive.HWheel += day.HWheel;
             archive.Combos += PersonalStats.Combos(day);
             archive.ActiveSeconds += day.ActiveSeconds;
             archive.MoveMeters += day.MoveMeters;
@@ -161,6 +162,7 @@ namespace KeyMouseStats
             sb.Append('|').Append(archive.HoldMaxMs.ToString("R", CultureInfo.InvariantCulture));
             sb.Append('|').Append(archive.HoldActiveSeconds.ToString("R", CultureInfo.InvariantCulture));
             sb.Append('|').Append(archive.HoldDiscarded.ToString(CultureInfo.InvariantCulture));
+            sb.Append('|').Append(archive.HWheel.ToString(CultureInfo.InvariantCulture));
             return sb.ToString();
         }
 
@@ -212,6 +214,7 @@ namespace KeyMouseStats
                     archive.HoldActiveSeconds = Math.Max(0, ParseDouble(fields[13]));
                     archive.HoldDiscarded = Math.Max(0, ParseLong(fields[14]));
                 }
+                if (fields.Length >= 16) archive.HWheel = Math.Max(0, ParseLong(fields[15]));
                 archives[archive.Key] = archive;
             }
             catch (FormatException) { }
@@ -338,7 +341,8 @@ namespace KeyMouseStats
             if (replace)
             {
                 result.Replaced = preview.Data.History.Count;
-                Store.ApplyParsed(preview.Data, true);
+                // 跨机器导入不覆盖本机的外设纪元与选屏身份:DeviceName / 磨损计数属于本机硬件。
+                Store.ApplyParsed(preview.Data, true, false);
             }
             else
             {

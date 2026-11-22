@@ -112,6 +112,8 @@ internal static class SaveReliabilityTests
             Store.History[ancient] = old;
             Store.Save();
             Check(!File.ReadAllText(file).Contains(ancient.ToString("yyyy-MM-dd")), "save prunes days outside the retention window");
+
+            LongPathAndVisibleFailure(directory);
         }
         finally
         {
@@ -127,5 +129,61 @@ internal static class SaveReliabilityTests
             catch { }
         }
         Console.WriteLine("PASS: " + _checks + " storage reliability checks");
+    }
+
+    private static void LongPathAndVisibleFailure(string normalDirectory)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "KeyMouseLong-" + Guid.NewGuid().ToString("N"));
+        while (root.Length < 250) root += "\\" + new string('r', 18);
+        string longDirectory = root + "\\data";
+        string blocker = Path.Combine(Path.GetTempPath(), "KeyMouseBlock-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Check(Store.LongPath(@"C:\short") == @"C:\short", "短路径不应加前缀");
+            Check(Store.LongPath(@"C:\" + new string('x', 260)).StartsWith(@"\\?\"), "长本地路径应加 \\?\\ 前缀");
+            Check(Store.LongPath(@"\\server\share\" + new string('x', 260)).StartsWith(@"\\?\UNC\"),
+                "长 UNC 路径应加 UNC 长路径前缀");
+
+            Store.DataDirectory = longDirectory;
+            Store.History.Clear();
+            Store.Total = new Counters();
+            Store.RollDay(DateTime.Today);
+            Store.Today.Keys = 7;
+            Store.LastSaveError = "";
+            Store.Save();
+            Check(Store.LastSaveError == "", "长路径保存应成功: " + Store.LastSaveError);
+            Check(LongPathIO.FileExists(Store.LongPath(Path.Combine(longDirectory, "stats.txt"))),
+                "长路径下 stats.txt 应真实存在");
+            LongPathIO.CreateDirectory(Store.LongPath(Path.Combine(longDirectory, "2025")));
+            string[] longDirs = LongPathIO.GetDirectories(Store.LongPath(longDirectory));
+            Check(longDirs.Length >= 1, "长路径目录枚举应能看到子目录");
+            Store.History.Clear();
+            Store.RollDay(DateTime.Today);
+            Store.Load();
+            Check(Store.Today.Keys == 7, "长路径下 stats.txt 应能读回");
+
+            // 父级是文件时,Directory.CreateDirectory 必然失败;错误必须可见。
+            File.WriteAllText(blocker, "not a directory");
+            Store.DataDirectory = Path.Combine(blocker, "data");
+            Store.Today.Keys = 1;
+            Store.LastSaveError = "";
+            Store.Save();
+            Check(!string.IsNullOrEmpty(Store.LastSaveError), "写入失败必须留下用户可见错误");
+            Check(Store.SaveFailureVersion > 0, "写入失败必须递增可见状态版本");
+
+            Store.DataDirectory = normalDirectory;
+            Store.History.Clear();
+            Store.RollDay(DateTime.Today);
+            Store.Today.Keys = 1;
+            Store.Save();
+            Check(Store.LastSaveError == "", "后续成功保存应清除错误状态");
+        }
+        finally
+        {
+            Store.DataDirectory = normalDirectory;
+            try { File.Delete(blocker); } catch { }
+            try { LongPathIO.DeleteDirectory(root); } catch { }
+            try { Directory.Delete(root, true); } catch { }
+        }
     }
 }

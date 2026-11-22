@@ -41,7 +41,10 @@ internal static class FlowAnalyzerTests
     {
         NormalizeRules();
         DeepHappyPath();
-        DeepNeedsFifteenMinutes();
+        DeepNeedsTenMinutes();
+        LenientRhythmAndInput();
+        StickinessCategoriesAndNormal();
+        LongestFocusRunCountsNormal();
         MicroCheckoutKeepsFlow();
         LongBreakInterrupts();
         UnrelatedSwitchesInterrupt();
@@ -51,6 +54,10 @@ internal static class FlowAnalyzerTests
         ExtraCoverage();
         IdleWindowNotFragmented();
         NoOverlapDoubleCount();
+        MergeAcrossGapStaysSplit();
+        LongIdleActiveMsNotFragmented();
+        MinuteSegmentKeysProrated();
+        HasDataRequiresMeaningfulInput();
         Console.WriteLine("FlowAnalyzerTests: " + _checks + " 项断言通过");
     }
 
@@ -106,16 +113,92 @@ internal static class FlowAnalyzerTests
         Near(r.Parts.Quality, 1, 0.001, "质量项为 1");
     }
 
-    private static void DeepNeedsFifteenMinutes()
+    private static void DeepNeedsTenMinutes()
     {
-        List<FlowSessionRow> s = new List<FlowSessionRow>(); s.Add(S(0, 840, "code.exe", 0, 6000));
-        FlowReport r = FlowAnalyzer.Analyze(s, Bursts(0, 840, 30, 40, 500), new FlowConfig());
-        bool deep = false;
-        for (int i = 0; i < r.Segments.Count; i++) if (r.Segments[i].State == FlowState.Deep) deep = true;
-        Check(!deep, "14 分钟不足以判为深度心流");
-        Equal(r.LongestDeepMs, 0, "无深度段时连击为 0");
-        Check(r.FocusScore < 100, "不足 15 分钟不应满分");
-        Check(r.FocusScore > 30, "常规活跃仍应有一定分数");
+        List<FlowSessionRow> s9 = new List<FlowSessionRow>(); s9.Add(S(0, 540, "code.exe", 0, 4000));
+        FlowReport r9 = FlowAnalyzer.Analyze(s9, Bursts(0, 540, 30, 40, 500), new FlowConfig());
+        bool deep9 = false;
+        for (int i = 0; i < r9.Segments.Count; i++) if (r9.Segments[i].State == FlowState.Deep) deep9 = true;
+        Check(!deep9, "9 分钟不足以判为深度心流");
+        Equal(r9.LongestDeepMs, 0, "无深度段时深度连击为 0");
+        Check(r9.LongestFocusMs >= 540000, "9 分钟仍应计入最长专注");
+        Check(r9.FocusScore < 100, "不足 10 分钟不应满分");
+
+        List<FlowSessionRow> s10 = new List<FlowSessionRow>(); s10.Add(S(0, 600, "code.exe", 0, 5000));
+        FlowReport r10 = FlowAnalyzer.Analyze(s10, Bursts(0, 600, 30, 40, 500), new FlowConfig());
+        bool deep10 = false;
+        for (int i = 0; i < r10.Segments.Count; i++) if (r10.Segments[i].State == FlowState.Deep) deep10 = true;
+        Check(deep10, "10 分钟连续专注应判为深度心流");
+        Equal(r10.LongestDeepMs, 600000, "深度连击 = 10 分钟");
+    }
+
+    /// <summary>宽容节奏:思考停顿不被绝对方差误杀,鼠标点击也计入有效输入。</summary>
+    private static void LenientRhythmAndInput()
+    {
+        List<FlowSessionRow> s = new List<FlowSessionRow>();
+        s.Add(S(0, 1200, "code.exe", 0, 9000));
+        FlowReport r = FlowAnalyzer.Analyze(s, Bursts(0, 1200, 30, 40, 100000), new FlowConfig());
+        Check(r.LongestDeepMs >= 600000, "思考停顿(高 IKI 方差)不应把深度心流判成碎片");
+
+        List<FlowSessionRow> clicks = new List<FlowSessionRow>();
+        FlowSessionRow row = S(0, 600, "code.exe", 0, 10);
+        row.InputCount = 150;
+        clicks.Add(row);
+        List<FlowBurstRow> b = new List<FlowBurstRow>();
+        FlowBurstRow burst = new FlowBurstRow();
+        burst.StartMs = 0; burst.EndMs = 600000;
+        burst.KeyCount = 5; burst.IkiAvgMs = 180; burst.IkiVar = 500;
+        b.Add(burst);
+        FlowReport cr = FlowAnalyzer.Analyze(clicks, b, new FlowConfig());
+        Check(cr.LongestDeepMs >= 600000, "鼠标点击占主导 + 少量键盘应能构成深度专注");
+    }
+
+    /// <summary>0.72 粘性与 3 类别上限;48% 粘性应落常规专注。</summary>
+    private static void StickinessCategoriesAndNormal()
+    {
+        List<FlowSessionRow> s = new List<FlowSessionRow>();
+        s.Add(S(0, 240, "code.exe", 0, 3000));
+        s.Add(S(240, 30, "chrome.exe", 4, 300));
+        s.Add(S(270, 30, "office.exe", 5, 300));
+        s.Add(S(300, 240, "code.exe", 0, 3000));
+        s.Add(S(540, 30, "chrome.exe", 4, 300));
+        s.Add(S(570, 30, "office.exe", 5, 300));
+        s.Add(S(600, 240, "code.exe", 0, 3000));
+        s.Add(S(840, 30, "chrome.exe", 4, 300));
+        s.Add(S(870, 30, "office.exe", 5, 300));
+        FlowReport r = FlowAnalyzer.Analyze(s, Bursts(0, 900, 30, 40, 500), new FlowConfig());
+        Check(r.LongestDeepMs >= 600000, "0.8 粘性 + 3 类别应可判深度心流");
+
+        List<FlowSessionRow> n = new List<FlowSessionRow>();
+        n.Add(S(0, 144, "code.exe", 0, 2000));
+        n.Add(S(144, 156, "chrome.exe", 4, 2000));
+        FlowReport nr = FlowAnalyzer.Analyze(n, Bursts(0, 300, 30, 40, 500), new FlowConfig());
+        bool normal = false;
+        for (int i = 0; i < nr.Segments.Count; i++) if (nr.Segments[i].State == FlowState.Normal) normal = true;
+        Check(normal, "48% 粘性应判常规专注");
+        Equal(nr.LongestDeepMs, 0, "不足 72% 粘性不应判深度");
+        Check(nr.LongestFocusMs >= 300000, "常规专注应计入最长专注");
+    }
+
+    private static FlowSegment Seg(long startSec, long durSec, FlowState state)
+    {
+        FlowSegment segment = new FlowSegment();
+        segment.StartMs = startSec * 1000L;
+        segment.EndMs = (startSec + durSec) * 1000L;
+        segment.State = state;
+        return segment;
+    }
+
+    /// <summary>LongestFocusMs 必须把连续的 Deep + Normal 合并计算。</summary>
+    private static void LongestFocusRunCountsNormal()
+    {
+        List<FlowSegment> segments = new List<FlowSegment>();
+        segments.Add(Seg(0, 600, FlowState.Deep));
+        segments.Add(Seg(600, 300, FlowState.Normal));
+        segments.Add(Seg(900, 60, FlowState.Fragmented));
+        segments.Add(Seg(960, 600, FlowState.Deep));
+        segments.Add(Seg(1560, 240, FlowState.Idle));
+        Equal(FlowAnalyzer.LongestFocusRun(segments), 900000, "深度 + 常规应合并为最长专注");
     }
 
     private static void MicroCheckoutKeepsFlow()
@@ -283,5 +366,93 @@ internal static class FlowAnalyzerTests
         long sum = 0;
         for (int i = 0; i < r.Segments.Count; i++) sum += r.Segments[i].LengthMs;
         Equal(sum, total, "分段求和自洽");
+    }
+
+    /// <summary>同态但中间隔 2 小时:必须保持两段,不得桥接成更长连击。</summary>
+    private static void MergeAcrossGapStaysSplit()
+    {
+        List<FlowSessionRow> s = new List<FlowSessionRow>();
+        s.Add(S(0, 1200, "code.exe", 0, 9000));
+        s.Add(S(8400, 1200, "code.exe", 0, 9000));    // 与上一段相隔 2 小时
+        List<FlowBurstRow> b = Bursts(0, 1200, 30, 40, 500);
+        b.AddRange(Bursts(8400, 9600, 30, 40, 500));
+        FlowReport r = FlowAnalyzer.Analyze(s, b, new FlowConfig());
+        Check(r.Segments.Count >= 2, "同态段之间有 2 小时空洞时必须拆成两段");
+        Equal(r.LongestDeepMs, 1200000, "空洞不得把两段深度桥接成更长连击");
+        long total = 0;
+        for (int i = 0; i < r.Segments.Count; i++) total += r.Segments[i].LengthMs;
+        Check(total <= 2460000, "两段各 20 分钟,总活动时长不得超过 41 分钟(实际 " + total + " ms)");
+    }
+
+    /// <summary>93 分钟前台会话只有 3.6 秒有效输入:应判 Idle,不得铺成长碎片。</summary>
+    private static void LongIdleActiveMsNotFragmented()
+    {
+        FlowSessionRow idle = S(0, 5580, "Gemini.exe", 4, 0);
+        idle.ActiveMs = 3633;
+        List<FlowSessionRow> s = new List<FlowSessionRow>();
+        s.Add(idle);
+        FlowReport r = FlowAnalyzer.Analyze(s, new List<FlowBurstRow>(), new FlowConfig());
+        Check(r.IdleMs >= 5500000, "93 分钟挂机会话应归入 Idle(实际 " + r.IdleMs + " ms)");
+        long frag = 0;
+        for (int i = 0; i < r.Segments.Count; i++)
+            if (r.Segments[i].State == FlowState.Fragmented) frag += r.Segments[i].LengthMs;
+        Equal(frag, 0, "挂机不得计入 FragmentedMs");
+        Near(r.Parts.DeepShare, 0, 0.001, "挂机不产生深度占比");
+
+        // 190 分钟会话仅 32 次键鼠输入:按比例向下取整后不得摊成每个窗口 1 次。
+        FlowSessionRow gemini = S(0, 11401, "Gemini.exe", 4, 3);
+        gemini.InputCount = 32;
+        gemini.ActiveMs = 29714;
+        List<FlowSessionRow> g = new List<FlowSessionRow>();
+        g.Add(gemini);
+        FlowReport gr = FlowAnalyzer.Analyze(g, new List<FlowBurstRow>(), new FlowConfig());
+        Check(gr.IdleMs >= 11000000, "190 分钟零星输入应主要归入 Idle(实际 " + gr.IdleMs + " ms)");
+        long gFrag = 0;
+        for (int i = 0; i < gr.Segments.Count; i++)
+            if (gr.Segments[i].State == FlowState.Fragmented) gFrag += gr.Segments[i].LengthMs;
+        Equal(gFrag, 0, "零星输入不得被取整放大成整段碎片");
+    }
+
+    /// <summary>FlowSegment.Keys 必须按 burst 与分钟桶的重叠比例累计真实击键。</summary>
+    private static void MinuteSegmentKeysProrated()
+    {
+        List<FlowSessionRow> s = new List<FlowSessionRow>();
+        s.Add(S(0, 300, "code.exe", 0, 60));
+        List<FlowBurstRow> b = new List<FlowBurstRow>();
+        FlowBurstRow burst = new FlowBurstRow();
+        burst.StartMs = 30000; burst.EndMs = 90000;
+        burst.KeyCount = 60; burst.IkiVar = 500; burst.IkiAvgMs = 180;
+        b.Add(burst);
+        FlowReport r = FlowAnalyzer.Analyze(s, b, new FlowConfig());
+        long keys = 0;
+        long listKeys = 0;
+        for (int i = 0; i < r.Segments.Count; i++)
+        {
+            keys += r.Segments[i].Keys;
+            if (r.Segments[i].MinuteKeys == null) continue;
+            for (int m = 0; m < r.Segments[i].MinuteKeys.Count; m++) listKeys += r.Segments[i].MinuteKeys[m];
+        }
+        Equal(keys, 60, "FlowSegment.Keys 应按分钟重叠比例累计 burst 击键");
+        Equal(listKeys, 60, "MinuteKeys 应保留可绘制的分钟击键序列");
+    }
+
+    /// <summary>HasData 只认有效输入;纯挂机会话不算可分析心流数据。</summary>
+    private static void HasDataRequiresMeaningfulInput()
+    {
+        FlowSessionRow idle = S(0, 600, "idle.exe", 4, 0);
+        idle.ActiveMs = 0;
+        List<FlowSessionRow> sessions = new List<FlowSessionRow>();
+        sessions.Add(idle);
+        Check(!FlowBoardData.HasMeaningfulInput(sessions, new List<FlowBurstRow>()),
+            "没有键鼠输入的会话不算可分析数据");
+        sessions.Add(S(60, 60, "code.exe", 0, 10));
+        Check(FlowBoardData.HasMeaningfulInput(sessions, new List<FlowBurstRow>()),
+            "有击键的会话应算可分析数据");
+        List<FlowBurstRow> bursts = new List<FlowBurstRow>();
+        FlowBurstRow burst = new FlowBurstRow();
+        burst.KeyCount = 5;
+        bursts.Add(burst);
+        Check(FlowBoardData.HasMeaningfulInput(new List<FlowSessionRow>(), bursts),
+            "输入突发段本身也应算可分析数据");
     }
 }

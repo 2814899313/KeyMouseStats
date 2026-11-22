@@ -53,7 +53,9 @@ internal static class RingBufferTests
         Sequential();
         WrapAround();
         Overflow();
+        BackloggedThreshold();
         ConcurrentSpSc();
+        HighPollingSustained();
         AllocationSmoke();
         Console.WriteLine("RingBufferTests: " + _checks + " 项断言通过");
     }
@@ -141,6 +143,21 @@ internal static class RingBufferTests
         Equal(ring.DroppedCount, 13, "失败的入队也要计入丢弃");
     }
 
+    /// <summary>3b. 默认容量与背压阈值:8 kHz 鼠标需要更大的默认环。</summary>
+    private static void BackloggedThreshold()
+    {
+        EventRing ring = new EventRing();
+        Equal(ring.Capacity, EventRing.DefaultCapacity, "默认容量应取 DefaultCapacity");
+        Equal(EventRing.DefaultCapacity, 32768, "默认容量必须为 32768");
+        for (int i = 0; i < 16384; i++)
+        {
+            RawInputEvent item = Make(i, InputEventKind.Move, 0, 0, 0, 1);
+            Check(ring.TryEnqueue(ref item), "背压阈值填充 " + i);
+        }
+        Check(ring.IsBacklogged, "积压达到容量一半时应请求 Wake");
+        Equal(ring.DroppedCount, 0, "阈值填充不应丢弃");
+    }
+
     /// <summary>4. 真实两线程并发:生产者让路式重试保证零丢失,消费者校验顺序。</summary>
     private static void ConcurrentSpSc()
     {
@@ -190,6 +207,68 @@ internal static class RingBufferTests
         Equal(produced, total, "生产者必须全部入队");
         Equal(ring.DroppedCount, 0, "让路式重试下不应有丢弃");
         _checks++;
+    }
+
+    /// <summary>
+    /// 4b. 8 kHz × 10 秒持续压力:生产者每 200 ms 突发 1600 条,消费者每 200 ms 排空。
+    /// 这是 DbWriter.Wake/WaitOne(200) 之后的真实节拍;默认 32768 环必须零丢弃。
+    /// </summary>
+    private static void HighPollingSustained()
+    {
+        const int bursts = 50;
+        const int burstSize = 1600;
+        const int total = bursts * burstSize;   // 80,000 = 8 kHz × 10 s
+        EventRing ring = new EventRing();
+        int produced = 0;
+        int consumed = 0;
+        Exception failure = null;
+        DateTime deadline = DateTime.UtcNow.AddSeconds(30);
+
+        Thread producer = new Thread(delegate()
+        {
+            try
+            {
+                for (int b = 0; b < bursts; b++)
+                {
+                    for (int i = 0; i < burstSize; i++)
+                    {
+                        RawInputEvent item = Make(b * burstSize + i, InputEventKind.Move, 0, i, b, 1);
+                        if (!ring.TryEnqueue(ref item))
+                        {
+                            failure = new Exception("8 kHz 压力下发生丢弃");
+                            return;
+                        }
+                        produced++;
+                    }
+                    Thread.Sleep(200);
+                }
+            }
+            catch (Exception error) { failure = error; }
+        });
+
+        Thread consumer = new Thread(delegate()
+        {
+            RawInputEvent[] buffer = new RawInputEvent[4096];
+            while (consumed < total && DateTime.UtcNow <= deadline)
+            {
+                Thread.Sleep(200);
+                int n;
+                while ((n = ring.Drain(buffer, buffer.Length)) > 0) consumed += n;
+            }
+        });
+
+        producer.IsBackground = true;
+        consumer.IsBackground = true;
+        producer.Start();
+        consumer.Start();
+        producer.Join(20000);
+        consumer.Join(20000);
+
+        Check(failure == null, "8 kHz 压力生产不得抛出异常");
+        Equal(produced, total, "8 kHz × 10 秒应生产 80,000 条");
+        Equal(consumed, total, "消费者应完整排空 80,000 条");
+        Equal(ring.DroppedCount, 0, "8 kHz 持续移动下 DroppedCount 必须为 0");
+        Equal(ring.PendingCount, 0, "消费结束后环应为空");
     }
 
     /// <summary>5. 零堆分配冒烟:二十万次入队/出队不应带来堆增长。</summary>

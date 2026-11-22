@@ -7,7 +7,8 @@
 //   3. 空闲切分:超过 60 s 无输入同样收口;
 //   4. Welford:IKI 均值/方差与手算值一致,> 15 s 的思考停顿被排除;
 //   5. 悬空会话自愈:强杀留下的 is_open=1 行被收口到 meta.last_event_ts_ms;
-//   6. 阴影双写:daily_summary 与 DayRecord 的五个核心标量 0 差异。
+//   6. 阴影双写:daily_summary 与 DayRecord 的五个核心标量 0 差异;
+//   7. 实时时间基准:day 必须是本地今天,start_ts_ms 必须是 Unix 毫秒。
 //
 //  全部写入在 %TEMP% 沙盒内;窗口解析用假实现,不依赖真实前台窗口。
 // ============================================================================
@@ -112,7 +113,42 @@ internal static class DbWriterTests
         WelfordIki();
         SelfHealAfterCrash();
         ShadowDualWriteZeroDiff();
+        RealtimeTimestampBase();
         Console.WriteLine("DbWriterTests: " + _checks + " 项断言通过");
+    }
+
+    /// <summary>7. 实时写入必须使用 Unix 毫秒,day 必须是本地今天。</summary>
+    private static void RealtimeTimestampBase()
+    {
+        string root = NewSandbox("realtime");
+        EventRing ring = new EventRing(8192);
+        DbWriter writer = DbWriter.Open(root, ring);
+        writer.ResolveWindow = FakeResolver();
+        try
+        {
+            long now = UnixTime.NowMs();
+            Feed(writer, ring, InputEventKind.KeyDown, HwndA, 65, now);
+            writer.DrainOnce();
+            using (KmsDb reader = KmsDb.OpenReader(writer.DatabasePath))
+            {
+                string day = reader.ScalarText(
+                    "SELECT day FROM events_window_session ORDER BY id DESC LIMIT 1;", null);
+                long start = reader.ScalarLong(
+                    "SELECT start_ts_ms FROM events_window_session ORDER BY id DESC LIMIT 1;", null);
+                Check(day == UnixTime.ToLocal(now).ToString("yyyy-MM-dd"),
+                    "实时会话 day 必须是本地今天,实际=" + day);
+                Check(day == DateTime.Today.ToString("yyyy-MM-dd"),
+                    "实时会话 day 必须等于 DateTime.Today,实际=" + day);
+                Check(Math.Abs(start - now) <= 86400000L,
+                    "start_ts_ms 必须落在当前 Unix 毫秒 ±1 天内,实际=" + start + ",now=" + now);
+                Check(start < KmsSchema.EpochFixThresholdMs,
+                    "start_ts_ms 不得落入 3995 年异常区间,实际=" + start);
+            }
+        }
+        finally
+        {
+            writer.Dispose();
+        }
     }
 
     /// <summary>1 + 2. 批量事务与会话切分。</summary>

@@ -74,6 +74,31 @@ namespace KeyMouseStats
             return spanSec;
         }
 
+        /// <summary>
+        /// 把活跃区间扩展为默认视窗:前后留白,且跨度不低于 minSpanSec。
+        /// 返回的 start/span 已夹紧在 [0, 86400]。
+        /// </summary>
+        internal static void FocusRange(int firstSec, int lastSec, int paddingSec, int minSpanSec,
+            out int start, out int span)
+        {
+            if (firstSec > lastSec) { int swap = firstSec; firstSec = lastSec; lastSec = swap; }
+            if (paddingSec < 0) paddingSec = 0;
+            int from = Math.Max(0, firstSec - paddingSec);
+            int to = Math.Min(DaySeconds, lastSec + paddingSec);
+            if (to <= from) { from = 0; to = MinSpanSeconds; }
+
+            int wanted = to - from;
+            int minimum = ClampSpan(Math.Max(MinSpanSeconds, minSpanSec));
+            if (wanted < minimum)
+            {
+                int center = (from + to) / 2;
+                from = center - minimum / 2;
+                wanted = minimum;
+            }
+            span = ClampSpan(wanted);
+            start = ClampStart(from, span);
+        }
+
         internal static int ClampStart(int startSec, int spanSec)
         {
             int span = ClampSpan(spanSec);

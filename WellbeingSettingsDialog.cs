@@ -21,12 +21,17 @@ namespace KeyMouseStats
         private readonly NumericUpDown _cooldown = new NumericUpDown { Minimum = 5, Maximum = 240, Increment = 5 };
         private readonly CheckBox _summary = new CheckBox { Text = "每日摘要（到点提示今日概况）" };
         private readonly NumericUpDown _summaryHour = new NumericUpDown { Minimum = 0, Maximum = 23 };
+        private readonly CheckBox _focusPill = new CheckBox { Text = "心流自动胶囊（Focus Pill）" };
+        private readonly NumericUpDown _focusPillMinutes = new NumericUpDown { Minimum = 1, Maximum = 120, Increment = 1 };
+        private readonly CheckBox _focusBreak = new CheckBox { Text = "心流保护型微休息" };
+        private readonly NumericUpDown _focusBreakMinutes = new NumericUpDown { Minimum = 15, Maximum = 240, Increment = 5 };
+        private readonly NumericUpDown _focusBreakIdle = new NumericUpDown { Minimum = 5, Maximum = 120, Increment = 1 };
 
         public WellbeingSettingsDialog()
         {
             Text = "目标 / 提醒"; FormBorderStyle = FormBorderStyle.FixedDialog; StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false; MinimizeBox = false; ShowInTaskbar = false; AutoScaleMode = AutoScaleMode.None;
-            Font = new Font("Microsoft YaHei UI", 9f); ClientSize = new Size(460, 430);
+            Font = new Font("Microsoft YaHei UI", 9f); ClientSize = new Size(460, 590);
 
             Label goalTitle = Header("每日目标");
             goalTitle.SetBounds(20, 14, 300, 22);
@@ -63,13 +68,35 @@ namespace KeyMouseStats
             _summaryHour.SetBounds(60, 360, 60, 26);
             summaryTail.SetBounds(126, 360, 140, 26);
 
+            Label focusTitle = Header("心流护航");
+            focusTitle.SetBounds(20, 386, 300, 22);
+            _focusPill.SetBounds(20, 414, 300, 22);
+            Label pillPrefix = new Label { Text = "专注超过", TextAlign = ContentAlignment.MiddleLeft };
+            Label pillTail = new Label { Text = "分钟自动收敛为胶囊", TextAlign = ContentAlignment.MiddleLeft };
+            pillPrefix.SetBounds(38, 442, 48, 26);
+            _focusPillMinutes.SetBounds(88, 442, 60, 26);
+            pillTail.SetBounds(154, 442, 220, 26);
+            _focusBreak.SetBounds(20, 470, 300, 22);
+            Label breakPrefix = new Label { Text = "专注超过", TextAlign = ContentAlignment.MiddleLeft };
+            Label breakTail = new Label { Text = "分钟进入待提醒", TextAlign = ContentAlignment.MiddleLeft };
+            breakPrefix.SetBounds(38, 498, 48, 26);
+            _focusBreakMinutes.SetBounds(88, 498, 60, 26);
+            breakTail.SetBounds(154, 498, 220, 26);
+            Label idlePrefix = new Label { Text = "自然空闲", TextAlign = ContentAlignment.MiddleLeft };
+            Label idleTail = new Label { Text = "秒后温和提醒", TextAlign = ContentAlignment.MiddleLeft };
+            idlePrefix.SetBounds(38, 526, 60, 26);
+            _focusBreakIdle.SetBounds(98, 526, 60, 26);
+            idleTail.SetBounds(164, 526, 220, 26);
+
             Button ok = new Button { Text = "保存", DialogResult = DialogResult.OK };
             Button cancel = new Button { Text = "取消", DialogResult = DialogResult.Cancel };
-            ok.SetBounds(250, 392, 88, 28); cancel.SetBounds(348, 392, 88, 28);
+            ok.SetBounds(250, 556, 88, 28); cancel.SetBounds(348, 556, 88, 28);
 
             Controls.AddRange(new Control[]{ goalTitle, _goalOff, _goalKeys, _goalKeysValue, _goalActive, _goalHours, hoursLabel, goalNote,
                 reminderTitle, _continuous, thresholdLabel, _continuousMinutes, thresholdTail, cooldownLabel, _cooldown, cooldownTail, dndNote,
-                summaryTitle, _summary, summaryLabel, _summaryHour, summaryTail, ok, cancel });
+                summaryTitle, _summary, summaryLabel, _summaryHour, summaryTail,
+                focusTitle, _focusPill, pillPrefix, _focusPillMinutes, pillTail,
+                _focusBreak, breakPrefix, _focusBreakMinutes, breakTail, idlePrefix, _focusBreakIdle, idleTail, ok, cancel });
             AcceptButton = ok; CancelButton = cancel;
 
             // 载入现有设置
@@ -88,11 +115,22 @@ namespace KeyMouseStats
             _cooldown.Value = Math.Max(_cooldown.Minimum, Math.Min(_cooldown.Maximum, WellbeingSettings.CooldownMinutes));
             _summary.Checked = WellbeingSettings.SummaryEnabled;
             _summaryHour.Value = Math.Max(_summaryHour.Minimum, Math.Min(_summaryHour.Maximum, WellbeingSettings.SummaryHour));
+            _focusPill.Checked = WellbeingSettings.FocusPillEnabled;
+            _focusPillMinutes.Value = Math.Max(_focusPillMinutes.Minimum,
+                Math.Min(_focusPillMinutes.Maximum, WellbeingSettings.FocusPillAfterMinutes));
+            _focusBreak.Checked = WellbeingSettings.FocusBreakEnabled;
+            _focusBreakMinutes.Value = Math.Max(_focusBreakMinutes.Minimum,
+                Math.Min(_focusBreakMinutes.Maximum, WellbeingSettings.FocusBreakAfterMinutes));
+            _focusBreakIdle.Value = Math.Max(_focusBreakIdle.Minimum,
+                Math.Min(_focusBreakIdle.Maximum, WellbeingSettings.FocusBreakIdleSeconds));
 
             _goalKeys.CheckedChanged += delegate { SyncGoalControls(); };
             _goalActive.CheckedChanged += delegate { SyncGoalControls(); };
             _goalOff.CheckedChanged += delegate { SyncGoalControls(); };
+            _focusPill.CheckedChanged += delegate { SyncFocusControls(); };
+            _focusBreak.CheckedChanged += delegate { SyncFocusControls(); };
             SyncGoalControls();
+            SyncFocusControls();
 
             ok.Click += delegate { Apply(); };
         }
@@ -106,6 +144,13 @@ namespace KeyMouseStats
         {
             _goalKeysValue.Enabled = _goalKeys.Checked;
             _goalHours.Enabled = _goalActive.Checked;
+        }
+
+        private void SyncFocusControls()
+        {
+            _focusPillMinutes.Enabled = _focusPill.Checked;
+            _focusBreakMinutes.Enabled = _focusBreak.Checked;
+            _focusBreakIdle.Enabled = _focusBreak.Checked;
         }
 
         private void Apply()
@@ -130,6 +175,11 @@ namespace KeyMouseStats
             WellbeingSettings.CooldownMinutes = (int)_cooldown.Value;
             WellbeingSettings.SummaryEnabled = _summary.Checked;
             WellbeingSettings.SummaryHour = (int)_summaryHour.Value;
+            WellbeingSettings.FocusPillEnabled = _focusPill.Checked;
+            WellbeingSettings.FocusPillAfterMinutes = (int)_focusPillMinutes.Value;
+            WellbeingSettings.FocusBreakEnabled = _focusBreak.Checked;
+            WellbeingSettings.FocusBreakAfterMinutes = (int)_focusBreakMinutes.Value;
+            WellbeingSettings.FocusBreakIdleSeconds = (int)_focusBreakIdle.Value;
             Store.Save();
         }
     }

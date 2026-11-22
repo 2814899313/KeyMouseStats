@@ -1,0 +1,911 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>外设健康 · 多设备布局原型</title>
+<style>
+  :root{
+    --bg:#0a0f15; --sidebar:#0c1219; --card:#141b24; --card2:#18212c;
+    --line:#222e3b; --line2:#2a3746; --text:#e9eff6; --muted:#8b99a9; --dim:#5f6d7c;
+    --blue:#4c8dff; --blue2:#2d5fa8; --green:#3ddc84; --orange:#ffb020; --red:#ff5c5c;
+    --scale:1; --card-h:482px; color-scheme:dark;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#060a0f;color:var(--text);
+    font-family:"Microsoft YaHei UI","Microsoft YaHei","PingFang SC",system-ui,sans-serif;
+    font-size:13px;-webkit-font-smoothing:antialiased}
+  button,input{font-family:inherit}
+  button{cursor:pointer}
+  .toolbar{position:sticky;top:0;z-index:80;display:flex;align-items:center;gap:18px;
+    padding:12px 24px;background:rgba(8,13,19,.94);border-bottom:1px solid #18222e;
+    backdrop-filter:blur(12px)}
+  .toolbar .brand{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:700;
+    letter-spacing:.3px;white-space:nowrap}
+  .toolbar .brand span{font-size:9px;font-weight:400;color:var(--muted);letter-spacing:1.2px}
+  .toolbar .spacer{flex:1}
+  .toolbar .seg{display:flex;background:#111923;border:1px solid #243140;border-radius:8px;padding:2px}
+  .toolbar .seg button{height:26px;padding:0 12px;border:0;border-radius:6px;background:transparent;
+    color:#a9b7c6;font-size:11px}
+  .toolbar .seg button.active{background:#243b5e;color:#eaf2ff}
+  .toolbar label{display:flex;align-items:center;gap:7px;font-size:11px;color:#a9b7c6;white-space:nowrap}
+  .toolbar input[type=checkbox]{accent-color:var(--blue)}
+  .toolbar .demo{height:30px;padding:0 13px;border:1px solid #2a3746;border-radius:8px;
+    background:#131c26;color:#c6d2df;font-size:11px}
+  .toolbar .demo:hover{border-color:#3c4e63;color:#fff}
+
+  .stage{overflow:auto;padding:26px 24px 10px;display:flex;justify-content:flex-start}
+  .app-frame{position:relative;flex:0 0 auto;margin:0 auto;
+    width:calc(1072px * var(--scale));height:calc(724px * var(--scale))}
+  .app{position:absolute;left:0;top:0;width:1072px;height:724px;overflow:hidden;
+    background:
+      radial-gradient(900px 420px at 78% -12%,rgba(76,141,255,.09),transparent 60%),
+      radial-gradient(700px 380px at 8% 110%,rgba(61,220,132,.04),transparent 55%),
+      var(--bg);
+    border:1px solid #1d2835;border-radius:14px;
+    box-shadow:0 30px 80px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.015) inset;
+    transform:scale(var(--scale));transform-origin:top left}
+  .app.compact{--card-h:404px}
+
+  /* ---------------- sidebar ---------------- */
+  .sidebar{position:absolute;left:0;top:0;bottom:0;width:160px;background:rgba(11,17,24,.9);
+    border-right:1px solid #18222e;padding:18px 14px}
+  .logo{display:flex;align-items:center;gap:10px;margin-bottom:26px}
+  .logo-mark{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;
+    background:linear-gradient(140deg,#4c8dff,#6b6bff);box-shadow:0 6px 16px rgba(76,141,255,.28)}
+  .logo-mark svg{width:20px;height:20px;color:#fff}
+  .logo-text b{display:block;font-size:15px;letter-spacing:.5px}
+  .logo-text span{display:block;font-size:8px;letter-spacing:1.6px;color:var(--dim);margin-top:2px;white-space:nowrap}
+  .nav{display:flex;flex-direction:column;gap:3px}
+  .nav-item{display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:9px;
+    color:#a9b7c6;font-size:12px;white-space:nowrap}
+  .nav-item svg{width:16px;height:16px;flex:none;opacity:.9}
+  .nav-item.active{background:linear-gradient(90deg,rgba(76,141,255,.22),rgba(76,141,255,.08));
+    color:#e7f0ff;box-shadow:inset 2px 0 0 var(--blue)}
+  .side-bottom{position:absolute;left:14px;right:14px;bottom:14px}
+  .theme-label{font-size:9px;color:var(--dim);margin-bottom:7px}
+  .theme-dots{display:flex;flex-wrap:wrap;gap:6px;width:120px}
+  .theme-dot{width:14px;height:14px;border-radius:50%;border:2px solid transparent}
+  .theme-dot.active{box-shadow:0 0 0 2px #0c1219,0 0 0 3px #7da7ff}
+  .shortcuts{margin-top:12px;font-size:9px;line-height:1.75;color:#7e8c9c}
+  .shortcuts b{color:#b8c5d3;font-weight:500}
+  .version{margin-top:10px;display:flex;align-items:center;gap:6px;font-size:10px;color:#7e8c9c}
+  .version i{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block}
+
+  /* ---------------- main / header ---------------- */
+  .main{position:absolute;left:160px;top:0;right:0;bottom:0;padding:20px 40px 0}
+  .crumb{font-size:10px;color:var(--muted);letter-spacing:.4px}
+  .title-row{display:flex;align-items:center;gap:13px;height:42px;margin-top:8px}
+  h1{margin:0;font-size:28px;line-height:1;font-weight:800;letter-spacing:.6px;white-space:nowrap}
+  .sample-pill{height:28px;padding:0 13px;display:flex;align-items:center;gap:8px;
+    border:1px solid #273545;border-radius:999px;background:#111923;color:#c7d3df;font-size:11px;
+    white-space:nowrap}
+  .sample-pill i{width:6px;height:6px;border-radius:50%;background:var(--blue)}
+  .subview{display:flex;gap:8px;margin-left:34px}
+  .sub-chip{height:28px;padding:0 17px;border-radius:8px;border:1px solid #283545;background:#141d27;
+    color:#c5d1de;font-size:11px;display:flex;align-items:center;gap:7px;white-space:nowrap}
+  .sub-chip:hover{background:#1a2531;border-color:#3a4b5e}
+  .sub-chip.active{background:var(--blue);border-color:var(--blue);color:#fff;
+    box-shadow:0 5px 16px rgba(76,141,255,.22)}
+  .sub-chip:focus-visible,.chip:focus-visible,.pill:focus-visible,.reset-btn:focus-visible,
+  .merge-btn:focus-visible,.demo:focus-visible{outline:2px solid #9cc0ff;outline-offset:2px}
+  .clock{margin-left:auto;height:40px;padding:0 16px;border:1px solid #1f2b38;border-radius:12px;
+    background:#101821;display:flex;align-items:center;gap:9px;font-size:11px;color:#b9c6d4;
+    font-variant-numeric:tabular-nums;white-space:nowrap}
+  .clock i{width:7px;height:7px;border-radius:50%;background:var(--green);
+    box-shadow:0 0 10px rgba(61,220,132,.55)}
+  .subtitle{margin-top:7px;font-size:12px;color:var(--muted)}
+
+  .cards{display:grid;grid-template-columns:408px 408px;gap:16px;margin-top:22px}
+  .card{position:relative;height:var(--card-h);padding:16px;border-radius:14px;
+    background:linear-gradient(180deg,#151d27 0%,#121922 100%);
+    border:1px solid #202c39;box-shadow:0 16px 34px rgba(0,0,0,.22);overflow:hidden}
+  .card:after{content:"";position:absolute;left:16px;right:16px;top:0;height:1px;
+    background:linear-gradient(90deg,transparent,rgba(140,180,255,.22),transparent);pointer-events:none}
+
+  /* keyboard card */
+  .kbd-card{display:flex;flex-direction:column}
+  .kbd-head{height:64px;display:flex;flex-direction:column;gap:7px}
+  .kbd-host{height:128px;margin-top:5px;padding:9px 11px;border:1px solid #233140;
+    background:#101720;border-radius:9px;display:flex;flex-direction:column;justify-content:space-between}
+  .kbd-host .field{margin-top:0}
+  .kbd-host .since{margin-top:0}
+  .kbd-host .host-actions{margin-top:0}
+  .type-tag{display:inline-flex;align-items:center;height:16px;padding:0 6px;border-radius:4px;
+    background:#1c2a3b;color:#9fbbdf;font-size:9px;font-weight:500;margin-left:6px;vertical-align:1px}
+  .field{display:flex;align-items:center;gap:7px;height:26px;margin-top:5px}
+  .field label{width:58px;flex:none;font-size:10px;color:var(--muted)}
+  .input{height:26px;min-width:0;background:#1a2430;border:1px solid #2b3a4b;border-radius:6px;
+    color:var(--text);font-size:11px;padding:0 8px;outline:none}
+  .input:hover{border-color:#3a4d62}
+  .input:focus{border-color:var(--blue);box-shadow:0 0 0 2px rgba(76,141,255,.15)}
+  .field .input{flex:1}
+  .num{width:72px;flex:none;text-align:right;font-variant-numeric:tabular-nums}
+  .unit{flex:none;font-size:10px;color:var(--muted);width:26px}
+  .since{font-size:10px;color:var(--muted);margin-top:7px}
+  .host-actions{display:flex;align-items:center;gap:7px;margin-top:7px}
+  .reset-btn{height:26px;padding:0 12px;border:1px solid #2b3a4b;border-radius:6px;background:#1a2430;
+    color:#d8e2ee;font-size:10px;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+  .reset-btn:hover{border-color:#48617a;background:#202c39}
+  .reset-btn svg{width:11px;height:11px;color:#9fb1c5}
+  .merge-btn{height:26px;padding:0 11px;border:1px dashed #4c8dff;border-radius:6px;background:#16243a;
+    color:#b9d4ff;font-size:10px;white-space:nowrap}
+  .merge-btn:hover{background:#1b2c48;color:#e3efff}
+  .top5{display:flex;flex-direction:column;justify-content:space-around;
+    height:calc(var(--card-h) - 234px);margin-top:6px}
+  .key-row{display:grid;grid-template-columns:68px 58px 1fr 46px;gap:8px;align-items:center;
+    min-height:42px}
+  .keycap{height:26px;border-radius:5px;border:1px solid #2b3a4b;background:#111923;
+    display:flex;align-items:center;justify-content:center;font-size:10px;color:#d7e1ec;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 5px}
+  .keycap.top{border-color:#3e5f8f;background:#18263a;color:#d6e6ff}
+  .k-count{font-size:10px;color:#93a4b6;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .k-track{height:8px;border-radius:4px;background:#1a2531;overflow:hidden}
+  .k-fill{height:100%;border-radius:4px;background:var(--green)}
+  .k-fill.orange{background:var(--orange)}.k-fill.red{background:var(--red)}
+  .k-pct{font-size:9px;color:#8394a6;text-align:right;font-variant-numeric:tabular-nums}
+  .aggregate-note{display:flex;align-items:center;gap:8px;min-height:58px;padding:10px 11px;
+    border:1px solid #243140;background:#101720;border-radius:9px;font-size:10px;color:#93a4b6;
+    line-height:1.6}
+  .aggregate-note b{color:#d9e5f1;font-weight:600}
+
+  /* mouse card */
+  .mouse-card{display:flex;flex-direction:column}
+  .mouse-head{height:64px;display:flex;flex-direction:column;gap:7px}
+  .card-title{font-size:14px;font-weight:700;display:flex;align-items:center;gap:7px;white-space:nowrap;min-width:0}
+  .selected-name{font-size:12px;font-weight:500;color:#a8bdd2;overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap;max-width:210px}
+  .device-count{font-size:9px;font-weight:400;color:var(--muted);border:1px solid #2a3746;
+    border-radius:999px;padding:2px 7px;flex:none}
+  .device-bar{display:flex;align-items:center;gap:6px;min-width:0;position:relative}
+  .device-label{font-size:9px;color:var(--muted);white-space:nowrap;flex:none}
+  .pills{display:flex;align-items:center;gap:5px;min-width:0;flex:1;position:relative}
+  .pill{height:28px;padding:0 5px;border-radius:7px;border:1px solid #2a3746;background:#101821;
+    color:#c5d2df;font-size:10px;display:inline-flex;align-items:center;gap:3px;
+    flex:0 0 auto;max-width:118px;min-width:0;white-space:nowrap}
+  .pill[data-mouse="all"]{max-width:none}
+  .pill:hover{background:#1a2531;border-color:#3a4d62}
+  .pill.active{background:var(--blue);border-color:var(--blue);color:#fff}
+  .pill svg{width:12px;height:12px;flex:none;opacity:.9}
+  .pill .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;max-width:86px}
+  .pill[data-mouse="all"] .name{max-width:none}
+  .pill .status{width:6px;height:6px;border-radius:50%;flex:none;background:var(--green)}
+  .pill.active .status{box-shadow:0 0 0 2px rgba(255,255,255,.18)}
+  .pill.more{padding:0 8px;color:#9eb0c4}
+  .status.green{background:var(--green)}.status.orange{background:var(--orange)}.status.red{background:var(--red)}
+  .more-menu{position:absolute;right:0;top:34px;z-index:30;width:282px;padding:7px;
+    background:#151f2b;border:1px solid #2c3b4d;border-radius:10px;
+    box-shadow:0 18px 40px rgba(0,0,0,.5);display:none}
+  .more-menu.show{display:block}
+  .more-title{font-size:9px;color:var(--dim);padding:5px 8px 7px;letter-spacing:.5px}
+  .more-item{display:grid;grid-template-columns:14px 1fr auto auto;gap:7px;align-items:center;
+    width:100%;padding:7px 8px;border:0;border-radius:6px;background:transparent;color:#c9d5e2;
+    font-size:10px;text-align:left}
+  .more-item:hover,.more-item.active{background:#22364f;color:#edf5ff}
+  .more-item svg{width:13px;height:13px;color:#91a6bb}
+  .more-item .mi-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .more-item .mi-type{font-size:8px;color:#7e90a3}
+  .more-item .mi-pct{font-size:9px;color:#9db0c4;font-variant-numeric:tabular-nums}
+
+  .mouse-host{margin-top:5px;height:128px;padding:9px 11px;border:1px solid #233140;
+    background:#101720;border-radius:9px;display:flex;flex-direction:column;justify-content:space-between}
+  .mouse-host .field{margin-top:0}
+  .mouse-host .field label{width:48px}
+  .mouse-host .field .wide{flex:1}
+  .rated-pair{display:flex;align-items:center;gap:6px;min-width:0}
+  .rated-pair .mini-label{font-size:9px;color:var(--muted);flex:none}
+  .rated-pair .num{width:58px}
+  .rated-pair .unit{width:22px}
+  .rated-pair .divider{width:1px;height:16px;background:#253342;margin:0 2px;flex:none}
+  .mouse-host .host-actions{margin-top:0}
+  .mouse-host .reset-btn{width:190px}
+
+  .mouse-bars{display:flex;flex-direction:column;gap:9px;margin-top:9px}
+  .mbar{min-height:58px}
+  .mbar-head{display:flex;align-items:center;gap:8px}
+  .mbar-label{width:34px;flex:none;font-size:10px;color:#dbe5f0}
+  .mbar-track{height:14px;flex:1;border-radius:7px;background:#1a2531;overflow:hidden}
+  .mbar-fill{height:100%;border-radius:7px;background:var(--green);min-width:0}
+  .mbar-fill.orange{background:var(--orange)}.mbar-fill.red{background:var(--red)}
+  .mbar-pct{width:46px;flex:none;text-align:right;font-size:10px;color:#dbe5f0;
+    font-variant-numeric:tabular-nums}
+  .mbar-pct.orange{color:var(--orange)}.mbar-pct.red{color:var(--red)}
+  .mbar-sub{display:flex;justify-content:space-between;margin-left:42px;margin-top:4px;
+    font-size:9px;color:#7f90a2;font-variant-numeric:tabular-nums}
+  .device-meta{display:flex;align-items:center;gap:6px;margin-top:7px;font-size:9px;color:#7e90a3;
+    min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .device-meta .tag{flex:none;height:15px;padding:0 5px;border-radius:4px;background:#1a2839;
+    color:#9fb8d5;font-size:8px;display:inline-flex;align-items:center}
+  .device-meta .path{overflow:hidden;text-overflow:ellipsis;color:#6f8194}
+  .contrib{display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:7px;font-size:9px;color:#8798aa}
+  .contrib span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+  .contrib i{width:6px;height:6px;border-radius:50%;display:inline-block}
+  .mouse-notes{margin-top:auto;padding-top:8px}
+  .note-line{font-size:9px;color:#8394a6;line-height:1.5}
+  .note-line b{color:#b9c8d8;font-weight:500}
+  .warn{font-size:9px;color:var(--orange);margin-top:2px;line-height:1.5}
+  .warn.red{color:var(--red)}
+  .legacy-note{font-size:9px;color:#9eb8d8;line-height:1.55;margin-top:2px}
+
+  .confirm-layer{position:absolute;inset:0;z-index:40;background:rgba(6,10,15,.74);
+    backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;padding:18px}
+  .confirm-card{width:302px;padding:15px;border:1px solid #2d3d4f;border-radius:11px;
+    background:#151f2b;box-shadow:0 20px 40px rgba(0,0,0,.55)}
+  .confirm-title{font-size:13px;font-weight:700;margin-bottom:6px}
+  .confirm-text{font-size:10px;color:#9babbd;line-height:1.65}
+  .confirm-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:13px}
+  .confirm-actions button{height:27px;padding:0 12px;border-radius:6px;font-size:10px;
+    border:1px solid #2b3a4b;background:#1a2430;color:#cad6e3}
+  .confirm-actions .danger{border-color:#8c3d3d;background:#3a1e22;color:#ffd7d7}
+  .confirm-actions .danger:hover{background:#4a2328}
+
+  /* stats subview (simplified) */
+  .stats-card{grid-column:1 / span 2;height:var(--card-h);padding:18px 20px}
+  .stats-title{font-size:15px;font-weight:700;margin-bottom:3px}
+  .stats-sub{font-size:10px;color:var(--muted);margin-bottom:16px}
+  .stats-head,.stats-row{display:grid;grid-template-columns:34px 120px 90px 70px 1fr;gap:10px;
+    align-items:center}
+  .stats-head{height:24px;font-size:9px;color:var(--dim);border-bottom:1px solid #1d2936}
+  .stats-row{height:42px;border-bottom:1px solid #182330;font-size:10px;color:#c7d3df}
+  .stats-row:last-child{border-bottom:0}
+  .stats-rank{color:#6f8194;font-variant-numeric:tabular-nums}
+  .stats-key{display:flex;align-items:center;gap:8px;min-width:0}
+  .stats-key .keycap{width:76px;flex:none}
+  .stats-count{text-align:right;font-variant-numeric:tabular-nums;color:#aebdcc}
+  .stats-share{text-align:right;font-variant-numeric:tabular-nums;color:#8fa1b3}
+  .stats-bar{height:8px;border-radius:4px;background:#1a2531;overflow:hidden}
+  .stats-bar i{display:block;height:100%;border-radius:4px;background:var(--blue)}
+
+  .footer{position:absolute;left:40px;right:40px;bottom:12px;height:42px;
+    border-top:1px solid #1c2733;display:flex;align-items:center;justify-content:space-between;
+    padding-top:8px;font-size:10px;color:#7e8f9f}
+  .footer .left{display:flex;align-items:center;gap:8px}
+  .footer .left i{width:6px;height:6px;border-radius:50%;background:var(--green)}
+  .export{height:30px;padding:0 16px;border:0;border-radius:8px;background:var(--blue);color:#fff;
+    font-size:11px;display:flex;align-items:center;gap:7px;box-shadow:0 6px 15px rgba(76,141,255,.22)}
+  .export:hover{background:#5e9aff}
+  .win-controls{position:absolute;right:13px;top:12px;display:flex;gap:12px;color:#8393a4}
+  .win-controls button{width:16px;height:16px;padding:0;border:0;background:transparent;color:inherit;
+    display:grid;place-items:center}
+  .win-controls button:hover{color:#e8f0f8}
+  .win-controls svg{width:12px;height:12px}
+
+  .toast{position:absolute;left:50%;bottom:58px;transform:translate(-50%,8px);z-index:60;
+    padding:8px 14px;border:1px solid #2d4057;border-radius:999px;background:#172434;
+    color:#d8e7f7;font-size:10px;box-shadow:0 14px 30px rgba(0,0,0,.4);opacity:0;
+    pointer-events:none;transition:opacity .18s ease,transform .18s ease;white-space:nowrap}
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+
+  /* compact height: simulates a short logical canvas */
+  .app.compact .card{padding:12px 14px}
+  .app.compact .kbd-head{height:56px;gap:5px}
+  .app.compact .kbd-host{height:104px;padding:7px 10px}
+  .app.compact .field{height:24px;margin-top:3px}
+  .app.compact .input{height:24px}
+  .app.compact .since{margin-top:4px}
+  .app.compact .host-actions{margin-top:4px}
+  .app.compact .reset-btn{height:24px}
+  .app.compact .top5{height:calc(var(--card-h) - 187px);margin-top:3px}
+  .app.compact .key-row{min-height:36px}
+  .app.compact .mouse-head{height:56px;gap:5px}
+  .app.compact .mouse-host{height:104px;padding:7px 10px}
+  .app.compact .mouse-host .field{height:22px}
+  .app.compact .mouse-host .input{height:22px}
+  .app.compact .mouse-host .reset-btn{height:22px}
+  .app.compact .mouse-bars{gap:6px;margin-top:6px}
+  .app.compact .mbar{min-height:48px}
+  .app.compact .mbar-track{height:12px}
+  .app.compact .device-meta{display:none}
+  .app.compact .mouse-notes{margin-top:5px}
+  .app.compact .card-title{font-size:14px}
+
+  /* review notes below the stage */
+  .notes{max-width:1180px;margin:12px auto 60px;padding:0 24px}
+  .notes-head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;
+    border-top:1px solid #182330;padding-top:24px;margin-bottom:16px}
+  .notes-head h2{font-size:18px;margin:0;font-weight:700;letter-spacing:.3px}
+  .notes-head p{margin:4px 0 0;font-size:11px;color:#7f90a2}
+  .notes-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .note-card{padding:14px;border:1px solid #1e2b38;border-radius:11px;
+    background:linear-gradient(180deg,#111923,#0d141c)}
+  .note-num{width:20px;height:20px;border-radius:6px;background:#1c2b3d;color:#9fc2f0;
+    display:grid;place-items:center;font-size:10px;font-weight:700;margin-bottom:9px}
+  .note-card h3{margin:0 0 5px;font-size:12px;font-weight:600;color:#dbe7f3}
+  .note-card p{margin:0;font-size:10px;line-height:1.7;color:#8798aa}
+  .note-card code{font-family:Consolas,monospace;font-size:9px;color:#a9c8ec}
+  .review-list{margin:16px 0 0;padding:13px 16px;border:1px dashed #27384a;border-radius:10px;
+    font-size:10px;line-height:1.8;color:#8d9fb2}
+  .review-list b{color:#c2d2e3;font-weight:600}
+  @media (max-width:1100px){.notes-grid{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:680px){.notes-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <div class="brand">外设健康 <span>· 多设备布局原型</span></div>
+  <div class="spacer"></div>
+  <div class="seg" id="scaleSeg">
+    <button data-scale="1" class="active">100%</button>
+    <button data-scale="1.5">150%</button>
+    <button data-scale="1.75">175%</button>
+  </div>
+  <label><input type="checkbox" id="compactToggle"> 紧凑高度（模拟短窗口）</label>
+  <button class="demo" id="resetDemo">恢复示例数据</button>
+</div>
+
+<div class="stage">
+  <div class="app-frame">
+    <div class="app" id="app">
+      <aside class="sidebar">
+        <div class="logo">
+          <div class="logo-mark">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/>
+              <rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>
+            </svg>
+          </div>
+          <div class="logo-text"><b>键鼠统计</b><span>ACTIVITY MONITOR</span></div>
+        </div>
+        <nav class="nav">
+          <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>总览</div>
+          <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 17l5-5 4 3 7-8"/><path d="M15 7h4v4"/></svg>趋势</div>
+          <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg>时段分布</div>
+          <div class="nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 7h10M4 12h16M4 17h7"/><circle cx="18" cy="7" r="1.6"/><circle cx="14" cy="17" r="1.6"/></svg>按键排行</div>
+          <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 8.5h17"/></svg>应用统计</div>
+          <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8.5"/><path d="M8 14c1.5 1.4 6.5 1.4 8 0M9 9.5h.01M15 9.5h.01"/></svg>使用洞察</div>
+          <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>字符内容</div>
+          <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/></svg>日报</div>
+          <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M7 15l3-3 2 2 3-4 2 2"/></svg>点击热区</div>
+        </nav>
+        <div class="side-bottom">
+          <div class="theme-label">外观 · 午夜蓝</div>
+          <div class="theme-dots">
+            <span class="theme-dot active" style="background:#4c8dff"></span>
+            <span class="theme-dot" style="background:#b26bff"></span>
+            <span class="theme-dot" style="background:#35c9c1"></span>
+            <span class="theme-dot" style="background:#f0a85a"></span>
+            <span class="theme-dot" style="background:#f26d7d"></span>
+            <span class="theme-dot" style="background:#79d46a"></span>
+            <span class="theme-dot" style="background:#d7a7ff"></span>
+            <span class="theme-dot" style="background:#6ec6ff"></span>
+            <span class="theme-dot" style="background:#ffd166"></span>
+            <span class="theme-dot" style="background:#ff8f70"></span>
+            <span class="theme-dot" style="background:#8ff0c8"></span>
+            <span class="theme-dot" style="background:#c9d3df"></span>
+            <span class="theme-dot" style="background:#8a9bb0"></span>
+          </div>
+          <div class="shortcuts"><b>1–9 / ←→</b> 切换页面<br><b>Tab</b> 选中筛选项<br><b>Ctrl+C</b> 复制明细<br><b>Esc</b> 返回 / 关闭</div>
+          <div class="version"><i></i> 3.2.2 · 本地记录 365 天</div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div class="crumb">工作空间 / 按键排行</div>
+        <div class="title-row">
+          <h1>按键排行</h1>
+          <div class="sample-pill"><i></i>今日 · 累积中</div>
+          <div class="subview">
+            <button class="sub-chip" data-subview="stats">按键统计</button>
+            <button class="sub-chip active" data-subview="health"><span id="healthDot" class="status orange" style="width:6px;height:6px;border-radius:50%;display:inline-block"></span>外设健康</button>
+          </div>
+          <div class="clock"><i></i><span id="clockText">2026.11.22 16:42:08</span></div>
+        </div>
+        <div class="subtitle">从常用按键中，发现你的操作习惯。</div>
+
+        <div id="healthView">
+          <div class="cards">
+            <section class="card kbd-card" id="kbdCard"></section>
+            <section class="card mouse-card" id="mouseCard"></section>
+          </div>
+        </div>
+
+        <div id="statsView" style="display:none">
+          <section class="card stats-card" id="statsCard" style="margin-top:20px"></section>
+        </div>
+
+        <div class="footer">
+          <div class="left"><i></i><span>本地数据已自动保存 · 示例原型</span></div>
+          <button class="export">↓ 导出 CSV</button>
+        </div>
+      </main>
+
+      <div class="win-controls">
+        <button title="最大化"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="2" y="2" width="8" height="8"/></svg></button>
+        <button title="关闭"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>
+      </div>
+      <div class="toast" id="toast"></div>
+    </div>
+  </div>
+</div>
+
+<section class="notes">
+  <div class="notes-head">
+    <div><h2>布局说明与审查重点</h2><p>键盘与鼠标都使用「卡内设备胶囊 + 卡内配置面板」，两张卡结构完全对称，顶部不再单独占用一行。</p></div>
+    <div style="font-size:10px;color:#6f8194;text-align:right;line-height:1.7">可点击设备胶囊、更多、换新、旧版归并<br>顶部可切换 100/150/175% 与紧凑高度</div>
+  </div>
+  <div class="notes-grid">
+    <div class="note-card"><div class="note-num">01</div><h3>设备选择放在各自卡内</h3><p>键盘和鼠标都在卡片顶部用「全部 / 家里 / 公司 / 更多」。不新增全局第二行，两张卡从标题到配置区完全对齐。</p></div>
+    <div class="note-card"><div class="note-num">02</div><h3>两套外设用别名区分</h3><p>建议直接命名「家里 · MX Master 3S」「公司 · G304」。胶囊用短名、标题和输入框显示完整别名，换地点时一眼能对上。</p></div>
+    <div class="note-card"><div class="note-num">03</div><h3>聚合与单设备分层</h3><p>「全部」看汇总磨损；单只设备才显示额定寿命、换新、别名。旧版键盘/鼠标档案都可一键归入当前实体设备。</p></div>
+    <div class="note-card"><div class="note-num">04</div><h3>溢出与紧凑模式</h3><p>超过 3 只设备折叠进「更多」，不挤压标题。短窗口/1080p@175% 自动切紧凑高度，隐藏设备路径、收窄输入区。</p></div>
+  </div>
+  <div class="review-list">
+    <b>想请你重点看：</b>1）键盘/鼠标设备胶囊都放在各自卡内，是否比顶部单独一行更整齐；2）「全部」聚合卡是否需要设备贡献条；3）换新用卡内确认浮层还是系统弹窗；4）同一型号两只设备时，识别路径是否需要默认展示；5）紧凑高度下输入区和进度条是否还够用。
+    <br><span style="color:#6f8194">实现映射：RIDI_DEVICENAME → 鼠标身份；mouse_v1 / mouse_buttons_v1 持久化；主鼠标继续镜像 hardware_v1 / wear_mouse_v1；format=13 不变。</span>
+  </div>
+</section>
+
+<script>
+(function(){
+  "use strict";
+
+  var $ = function(sel, root){ return (root || document).querySelector(sel); };
+  var $$ = function(sel, root){ return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
+  var esc = function(s){
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];
+    });
+  };
+  var fmt = function(n){
+    n = Number(n) || 0;
+    if (n >= 100000000) return (n / 100000000).toFixed(2).replace(/\.?0+$/, "") + " 亿";
+    if (n >= 10000) return (n / 10000).toFixed(1).replace(/\.0$/, "") + " 万";
+    return String(Math.round(n));
+  };
+  var pct = function(r){
+    var v = Math.max(0, Math.min(9.999, Number(r) || 0)) * 100;
+    return v.toFixed(1) + "%";
+  };
+  var wearClass = function(r){ return r >= 1 ? "red" : r >= 0.8 ? "orange" : "green"; };
+  var ratio = function(count, rated){ return rated > 0 ? (Number(count) || 0) / rated : 0; };
+  var svgMouse = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="6" y="2.5" width="12" height="19" rx="6"/><path d="M12 2.5v6"/></svg>';
+  var svgTouch = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M8 15l2.5-3 2 2 2-2.5 2 3"/></svg>';
+  var svgLegacy = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v18M5 8l7-5 7 5M5 16l7 5 7-5"/></svg>';
+  var svgKeyboard = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 9h.01M9 9h.01M12 9h.01M15 9h.01M18 9h.01M7 12h.01M10 12h.01M13 12h.01M16 12h.01M8 16h8"/></svg>';
+  var iconFor = function(type){ return type === "builtin" ? svgTouch : type === "legacy" ? svgLegacy : svgMouse; };
+
+  var initialMice = [
+    {id:"home", name:"家里 · MX Master 3S", type:"external", friendly:"Logitech MX Master 3S",
+     path:"HID\\VID_046D&PID_B034\\7&2A1C3D4E&0&0000", left:54200000, right:65600000,
+     middle:812000, x:96000, ratedL:80000000, ratedR:80000000, since:"2024-03-12"},
+    {id:"office", name:"公司 · G304", type:"external", friendly:"Logitech G304",
+     path:"HID\\VID_046D&PID_C53F\\6&1B2C3D4E&0&0000", left:22400000, right:18100000,
+     middle:210000, x:12000, ratedL:50000000, ratedR:50000000, since:"2025-01-08"},
+    {id:"touchpad", name:"笔记本触控板", type:"builtin", friendly:"Precision Touchpad",
+     path:"HID\\VID_06CB&PID_CE44\\5&3A2B1C0D&0&0000", left:6800000, right:2100000,
+     middle:0, x:0, ratedL:20000000, ratedR:20000000, since:"2025-09-20"},
+    {id:"legacy", name:"旧版鼠标（升级前）", type:"legacy", friendly:"升级前单鼠标累计",
+     path:"legacy", left:12600000, right:9400000, middle:180000, x:8000,
+     ratedL:80000000, ratedR:80000000, since:"2024-01-01"}
+  ];
+
+  var initialKeyboards = [
+    {id:"builtin", name:"笔记本内置键盘", type:"builtin", rated:50000000, since:"2025-01-01",
+     keys:[{n:"Space",k:"Space",c:18600000},{n:"Enter",k:"↵ Enter",c:11200000},
+           {n:"Bksp",k:"⌫ Bksp",c:7400000},{n:"A",k:"A",c:5100000},{n:"S",k:"S",c:3200000}]},
+    {id:"home", name:"家里 · MX Keys", type:"external", rated:50000000, since:"2024-03-12",
+     keys:[{n:"Space",k:"Space",c:11800000},{n:"Enter",k:"↵ Enter",c:6400000},
+           {n:"Bksp",k:"⌫ Bksp",c:5100000},{n:"E",k:"E",c:4300000},{n:"A",k:"A",c:3900000}]},
+    {id:"office", name:"公司 · G913", type:"external", rated:50000000, since:"2025-01-08",
+     keys:[{n:"Space",k:"Space",c:8200000},{n:"Enter",k:"↵ Enter",c:4100000},
+           {n:"Bksp",k:"⌫ Bksp",c:2800000},{n:"A",k:"A",c:2400000},{n:"S",k:"S",c:1900000}]},
+    {id:"legacy", name:"旧版单键盘", type:"legacy", rated:50000000, since:"2024-01-01",
+     keys:[{n:"Space",k:"Space",c:5600000},{n:"Enter",k:"↵ Enter",c:3200000},
+           {n:"Bksp",k:"⌫ Bksp",c:2100000},{n:"A",k:"A",c:1800000},{n:"S",k:"S",c:1200000}]}
+  ];
+
+  var state = {
+    scale: 1,
+    compact: false,
+    subview: "health",
+    mouseId: "home",
+    keyboardId: "builtin",
+    mice: JSON.parse(JSON.stringify(initialMice)),
+    keyboards: JSON.parse(JSON.stringify(initialKeyboards)),
+    moreOpen: false,
+    kbdMoreOpen: false,
+    confirmReset: false
+  };
+
+  var app = $("#app");
+  var kbdCard = $("#kbdCard");
+  var mouseCard = $("#mouseCard");
+  var statsCard = $("#statsCard");
+
+  function realMice(){ return state.mice.filter(function(m){ return m.id !== "all"; }); }
+  function findMouse(id){ return state.mice.filter(function(m){ return m.id === id; })[0] || null; }
+  function aggregateMouse(){
+    var list = realMice();
+    var out = {id:"all", name:"全部鼠标", type:"aggregate", friendly:"聚合视图", path:"",
+      left:0,right:0,middle:0,x:0,ratedL:0,ratedR:0,since:"—"};
+    list.forEach(function(m){
+      out.left += m.left; out.right += m.right; out.middle += m.middle; out.x += m.x;
+      out.ratedL += m.ratedL; out.ratedR += m.ratedR;
+    });
+    out.worst = list.length ? Math.max.apply(null, list.map(mouseWorst)) : 0;
+    return out;
+  }
+  function currentMouse(){ return state.mouseId === "all" ? aggregateMouse() : findMouse(state.mouseId); }
+  function targetMouse(){
+    var list = realMice().filter(function(m){ return m.type !== "legacy"; });
+    return list[0] || null;
+  }
+  function mouseWorst(m){
+    return Math.max(ratio(m.left, m.ratedL), ratio(m.right, m.ratedR));
+  }
+
+  function realKeyboards(){ return state.keyboards.filter(function(k){ return k.id !== "all"; }); }
+  function findKeyboard(id){ return state.keyboards.filter(function(k){ return k.id === id; })[0] || null; }
+  function aggregateKeyboard(){
+    var list = realKeyboards();
+    var map = {};
+    var order = [];
+    list.forEach(function(k){
+      k.keys.forEach(function(item){
+        if (!map[item.n]) { map[item.n] = {n:item.n,k:item.k,c:0}; order.push(item.n); }
+        map[item.n].c += item.c;
+      });
+    });
+    var keys = order.map(function(n){ return map[n]; })
+      .sort(function(a,b){ return b.c - a.c; }).slice(0,5);
+    return {id:"all", name:"全部键盘", type:"aggregate", rated:list.reduce(function(s,k){ return s + k.rated; },0),
+      since:"—", keys:keys};
+  }
+  function currentKeyboard(){ return state.keyboardId === "all" ? aggregateKeyboard() : findKeyboard(state.keyboardId); }
+  function targetKeyboard(){
+    var list = realKeyboards().filter(function(k){ return k.type !== "legacy"; });
+    return list[0] || null;
+  }
+
+  function keyboardWorst(k){
+    var worst = 0;
+    k.keys.forEach(function(item){ worst = Math.max(worst, ratio(item.c, k.rated)); });
+    return worst;
+  }
+
+  function keyboardPillHtml(k, active, list){
+    return '<button class="pill ' + (active ? "active" : "") + '" data-kbd="' + esc(k.id) + '" title="' + esc(k.name) + '">' +
+      svgKeyboard + '<span class="name">' + esc(shortName(k.name, list)) + '</span>' +
+      '<span class="status ' + wearClass(keyboardWorst(k)) + '"></span></button>';
+  }
+
+  function renderKeyboardPills(){
+    var list = realKeyboards();
+    var visible = list.slice(0, 3);
+    if (state.keyboardId !== "all") {
+      var sel = findKeyboard(state.keyboardId);
+      if (sel && visible.indexOf(sel) < 0) visible[visible.length - 1] = sel;
+    }
+    visible = visible.filter(Boolean);
+    var worst = 0;
+    list.forEach(function(k){ worst = Math.max(worst, keyboardWorst(k)); });
+    var html = '<button class="pill ' + (state.keyboardId === "all" ? "active" : "") + '" data-kbd="all">' +
+      '<span class="name">全部</span><span class="status ' + wearClass(worst) + '"></span></button>';
+    visible.forEach(function(k){ html += keyboardPillHtml(k, state.keyboardId === k.id, list); });
+    if (visible.length < list.length) html += '<button class="pill more" data-kbd-more>更多 ▾</button>';
+    var menu = '<div class="more-menu ' + (state.kbdMoreOpen ? "show" : "") + '" id="kbdMoreMenu"><div class="more-title">全部键盘 · ' + list.length + ' 个档案</div>';
+    list.forEach(function(k){
+      menu += '<button class="more-item ' + (state.keyboardId === k.id ? "active" : "") + '" data-kbd="' + esc(k.id) + '">' +
+        svgKeyboard + '<span class="mi-name">' + esc(k.name) + '</span>' +
+        '<span class="mi-type">' + (k.type === "builtin" ? "内置" : k.type === "legacy" ? "旧版" : "外接") + '</span>' +
+        '<span class="mi-pct">' + pct(keyboardWorst(k)) + '</span></button>';
+    });
+    return html + menu + '</div>';
+  }
+
+  function keyboardCardHtml(){
+    var k = currentKeyboard();
+    if (!k) return "";
+    var all = k.id === "all";
+    var legacy = k.type === "legacy";
+    var head = '<div class="kbd-head"><div class="card-title">键盘健康 <span class="selected-name">· ' +
+      esc(all ? "全部键盘" : k.name) + '</span><span class="device-count">' + realKeyboards().length + ' 个档案</span>' +
+      (all ? '<span class="type-tag">聚合</span>' : k.type === "builtin" ? '<span class="type-tag">内置</span>' :
+        legacy ? '<span class="type-tag">旧版</span>' : '<span class="type-tag">外接</span>') + '</div>' +
+      '<div class="device-bar"><span class="device-label">键盘设备</span><div class="pills" id="kbdPills">' +
+      renderKeyboardPills() + '</div></div></div>';
+    var host;
+    if (all) {
+      host = '<div class="kbd-host"><div class="aggregate-note"><span>这里汇总 ' + realKeyboards().length +
+        ' 个键盘的按键磨损；选择具体键盘后可编辑别名、额定寿命或换新。</span></div></div>';
+    } else {
+      host = '<div class="kbd-host">' +
+        '<div class="field"><label>设备型号</label><input class="input" data-kbd-field="name" value="' + esc(k.name) + '"></div>' +
+        '<div class="field"><label>额定寿命</label><input class="input num" data-kbd-field="rated" value="' + Math.round(k.rated / 10000) + '"><span class="unit">万次</span></div>' +
+        '<div class="since">起始：' + esc(k.since) + (legacy ? " · 升级前累计" : "") + '</div>' +
+        '<div class="host-actions"><button class="reset-btn" data-kbd-reset>⟳ 换新键盘 · 重置里程</button>' +
+        (legacy && targetKeyboard() ? '<button class="merge-btn" data-merge-kbd>归入当前键盘</button>' : '') + '</div></div>';
+    }
+    var rows = k.keys.map(function(item, i){
+      var r = ratio(item.c, k.rated);
+      var cls = wearClass(r);
+      return '<div class="key-row"><div class="keycap ' + (i < 3 ? "top" : "") + '">' + esc(item.k) + '</div>' +
+        '<div class="k-count">' + fmt(item.c) + ' 次</div>' +
+        '<div class="k-track"><div class="k-fill ' + cls + '" style="width:' + Math.min(100, r * 100).toFixed(2) + '%"></div></div>' +
+        '<div class="k-pct">' + (k.rated > 0 ? pct(r) : "—") + '</div></div>';
+    }).join("");
+    return head + host + '<div class="top5">' + rows + '</div>';
+  }
+
+  function shortName(name, list){
+    var text = String(name || "");
+    var parts = text.split(" · ");
+    var short = parts.length > 1 ? parts[0] : text;
+    if (list && list.length) {
+      var same = list.filter(function(x){
+        var p = String(x.name).split(" · ");
+        return (p.length > 1 ? p[0] : String(x.name)) === short;
+      }).length;
+      // 同一地点有两只鼠标时，胶囊补上型号片段，避免两个「家里」无法区分。
+      if (same > 1) short = text;
+    }
+    if (short.length > 9) short = short.slice(0, 8) + "…";
+    return short || "未命名";
+  }
+
+  function mousePillHtml(m, active, list){
+    return '<button class="pill ' + (active ? "active" : "") + '" data-mouse="' + esc(m.id) + '" title="' + esc(m.name) + '">' +
+      iconFor(m.type) + '<span class="name">' + esc(shortName(m.name, list)) + '</span>' +
+      '<span class="status ' + wearClass(mouseWorst(m)) + '"></span></button>';
+  }
+
+  function renderMousePills(){
+    var list = realMice();
+    var visible = list.slice(0, 3);
+    if (state.mouseId !== "all") {
+      var sel = findMouse(state.mouseId);
+      if (sel && visible.indexOf(sel) < 0) visible[visible.length - 1] = sel;
+    }
+    visible = visible.filter(Boolean);
+    var html = '<button class="pill ' + (state.mouseId === "all" ? "active" : "") + '" data-mouse="all">' +
+      '<span class="name">全部</span><span class="status ' + wearClass(aggregateMouse().worst) + '"></span></button>';
+    visible.forEach(function(m){ html += mousePillHtml(m, state.mouseId === m.id, list); });
+    if (visible.length < list.length) html += '<button class="pill more" data-more>更多 ▾</button>';
+    var menu = '<div class="more-menu ' + (state.moreOpen ? "show" : "") + '" id="moreMenu"><div class="more-title">全部鼠标 · ' + list.length + ' 个设备</div>';
+    list.forEach(function(m){
+      menu += '<button class="more-item ' + (state.mouseId === m.id ? "active" : "") + '" data-mouse="' + esc(m.id) + '">' +
+        iconFor(m.type) + '<span class="mi-name">' + esc(m.name) + '</span>' +
+        '<span class="mi-type">' + (m.type === "builtin" ? "内置" : m.type === "legacy" ? "旧版" : "外接") + '</span>' +
+        '<span class="mi-pct">' + pct(mouseWorst(m)) + '</span></button>';
+    });
+    return html + menu + '</div>';
+  }
+
+  function mouseBarHtml(label, count, rated, all){
+    var r = ratio(count, rated);
+    var cls = wearClass(r);
+    return '<div class="mbar"><div class="mbar-head"><span class="mbar-label">' + label + '</span>' +
+      '<div class="mbar-track"><div class="mbar-fill ' + cls + '" style="width:' + Math.min(100, r * 100).toFixed(2) + '%"></div></div>' +
+      '<span class="mbar-pct ' + cls + '">' + (rated > 0 ? pct(r) : "—") + '</span></div>' +
+      '<div class="mbar-sub"><span>' + fmt(count) + ' / ' + fmt(rated) + ' 次</span><span>' + (all ? "合计" : "本机") + '</span></div></div>';
+  }
+
+  function contribHtml(){
+    var list = realMice();
+    var colors = ["#4c8dff","#3ddc84","#b58cff","#ffb020"];
+    return '<div class="contrib">' + list.map(function(m, i){
+      return '<span><i style="background:' + colors[i % colors.length] + '"></i>' + esc(m.name) + ' · ' + fmt(m.left) + '</span>';
+    }).join("") + '</div>';
+  }
+
+  function mouseCardHtml(){
+    var m = currentMouse();
+    if (!m) return "";
+    var all = m.id === "all";
+    var legacy = m.type === "legacy";
+    var worst = all ? m.worst : mouseWorst(m);
+    var canMerge = legacy && targetMouse();
+    var host;
+    if (all) {
+      host = '<div class="aggregate-note" style="min-height:70px"><span><b>聚合视图</b> · ' + realMice().length +
+        ' 个鼠标的点击合计。选择具体鼠标后可编辑别名、额定寿命或换新；旧版档案可归入当前鼠标。</span></div>';
+    } else {
+      host = '<div class="mouse-host">' +
+        '<div class="field"><label>设备型号</label><input class="input wide" data-mouse-field="name" value="' + esc(m.name) + '"></div>' +
+        '<div class="field"><div class="rated-pair"><span class="mini-label">左微动</span><input class="input num" data-mouse-field="ratedL" value="' + Math.round(m.ratedL / 10000) + '"><span class="unit">万次</span></div>' +
+        '<div class="divider"></div><div class="rated-pair"><span class="mini-label">右微动</span><input class="input num" data-mouse-field="ratedR" value="' + Math.round(m.ratedR / 10000) + '"><span class="unit">万次</span></div></div>' +
+        '<div class="since">起始：' + esc(m.since) + (legacy ? " · 升级前累计" : "") + '</div>' +
+        '<div class="host-actions"><button class="reset-btn" data-mouse-reset>⟳ 换新鼠标 · 重置里程</button>' +
+        (canMerge ? '<button class="merge-btn" data-mouse-merge>归入当前鼠标</button>' : '') + '</div></div>';
+    }
+    var meta;
+    if (all) meta = contribHtml();
+    else if (legacy) meta = '<div class="device-meta"><span class="tag">旧版</span><span class="path">升级前的单鼠标累计 · 归入后原档案移除</span></div>';
+    else meta = '<div class="device-meta"><span class="tag">' + (m.type === "builtin" ? "内置" : "外接") + '</span><span class="path" title="' + esc(m.path) + '">' + esc(m.friendly) + ' · ' + esc(m.path) + '</span></div>';
+    var noteClass = worst >= 1 ? "warn red" : worst >= 0.8 ? "warn" : "note-line";
+    var noteText = worst >= 1 ? "微动已超额定寿命，建议检查或更换微动。" :
+      worst >= 0.8 ? "微动已用 ≥80%，若出现单击变双击，请检查微动。" :
+      "进度按按下次数估算，不代表故障诊断。";
+    var notes = '<div class="mouse-notes"><div class="note-line">中键 <b>' + fmt(m.middle) +
+      '</b> · 侧键 <b>' + fmt(m.x) + '</b>' + (all ? ' · 合计' : '') + '</div>' +
+      (legacy ? '<div class="legacy-note">旧版档案保留升级前计数，可一键并入上面的实体鼠标。</div>' : '') +
+      '<div class="' + noteClass + '">' + noteText + '</div></div>';
+
+    var confirm = '';
+    if (state.confirmReset && !all) {
+      confirm = '<div class="confirm-layer"><div class="confirm-card"><div class="confirm-title">换新鼠标？</div>' +
+        '<div class="confirm-text">将「' + esc(m.name) + '」的左右微动计数清零，起始日期改为今天。额定寿命与别名保持不变。</div>' +
+        '<div class="confirm-actions"><button data-cancel-reset>取消</button><button class="danger" data-confirm-reset>确认换新</button></div></div></div>';
+    }
+
+    return '<div class="mouse-head"><div class="card-title">鼠标健康 <span class="selected-name">· ' + esc(all ? "全部鼠标" : m.name) + '</span>' +
+      '<span class="device-count">' + realMice().length + ' 个档案</span>' +
+      (all ? '<span class="type-tag">聚合</span>' : legacy ? '<span class="type-tag">旧版</span>' : '') + '</div>' +
+      '<div class="device-bar"><span class="device-label">鼠标设备</span><div class="pills" id="mousePills">' + renderMousePills() + '</div></div></div>' +
+      host +
+      '<div class="mouse-bars">' + mouseBarHtml("左键", m.left, m.ratedL, all) + mouseBarHtml("右键", m.right, m.ratedR, all) + '</div>' +
+      meta + notes + confirm;
+  }
+
+  function statsCardHtml(){
+    var k = currentKeyboard() || aggregateKeyboard();
+    var rows = k.keys.map(function(item, i){
+      var share = k.rated > 0 ? item.c / k.rated : 0;
+      return '<div class="stats-row"><div class="stats-rank">' + (i + 1) + '</div>' +
+        '<div class="stats-key"><div class="keycap ' + (i < 3 ? "top" : "") + '">' + esc(item.k) + '</div><span>' + esc(item.n) + '</span></div>' +
+        '<div class="stats-count">' + fmt(item.c) + ' 次</div><div class="stats-share">' + pct(share) + '</div>' +
+        '<div class="stats-bar"><i style="width:' + Math.min(100, share * 100).toFixed(2) + '%"></i></div></div>';
+    }).join("");
+    return '<div class="stats-title">按键排行 · ' + esc(k.name) + '</div><div class="stats-sub">原型简版：外设健康子视图切换后的按键明细。</div>' +
+      '<div class="stats-head"><div>#</div><div>按键</div><div style="text-align:right">频次</div><div style="text-align:right">占额定</div><div>强度</div></div>' + rows;
+  }
+
+  function render(){
+    app.classList.toggle("compact", state.compact);
+    kbdCard.innerHTML = keyboardCardHtml();
+    mouseCard.innerHTML = mouseCardHtml();
+    statsCard.innerHTML = statsCardHtml();
+    var health = state.subview === "health";
+    $("#healthView").style.display = health ? "" : "none";
+    $("#statsView").style.display = health ? "none" : "";
+    $$(".sub-chip").forEach(function(b){ b.classList.toggle("active", b.getAttribute("data-subview") === state.subview); });
+    var worstAll = 0;
+    realMice().forEach(function(m){ worstAll = Math.max(worstAll, mouseWorst(m)); });
+    realKeyboards().forEach(function(k){
+      k.keys.forEach(function(item){ worstAll = Math.max(worstAll, ratio(item.c, k.rated)); });
+    });
+    var dot = $("#healthDot");
+    if (dot) dot.className = "status " + wearClass(worstAll);
+  }
+
+  function toast(text){
+    var el = $("#toast");
+    el.textContent = text;
+    el.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function(){ el.classList.remove("show"); }, 1800);
+  }
+
+  function refreshClock(){
+    var d = new Date();
+    var p = function(n){ return (n < 10 ? "0" : "") + n; };
+    $("#clockText").textContent = d.getFullYear() + "." + p(d.getMonth() + 1) + "." + p(d.getDate()) +
+      " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+  }
+
+  document.addEventListener("click", function(ev){
+    var t = ev.target;
+    var scaleBtn = t.closest("[data-scale]");
+    if (scaleBtn) {
+      state.scale = parseFloat(scaleBtn.getAttribute("data-scale"));
+      document.documentElement.style.setProperty("--scale", state.scale);
+      $$("#scaleSeg button").forEach(function(b){ b.classList.toggle("active", b === scaleBtn); });
+      return;
+    }
+    var sub = t.closest("[data-subview]");
+    if (sub) { state.subview = sub.getAttribute("data-subview"); state.moreOpen = false; state.kbdMoreOpen = false; render(); return; }
+    if (t.closest("[data-kbd-more]")) {
+      state.kbdMoreOpen = !state.kbdMoreOpen; state.moreOpen = false; render(); return;
+    }
+    var kbd = t.closest("[data-kbd]");
+    if (kbd && !t.closest("[data-kbd-field]")) {
+      state.keyboardId = kbd.getAttribute("data-kbd"); state.moreOpen = false; state.kbdMoreOpen = false;
+      state.confirmReset = false; render(); return;
+    }
+    var mouse = t.closest("[data-mouse]");
+    if (mouse) {
+      state.mouseId = mouse.getAttribute("data-mouse"); state.moreOpen = false; state.kbdMoreOpen = false;
+      state.confirmReset = false; render(); return;
+    }
+    if (t.closest("[data-more]")) {
+      state.moreOpen = !state.moreOpen; state.kbdMoreOpen = false; render(); return;
+    }
+    if (t.closest("[data-merge-kbd]")) {
+      var legacyK = findKeyboard("legacy"); var targetK = targetKeyboard();
+      if (!legacyK || !targetK) return;
+      targetK.keys.forEach(function(item){ item.c += 0; });
+      legacyK.keys.forEach(function(item){
+        var targetItem = targetK.keys.filter(function(x){ return x.n === item.n; })[0];
+        if (targetItem) targetItem.c += item.c;
+        else targetK.keys.push({n:item.n,k:item.k,c:item.c});
+      });
+      targetK.keys.sort(function(a,b){ return b.c - a.c; });
+      state.keyboards = state.keyboards.filter(function(k){ return k.id !== "legacy"; });
+      state.keyboardId = targetK.id; state.moreOpen = false; state.kbdMoreOpen = false; render();
+      toast("旧版键盘已归入「" + targetK.name + "」");
+      return;
+    }
+    if (t.closest("[data-mouse-merge]")) {
+      var legacyM = findMouse("legacy"); var targetM = targetMouse();
+      if (!legacyM || !targetM) return;
+      targetM.left += legacyM.left; targetM.right += legacyM.right;
+      targetM.middle += legacyM.middle; targetM.x += legacyM.x;
+      state.mice = state.mice.filter(function(m){ return m.id !== "legacy"; });
+      state.mouseId = targetM.id; state.moreOpen = false; state.kbdMoreOpen = false; render();
+      toast("旧版鼠标已归入「" + targetM.name + "」");
+      return;
+    }
+    if (t.closest("[data-mouse-reset]")) {
+      state.confirmReset = true; state.moreOpen = false; state.kbdMoreOpen = false; render(); return;
+    }
+    if (t.closest("[data-cancel-reset]")) { state.confirmReset = false; render(); return; }
+    if (t.closest("[data-confirm-reset]")) {
+      var cur = findMouse(state.mouseId);
+      if (cur) {
+        cur.left = 0; cur.right = 0; cur.middle = 0; cur.x = 0;
+        var d = new Date();
+        var p = function(n){ return (n < 10 ? "0" : "") + n; };
+        cur.since = d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+      }
+      state.confirmReset = false; render(); toast("已换新：" + (cur ? cur.name : "鼠标"));
+      return;
+    }
+    if (t.closest("[data-kbd-reset]")) {
+      var k = findKeyboard(state.keyboardId);
+      if (k) {
+        k.keys.forEach(function(item){ item.c = 0; });
+        var d2 = new Date();
+        var p2 = function(n){ return (n < 10 ? "0" : "") + n; };
+        k.since = d2.getFullYear() + "-" + p2(d2.getMonth() + 1) + "-" + p2(d2.getDate());
+        render(); toast("已换新：" + k.name);
+      }
+      return;
+    }
+    if (!t.closest(".pills") && (state.moreOpen || state.kbdMoreOpen)) {
+      state.moreOpen = false; state.kbdMoreOpen = false; render();
+    }
+  });
+
+  document.addEventListener("change", function(ev){
+    var t = ev.target;
+    if (t.matches("[data-mouse-field=name]")) {
+      var m = findMouse(state.mouseId);
+      if (m) { m.name = t.value.trim() || m.friendly || "未命名鼠标"; render(); }
+      return;
+    }
+    if (t.matches("[data-mouse-field=ratedL]") || t.matches("[data-mouse-field=ratedR]")) {
+      var m2 = findMouse(state.mouseId); if (!m2) return;
+      var v = Math.max(100, Math.min(1000000, Number(t.value) || 100));
+      if (t.getAttribute("data-mouse-field") === "ratedL") m2.ratedL = v * 10000;
+      else m2.ratedR = v * 10000;
+      render(); return;
+    }
+    if (t.matches("[data-kbd-field=name]")) {
+      var k = findKeyboard(state.keyboardId);
+      if (k) { k.name = t.value.trim() || "未命名键盘"; render(); }
+      return;
+    }
+    if (t.matches("[data-kbd-field=rated]")) {
+      var k2 = findKeyboard(state.keyboardId); if (!k2) return;
+      k2.rated = Math.max(100, Math.min(1000000, Number(t.value) || 100)) * 10000;
+      render(); return;
+    }
+  });
+
+  $("#compactToggle").addEventListener("change", function(e){ state.compact = e.target.checked; render(); });
+  $("#resetDemo").addEventListener("click", function(){
+    state.mice = JSON.parse(JSON.stringify(initialMice));
+    state.keyboards = JSON.parse(JSON.stringify(initialKeyboards));
+    state.mouseId = "home"; state.keyboardId = "builtin"; state.subview = "health";
+    state.moreOpen = false; state.kbdMoreOpen = false; state.confirmReset = false;
+    render(); toast("示例数据已恢复");
+  });
+
+  render();
+  refreshClock();
+  setInterval(refreshClock, 1000);
+})();
+</script>
+</body>
+</html>

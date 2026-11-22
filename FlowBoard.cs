@@ -26,11 +26,36 @@ namespace KeyMouseStats
         public long DeepMs;
         public long NormalMs;
         public long FragmentedMs;
+        /// <summary>空闲挂机时长;不进入 TotalMs,也不参与碎片化惩罚。</summary>
+        public long IdleMs;
+
+        /// <summary>是否至少存在一个有效输入会话或输入突发段。</summary>
+        internal static bool HasMeaningfulInput(IList<FlowSessionRow> sessions, IList<FlowBurstRow> bursts)
+        {
+            if (bursts != null)
+            {
+                for (int i = 0; i < bursts.Count; i++)
+                {
+                    FlowBurstRow burst = bursts[i];
+                    if (burst != null && burst.KeyCount > 0) return true;
+                }
+            }
+            if (sessions != null)
+            {
+                for (int i = 0; i < sessions.Count; i++)
+                {
+                    FlowSessionRow row = sessions[i];
+                    if (row == null) continue;
+                    if (row.InputCount > 0 || row.KeyCount > 0 || row.ActiveMs > 0) return true;
+                }
+            }
+            return false;
+        }
 
         /// <summary>
         /// 本地日期 → 当日 00:00:00 的 UTC Unix 毫秒。
-        /// 事件表的 start_ts_ms / end_ts_ms 是 UTC Unix 毫秒(DbWriter.UnixEpoch),
-        /// 绝不能用 DateTime.Ticks(公元 1 年起的本地刻度)直接当毫秒比,否则相差约 62 年。
+        /// 事件表的 start_ts_ms / end_ts_ms 是 UTC Unix 毫秒(UnixTime),
+        /// 绝不能用 DateTime.Ticks(公元 1 年起的本地刻度)直接当毫秒比,否则时间基准完全不同。
         /// </summary>
         internal static long DayStartMs(DateTime day)
         {
@@ -39,7 +64,7 @@ namespace KeyMouseStats
                 - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalMilliseconds;
         }
 
-        /// <summary>当日某毫秒时刻的心流状态;无数据时返回 Fragmented。</summary>
+        /// <summary>当日某毫秒时刻的心流状态;无数据时返回 Idle。</summary>
         public FlowState StateAt(long ms)
         {
             if (Report != null)
@@ -50,7 +75,30 @@ namespace KeyMouseStats
                     if (ms >= segments[i].StartMs && ms < segments[i].EndMs) return segments[i].State;
                 }
             }
-            return FlowState.Fragmented;
+            return FlowState.Idle;
+        }
+
+        /// <summary>当日首条与末条非 Idle 活跃段的秒偏移;没有活跃段时返回 false。</summary>
+        internal bool ActiveRange(out int firstSec, out int lastSec)
+        {
+            firstSec = -1;
+            lastSec = -1;
+            if (Report == null) return false;
+            long dayStart = DayStartMs(Day);
+            List<FlowSegment> segments = Report.Segments;
+            for (int i = 0; i < segments.Count; i++)
+            {
+                FlowSegment segment = segments[i];
+                if (segment.State == FlowState.Idle || segment.LengthMs <= 0) continue;
+                int from = (int)((segment.StartMs - dayStart) / 1000L);
+                int to = (int)((segment.EndMs - dayStart) / 1000L);
+                if (from < 0) from = 0;
+                if (to > TimelineWindow.DaySeconds) to = TimelineWindow.DaySeconds;
+                if (to <= from) continue;
+                if (firstSec < 0 || from < firstSec) firstSec = from;
+                if (lastSec < 0 || to > lastSec) lastSec = to;
+            }
+            return firstSec >= 0 && lastSec > firstSec;
         }
 
         /// <summary>当日第 second 秒所在的前台会话;找不到返回 null。</summary>
@@ -98,6 +146,12 @@ namespace KeyMouseStats
     internal static class FlowBoard
     {
         internal const string CleanHint = "当前为清爽版(不含内置事件数据库),使用标准版可解锁深度心流与分钟级轨迹时光机";
+        internal const string NoDataHint = "当日暂无可分析的事件流，继续使用后将自动生成分钟级轨迹";
+#if CLEAN_EDITION
+        internal const string UnavailableHint = CleanHint;
+#else
+        internal const string UnavailableHint = "事件数据库未就绪，请检查运行日志";
+#endif
 
         private const int CacheLimit = 6;
         private const int TodayTtlSeconds = 30;
@@ -193,10 +247,11 @@ namespace KeyMouseStats
                     FlowSegment segment = report.Segments[i];
                     if (segment.State == FlowState.Deep) data.DeepMs += segment.LengthMs;
                     else if (segment.State == FlowState.Normal) data.NormalMs += segment.LengthMs;
+                    else if (segment.State == FlowState.Idle) data.IdleMs += segment.LengthMs;
                     else data.FragmentedMs += segment.LengthMs;
                 }
                 data.Costs = ContextCost.Analyze(data.Sessions, data.Bursts, new FlowConfig(), 5, 15);
-                data.HasData = data.Sessions.Count > 0;
+                data.HasData = FlowBoardData.HasMeaningfulInput(data.Sessions, data.Bursts);
 #endif
             }
             catch
@@ -207,7 +262,7 @@ namespace KeyMouseStats
         }
 
         /// <summary>
-        /// 把三态标签回填到 events_window_session.semantic_tag。幂等,幂等性由 SQL 的
+        /// 把四态标签回填到 events_window_session.semantic_tag。幂等,幂等性由 SQL 的
         /// `AND semantic_tag&lt;&gt;?` 保证。返回真正改动的行数。
         /// </summary>
         internal static int TagSessions(FlowBoardData data)
@@ -237,6 +292,7 @@ namespace KeyMouseStats
         {
             if (state == FlowState.Deep) return "deep";
             if (state == FlowState.Normal) return "normal";
+            if (state == FlowState.Idle) return "idle";
             return "fragmented";
         }
     }

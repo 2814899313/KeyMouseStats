@@ -39,6 +39,16 @@ namespace KeyMouseStats
         public static string ScriptPath = "";
         /// <summary>久坐提醒时异步 POST 的 Webhook(空 = 不投递)。</summary>
         public static string WebhookUrl = "";
+        // ---- v3.3 心流护航 ----
+        /// <summary>连续 Normal/Deep 后自动收敛为 Focus Pill。</summary>
+        public static bool FocusPillEnabled = true;
+        public static int FocusPillAfterMinutes = 5;
+        /// <summary>启用心流保护型微休息;开启时抑制旧版 ContinuousMessage。</summary>
+        public static bool FocusBreakEnabled = true;
+        public static int FocusBreakAfterMinutes = 45;
+        public static int FocusBreakIdleSeconds = 18;
+        public static DateTime BreakSnoozeUntil = DateTime.MinValue;
+        public static string BreakMutedDay = "";
 
         public static bool GoalEnabled { get { return GoalMode != GoalOff && GoalTarget > 0; } }
         public static bool AnyEnabled { get { return GoalEnabled || ContinuousEnabled || SummaryEnabled; } }
@@ -101,7 +111,14 @@ namespace KeyMouseStats
                 + SummarySent + "|"
                 + (FullscreenDnd ? "1" : "0") + "|"
                 + AutomationTrigger.EncodeField(ScriptPath) + "|"
-                + AutomationTrigger.EncodeField(WebhookUrl);
+                + AutomationTrigger.EncodeField(WebhookUrl) + "|"
+                + (FocusPillEnabled ? "1" : "0") + "|"
+                + FocusPillAfterMinutes.ToString(CultureInfo.InvariantCulture) + "|"
+                + (FocusBreakEnabled ? "1" : "0") + "|"
+                + FocusBreakAfterMinutes.ToString(CultureInfo.InvariantCulture) + "|"
+                + FocusBreakIdleSeconds.ToString(CultureInfo.InvariantCulture) + "|"
+                + (BreakSnoozeUntil == DateTime.MinValue ? "" : BreakSnoozeUntil.ToString("O", CultureInfo.InvariantCulture)) + "|"
+                + BreakMutedDay;
         }
 
         public static void Load(string text)
@@ -133,6 +150,33 @@ namespace KeyMouseStats
                 if (parts.Length >= 11) FullscreenDnd = parts[10] != "0";
                 if (parts.Length >= 12) ScriptPath = AutomationTrigger.DecodeField(parts[11]);
                 if (parts.Length >= 13) WebhookUrl = AutomationTrigger.DecodeField(parts[12]);
+                if (parts.Length >= 14) FocusPillEnabled = parts[13] != "0";
+                if (parts.Length >= 15)
+                {
+                    int value;
+                    if (int.TryParse(parts[14], NumberStyles.Integer, CultureInfo.InvariantCulture, out value))
+                        FocusPillAfterMinutes = value >= 1 && value <= 120 ? value : 5;
+                }
+                if (parts.Length >= 16) FocusBreakEnabled = parts[15] != "0";
+                if (parts.Length >= 17)
+                {
+                    int value;
+                    if (int.TryParse(parts[16], NumberStyles.Integer, CultureInfo.InvariantCulture, out value))
+                        FocusBreakAfterMinutes = value >= 15 && value <= 240 ? value : 45;
+                }
+                if (parts.Length >= 18)
+                {
+                    int value;
+                    if (int.TryParse(parts[17], NumberStyles.Integer, CultureInfo.InvariantCulture, out value))
+                        FocusBreakIdleSeconds = value >= 5 && value <= 120 ? value : 18;
+                }
+                if (parts.Length >= 19)
+                {
+                    DateTime snooze;
+                    BreakSnoozeUntil = DateTime.TryParse(parts[18], CultureInfo.InvariantCulture,
+                        DateTimeStyles.None, out snooze) ? snooze : DateTime.MinValue;
+                }
+                if (parts.Length >= 20) BreakMutedDay = parts[19] ?? "";
             }
             catch (FormatException) { }
         }
@@ -201,6 +245,8 @@ namespace KeyMouseStats
         public static string ContinuousMessage(DateTime now, ActiveSession session)
         {
             if (!WellbeingSettings.ContinuousEnabled || session == null) return null;
+            // v3.3:新版 FocusBreak 已启用时,旧的连续使用提醒交给状态机统一处理,避免双弹窗。
+            if (WellbeingSettings.FocusBreakEnabled) return null;
             double minutes = session.Seconds / 60.0;
             if (minutes < WellbeingSettings.ContinuousMinutes) return null;
             if (WellbeingSettings.LastReminder != DateTime.MinValue

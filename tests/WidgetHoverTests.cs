@@ -42,6 +42,7 @@ internal static class WidgetHoverTests
         NoOverlap();
         DragArming();
         ScaleAwareness();
+        PlacementClamp();
         Console.WriteLine("WidgetHoverTests: " + _checks + " 项断言通过");
     }
 
@@ -157,5 +158,25 @@ internal static class WidgetHoverTests
         Equal(WidgetChrome.HitHoverChrome(Client, 0f, new Point(120, 80)), WidgetChrome.None,
             "s=0 时按 1 倍处理且不命中");
         Check(WidgetChrome.DotRect(Client, -1f, 0).Width > 0, "负缩放应按 1 倍兜底");
+    }
+
+    /// <summary>P1-04:负坐标副屏被拔掉/窗口被拖出边界时,仍要至少主体落在某块工作区内。</summary>
+    private static void PlacementClamp()
+    {
+        Rectangle[] screens = {
+            new Rectangle(-1920, 0, 1920, 1080),
+            new Rectangle(0, 0, 1920, 1040)
+        };
+        Rectangle left = WidgetPlacement.Clamp(new Rectangle(-1900, 900, 248, 216), screens, new Rectangle(0, 0, 1920, 1040));
+        Check(left.Left >= -1920 && left.Bottom <= 1080, "负坐标副屏内的窗口不应被推到屏幕外");
+        Check(Rectangle.Intersect(left, screens[0]).Width > 0, "左侧副屏窗口至少主体可见");
+
+        Rectangle off = WidgetPlacement.Clamp(new Rectangle(-3500, -500, 248, 216), screens, new Rectangle(0, 0, 1920, 1040));
+        Check(off.Left >= -1920 && off.Top >= 0, "完全飞出左上角的窗口应回到最近屏幕");
+        Check(Rectangle.Intersect(off, screens[0]).Height > 0, "回到左屏后至少有可见高度");
+
+        Rectangle bottom = WidgetPlacement.Clamp(new Rectangle(100, 2000, 248, 216), screens, new Rectangle(0, 0, 1920, 1040));
+        Check(bottom.Bottom <= 1040 && bottom.Top >= 0, "飞出屏幕底部的窗口应被夹回工作区");
+        Check(Rectangle.Intersect(bottom, screens[1]).Width > 0, "主屏底部窗口至少主体可见");
     }
 }

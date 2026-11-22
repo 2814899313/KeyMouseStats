@@ -136,6 +136,8 @@ namespace KeyMouseStats
         public long Middle;
         public long XButtons;
         public long Wheel;
+        /// <summary>Wheel 中属于横向滚动(WM_MOUSEHWHEEL / RI_MOUSE_HWHEEL)的子集。</summary>
+        public long HWheel;
         public double MovePx;
         public double MoveMeters;
         /// <summary>1.7.6:按住时长的全量累计(跨归档、不随保留期清理而减少)。</summary>
@@ -154,6 +156,8 @@ namespace KeyMouseStats
         public long Middle;
         public long XButtons;
         public long Wheel;
+        /// <summary>Wheel 中属于横向滚动(WM_MOUSEHWHEEL / RI_MOUSE_HWHEEL)的子集。</summary>
+        public long HWheel;
         public double MovePx;
         public double MoveMeters;
         public long[] HourKeys = new long[24];
@@ -263,7 +267,7 @@ namespace KeyMouseStats
 
         public bool IsEmpty
         {
-            get { return Keys == 0 && Clicks == 0 && Wheel == 0 && MovePx < 0.5 && MoveMeters == 0 && ActiveSeconds == 0 && IdleSeconds == 0 && Cross.Packets==0 && Cross.Clicks==0 && HoldCount == 0 && HoldActiveSeconds == 0; }
+            get { return Keys == 0 && Clicks == 0 && Wheel == 0 && HWheel == 0 && MovePx < 0.5 && MoveMeters == 0 && ActiveSeconds == 0 && IdleSeconds == 0 && Cross.Packets==0 && Cross.Clicks==0 && HoldCount == 0 && HoldActiveSeconds == 0; }
         }
 
         /// <summary>合并另一份同日记录(多机合并的「相加」策略)。</summary>
@@ -271,7 +275,7 @@ namespace KeyMouseStats
         {
             if (other == null) return;
             Keys += other.Keys; Clicks += other.Clicks; Left += other.Left; Right += other.Right;
-            Middle += other.Middle; XButtons += other.XButtons; Wheel += other.Wheel;
+            Middle += other.Middle; XButtons += other.XButtons; Wheel += other.Wheel; HWheel += other.HWheel;
             MovePx += other.MovePx; MoveMeters += other.MoveMeters;
             ActiveSeconds += other.ActiveSeconds; IdleSeconds += other.IdleSeconds;
             AppObservedSeconds += other.AppObservedSeconds; AppSwitches += other.AppSwitches;
@@ -350,6 +354,10 @@ namespace KeyMouseStats
         private static readonly long[] _kb = new long[60];
         private static readonly long[] _ms = new long[60];
         private static int _idx;
+        // 300 个 1 秒桶:供 FocusMonitor 读取最近 5 分钟累计输入,不影响 60 秒 APM。
+        private static readonly long[] _kb5 = new long[300];
+        private static readonly long[] _ms5 = new long[300];
+        private static int _idx5;
         private static readonly long[] _trend = NewTrend();
         private static int _trendIndex;
         public static long TrendVersion { get; private set; }
@@ -359,10 +367,15 @@ namespace KeyMouseStats
         public static double ActiveSeconds { get { return Store.Today.ActiveSeconds; } }
         public static long Apm { get { return KeysPerMin + ClicksPerMin; } }
 
-        public static void AddKey() { Tick(); _kb[_idx]++; RateMemory.Add(DateTime.Now); }
-        public static void AddClick() { Tick(); _ms[_idx]++; RateMemory.Add(DateTime.Now); }
+        public static void AddKey() { Tick(); _kb[_idx]++; _kb5[_idx5]++; RateMemory.Add(DateTime.Now); }
+        public static void AddClick() { Tick(); _ms[_idx]++; _ms5[_idx5]++; RateMemory.Add(DateTime.Now); }
         public static void Reset()
-        { Array.Clear(_kb, 0, 60); Array.Clear(_ms, 0, 60); _idx = 0; _trendIndex=0;for(int i=0;i<300;i++)_trend[i]=-1;TrendVersion++; _rateStart = System.Diagnostics.Stopwatch.GetTimestamp(); RateMemory.Clear(); }
+        {
+            Array.Clear(_kb, 0, 60); Array.Clear(_ms, 0, 60); _idx = 0;
+            Array.Clear(_kb5, 0, 300); Array.Clear(_ms5, 0, 300); _idx5 = 0;
+            _trendIndex=0;for(int i=0;i<300;i++)_trend[i]=-1;TrendVersion++;
+            _rateStart = System.Diagnostics.Stopwatch.GetTimestamp(); RateMemory.Clear();
+        }
 
         public static void Tick(){TickAt(System.Diagnostics.Stopwatch.GetTimestamp());}
         internal static void TickAt(long now)
@@ -375,12 +388,14 @@ namespace KeyMouseStats
             if(steps>=300)
             {
                 Array.Clear(_kb,0,60);Array.Clear(_ms,0,60);
+                Array.Clear(_kb5,0,300);Array.Clear(_ms5,0,300);
                 for(int i=0;i<300;i++)_trend[i]=-1;
-                _idx=0;_trendIndex=0;
+                _idx=0;_idx5=0;_trendIndex=0;
             }
             else for(int i=0;i<steps;i++)
             {
                 _idx=(_idx+1)%60;_kb[_idx]=0;_ms[_idx]=0;
+                _idx5=(_idx5+1)%300;_kb5[_idx5]=0;_ms5[_idx5]=0;
                 _trendIndex=(_trendIndex+1)%300;
                 _trend[_trendIndex]=gap?-1:Apm;
             }
@@ -414,6 +429,21 @@ namespace KeyMouseStats
         {
             get { long s = 0; for (int i = 0; i < 60; i++) s += _ms[i]; return s; }
         }
+
+        /// <summary>最近 5 分钟累计击键(300 个 1 秒桶)。</summary>
+        public static long Keys5m
+        {
+            get { long s = 0; for (int i = 0; i < 300; i++) s += _kb5[i]; return s; }
+        }
+
+        /// <summary>最近 5 分钟累计点击(300 个 1 秒桶)。</summary>
+        public static long Clicks5m
+        {
+            get { long s = 0; for (int i = 0; i < 300; i++) s += _ms5[i]; return s; }
+        }
+
+        /// <summary>最近 5 分钟键盘 + 点击有效输入。</summary>
+        public static long Input5m { get { return Keys5m + Clicks5m; } }
     }
 
     /// <summary>
@@ -454,6 +484,277 @@ namespace KeyMouseStats
         }
     }
 
+    /// <summary>
+    /// 长路径文件小工具。.NET Framework 4.x 的 File/Directory API 即使收到 \\?\ 前缀,
+    /// 仍可能在 Path.GetFullPath 阶段抛 PathTooLongException;因此超过 240 字符的
+    /// stats.txt / 月归档改用 Win32 W 系列 API,短路径仍走原有 System.IO。
+    /// </summary>
+    internal static class LongPathIO
+    {
+        private const uint GENERIC_READ = 0x80000000;
+        private const uint GENERIC_WRITE = 0x40000000;
+        private const uint FILE_SHARE_READ = 0x00000001;
+        private const uint FILE_SHARE_WRITE = 0x00000002;
+        private const uint CREATE_ALWAYS = 2;
+        private const uint OPEN_EXISTING = 3;
+        private const uint FILE_ATTRIBUTE_NORMAL = 0x80;
+        private const uint FILE_ATTRIBUTE_DIRECTORY = 0x10;
+        private const uint INVALID_FILE_ATTRIBUTES = 0xFFFFFFFF;
+        private const uint MOVEFILE_REPLACE_EXISTING = 0x1;
+        private const uint MOVEFILE_WRITE_THROUGH = 0x8;
+        private const int ERROR_ALREADY_EXISTS = 183;
+        private static readonly IntPtr INVALID_HANDLE = new IntPtr(-1);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetFileAttributesW(string path);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool CreateDirectoryW(string path, IntPtr security);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr CreateFileW(string path, uint access, uint share,
+            IntPtr security, uint disposition, uint attributes, IntPtr template);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool ReadFile(IntPtr handle, byte[] buffer, uint count, out uint read, IntPtr overlapped);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool WriteFile(IntPtr handle, byte[] buffer, uint count, out uint written, IntPtr overlapped);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool FlushFileBuffers(IntPtr handle);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr handle);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool MoveFileExW(string existing, string target, uint flags);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool CopyFileW(string existing, string target, bool failIfExists);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool DeleteFileW(string path);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool RemoveDirectoryW(string path);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr FindFirstFileW(string pattern, out WIN32_FIND_DATA data);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool FindNextFileW(IntPtr handle, out WIN32_FIND_DATA data);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool FindClose(IntPtr handle);
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct WIN32_FIND_DATA
+        {
+            public uint Attributes;
+            public long CreationTime;
+            public long LastAccessTime;
+            public long LastWriteTime;
+            public uint SizeHigh;
+            public uint SizeLow;
+            public uint Reserved0;
+            public uint Reserved1;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string FileName;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 14)] public string AlternateName;
+        }
+
+        internal static bool IsLong(string path)
+        {
+            return path != null && path.StartsWith(@"\\?\", StringComparison.Ordinal);
+        }
+
+        internal static bool FileExists(string path)
+        {
+            if (!IsLong(path)) return File.Exists(path);
+            uint attributes = GetFileAttributesW(path);
+            return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+        }
+
+        internal static bool DirectoryExists(string path)
+        {
+            if (!IsLong(path)) return Directory.Exists(path);
+            uint attributes = GetFileAttributesW(path);
+            return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        }
+
+        internal static void CreateDirectory(string path)
+        {
+            if (!IsLong(path)) { Directory.CreateDirectory(path); return; }
+            string raw = path;
+            string prefix = "";
+            bool unc = false;
+            if (raw.StartsWith(@"\\?\UNC\", StringComparison.Ordinal))
+            {
+                prefix = @"\\?\UNC\";
+                raw = raw.Substring(8);   // server\share\...
+                unc = true;
+            }
+            else if (raw.StartsWith(@"\\?\", StringComparison.Ordinal))
+            {
+                prefix = @"\\?\";
+                raw = raw.Substring(4);   // C:\...
+            }
+
+            int start;
+            string current;
+            if (unc)
+            {
+                int slash1 = raw.IndexOf('\\');
+                int slash2 = slash1 < 0 ? -1 : raw.IndexOf('\\', slash1 + 1);
+                if (slash1 < 0) return;
+                start = slash2 < 0 ? raw.Length : slash2;
+                current = raw.Substring(0, start);   // server\share
+            }
+            else if (raw.StartsWith(@"\\", StringComparison.Ordinal))
+            {
+                int slash1 = raw.IndexOf('\\', 2);
+                int slash2 = slash1 < 0 ? -1 : raw.IndexOf('\\', slash1 + 1);
+                if (slash1 < 0) return;
+                start = slash2 < 0 ? raw.Length : slash2;
+                current = raw.Substring(0, start);
+            }
+            else
+            {
+                start = raw.Length >= 2 && raw[1] == ':' ? 3 : 0;
+                current = start > 0 ? raw.Substring(0, start).TrimEnd('\\') : "";
+            }
+            while (start < raw.Length)
+            {
+                while (start < raw.Length && (raw[start] == '\\' || raw[start] == '/')) start++;
+                if (start >= raw.Length) break;
+                int next = raw.IndexOfAny(new char[] { '\\', '/' }, start);
+                if (next < 0) next = raw.Length;
+                current = current.Length == 0 ? raw.Substring(start, next - start) : current + "\\" + raw.Substring(start, next - start);
+                string full = prefix + current;
+                if (!CreateDirectoryW(full, IntPtr.Zero))
+                {
+                    int error = Marshal.GetLastWin32Error();
+                    if (error != ERROR_ALREADY_EXISTS) throw new IOException("CreateDirectory 失败(Win32=" + error + "): " + full);
+                }
+                start = next;
+            }
+        }
+
+        private static string ReadAllText(string path)
+        {
+            if (!IsLong(path)) return File.ReadAllText(path, Encoding.UTF8);
+            IntPtr handle = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                IntPtr.Zero, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, IntPtr.Zero);
+            if (handle == INVALID_HANDLE) throw new IOException("ReadFile 打开失败(Win32=" + Marshal.GetLastWin32Error() + "): " + path);
+            try
+            {
+                using (MemoryStream stream = new MemoryStream())
+                {
+                    byte[] buffer = new byte[81920];
+                    for (; ; )
+                    {
+                        uint read;
+                        if (!ReadFile(handle, buffer, (uint)buffer.Length, out read, IntPtr.Zero))
+                            throw new IOException("ReadFile 失败(Win32=" + Marshal.GetLastWin32Error() + "): " + path);
+                        if (read == 0) break;
+                        stream.Write(buffer, 0, (int)read);
+                    }
+                    string text = Encoding.UTF8.GetString(stream.ToArray());
+                    return text.Length > 0 && text[0] == '\uFEFF' ? text.Substring(1) : text;
+                }
+            }
+            finally { CloseHandle(handle); }
+        }
+
+        internal static string[] ReadAllLines(string path)
+        {
+            if (!IsLong(path)) return File.ReadAllLines(path, Encoding.UTF8);
+            string text = ReadAllText(path);
+            return text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        }
+
+        internal static void WriteAllText(string path, string text, Encoding encoding)
+        {
+            if (!IsLong(path)) { File.WriteAllText(path, text, encoding); return; }
+            IntPtr handle = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ,
+                IntPtr.Zero, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, IntPtr.Zero);
+            if (handle == INVALID_HANDLE) throw new IOException("WriteFile 打开失败(Win32=" + Marshal.GetLastWin32Error() + "): " + path);
+            try
+            {
+                byte[] preamble = encoding.GetPreamble();
+                if (preamble.Length > 0) WriteBytes(handle, preamble, path);
+                WriteBytes(handle, encoding.GetBytes(text ?? ""), path);
+                FlushFileBuffers(handle);
+            }
+            finally { CloseHandle(handle); }
+        }
+
+        private static void WriteBytes(IntPtr handle, byte[] bytes, string path)
+        {
+            int offset = 0;
+            while (offset < bytes.Length)
+            {
+                int count = Math.Min(81920, bytes.Length - offset);
+                byte[] block = new byte[count];
+                Buffer.BlockCopy(bytes, offset, block, 0, count);
+                uint written;
+                if (!WriteFile(handle, block, (uint)count, out written, IntPtr.Zero) || written != (uint)count)
+                    throw new IOException("WriteFile 失败(Win32=" + Marshal.GetLastWin32Error() + "): " + path);
+                offset += count;
+            }
+        }
+
+        internal static void ReplaceOrMove(string temp, string target, string backup)
+        {
+            if (!IsLong(temp) && !IsLong(target))
+            {
+                if (File.Exists(target)) File.Replace(temp, target, backup);
+                else File.Move(temp, target);
+                return;
+            }
+            if (FileExists(target) && !CopyFileW(target, backup, false))
+                throw new IOException("备份旧文件失败(Win32=" + Marshal.GetLastWin32Error() + "): " + backup);
+            if (!MoveFileExW(temp, target, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+                throw new IOException("替换文件失败(Win32=" + Marshal.GetLastWin32Error() + "): " + target);
+        }
+
+        internal static string[] GetDirectories(string path)
+        {
+            if (!IsLong(path)) return Directory.GetDirectories(path);
+            return FindEntries(path, true, "*");
+        }
+
+        internal static string[] GetFiles(string path, string pattern)
+        {
+            if (!IsLong(path)) return Directory.GetFiles(path, pattern);
+            return FindEntries(path, false, pattern);
+        }
+
+        private static string[] FindEntries(string path, bool directories, string pattern)
+        {
+            List<string> result = new List<string>();
+            string search = path.TrimEnd('\\') + "\\*";
+            WIN32_FIND_DATA data;
+            IntPtr handle = FindFirstFileW(search, out data);
+            if (handle == INVALID_HANDLE) return result.ToArray();
+            try
+            {
+                do
+                {
+                    if (string.IsNullOrEmpty(data.FileName) || data.FileName == "." || data.FileName == "..") continue;
+                    bool isDirectory = (data.Attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+                    if (isDirectory != directories) continue;
+                    if (!directories && pattern != null && pattern != "*" &&
+                        pattern.StartsWith("*.", StringComparison.Ordinal) &&
+                        !data.FileName.EndsWith(pattern.Substring(1), StringComparison.OrdinalIgnoreCase)) continue;
+                    string child = path.TrimEnd('\\') + "\\" + data.FileName;
+                    if (!string.Equals(child, path, StringComparison.OrdinalIgnoreCase)) result.Add(child);
+                }
+                while (FindNextFileW(handle, out data));
+            }
+            finally { FindClose(handle); }
+            return result.ToArray();
+        }
+
+        internal static void DeleteDirectory(string path)
+        {
+            string safe = Store.LongPath(path);
+            if (!IsLong(safe)) { Directory.Delete(path, true); return; }
+            foreach (string file in GetFiles(safe, "*")) DeleteFileW(file);
+            foreach (string dir in GetDirectories(safe))
+                if (!string.Equals(dir.TrimEnd('\\'), safe.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
+                    DeleteDirectory(dir);
+            RemoveDirectoryW(safe);
+        }
+    }
+
     internal static class Store
     {
         /// <summary>保留天数;0 表示永久保留。超期数据先按月归档再移除。</summary>
@@ -481,7 +782,46 @@ namespace KeyMouseStats
         internal static string DataDirectory
         {
             get { return Dir; }
-            set { Dir = value; FilePath = Path.Combine(value, "stats.txt"); _redirected = true; MonthlyKnown.Clear(); _monthlyMigration = false; }
+            set { Dir = value; FilePath = Path.Combine(value, "stats.txt"); _redirected = true; MonthlyKnown.Clear(); _monthlyMigration = false; CustomThemeStore.InvalidateForDataDirectoryChange(); IconPack.InvalidateForDataDirectoryChange(); }
+        }
+
+        /// <summary>
+        /// 超长本地路径加 \\?\ 前缀;UNC 路径用 \\?\UNC\。短路径原样返回,
+        /// 避免改变既有 File.Replace / .bak 行为。
+        /// </summary>
+        internal static string LongPath(string path)
+        {
+            if (string.IsNullOrEmpty(path) || path.Length <= 240) return path;
+            if (path.StartsWith(@"\\?\", StringComparison.Ordinal)) return path;
+            if (path.Length >= 3 && path[1] == ':' &&
+                ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')))
+                return @"\\?\" + path;
+            if (path.StartsWith(@"\\", StringComparison.Ordinal))
+                return @"\\?\UNC\" + path.Substring(2);
+            return path;
+        }
+
+        /// <summary>去掉 \\?\ / \\?\UNC\ 前缀,供 Path.GetFileName 等受长度/字符校验影响的 API 使用。</summary>
+        internal static string StripLongPrefix(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return path;
+            if (path.StartsWith(@"\\?\UNC\", StringComparison.Ordinal)) return @"\\" + path.Substring(8);
+            if (path.StartsWith(@"\\?\", StringComparison.Ordinal)) return path.Substring(4);
+            return path;
+        }
+
+        internal static void ReportSaveFailure(Exception error, string context)
+        {
+            string detail = error == null ? "未知错误" : error.GetType().Name + " · " + error.Message;
+            LastSaveError = (context == null ? "" : context + "：") + detail;
+            Interlocked.Increment(ref _saveFailureVersion);
+            // 测试进程不要往真实 LOCALAPPDATA 写诊断;产品进程才记录。
+            if (PersistenceArmed) Program.LogEvent("本地保存失败: " + LastSaveError);
+        }
+
+        internal static void ReportSaveSuccess()
+        {
+            LastSaveError = "";
         }
 
         public static HistoryMap History = new HistoryMap();
@@ -511,14 +851,22 @@ namespace KeyMouseStats
         /// 为 true 时拒绝一切保存，避免把用户的完整历史静默覆盖成「只有今天」。
         /// </summary>
         public static bool LoadFailed;
+        /// <summary>最近一次持久化失败的用户可读原因;成功写入后清空。</summary>
+        internal static string LastSaveError = "";
+        private static long _saveFailureVersion;
+        internal static long SaveFailureVersion { get { return Interlocked.Read(ref _saveFailureVersion); } }
         public static DateTime Day = DateTime.Today;
         public static int ThemeId;
+        /// <summary>v3.1:当前启用的自定义壁纸 id;null 表示使用内置主题。实际配置在 themes/custom-themes.json。</summary>
+        public static string CustomThemeId;
         public static int KeyboardLayout;
         public static long AllTimePeakApm;
         public static int PosX = -1;
         public static int PosY = -1;
         public static double MouseDpi; // 0: 用户尚未设置，不猜测硬件 DPI。
         public static int IdleThresholdSeconds = 60;
+        public const int MinIdleThresholdSeconds = 10;
+        public const int MaxIdleThresholdSeconds = 500;
         /// <summary>备份轮转保留的份数。</summary>
         public static int BackupKeep = 7;
         /// <summary>1.8.0:动效档位(0 关 / 1 精简 / 2 完整),默认完整。</summary>
@@ -530,6 +878,9 @@ namespace KeyMouseStats
         /// <summary>Milestone 2 / 3.1:窗口记忆(画布单位,0 = 未记录)。</summary>
         public static int WindowW, WindowH;
         public static bool WindowMaximized;
+        /// <summary>v3.4:点击热区选中的显示器身份(DeviceName 优先,边界签名兜底)。</summary>
+        public static string ClickScreenDevice = "";
+        public static Rectangle ClickScreenBounds = Rectangle.Empty;
         /// <summary>1.9.0:字符内容页重新读取 Rime 日志的最小间隔(秒);0 = 只在文件改动时重读。</summary>
         public static int TextRefreshSeconds = 15;
         /// <summary>2.0:最近一次在「每日首次打开面板」时生成日报的日期。用来保证一天只生成一次。</summary>
@@ -653,6 +1004,7 @@ namespace KeyMouseStats
                 total.Middle += day.Middle;
                 total.XButtons += day.XButtons;
                 total.Wheel += day.Wheel;
+                total.HWheel += day.HWheel;
                 total.MovePx += day.MovePx;
                 total.MoveMeters += day.MoveMeters;
                 total.HoldCount += day.HoldCount;
@@ -667,6 +1019,7 @@ namespace KeyMouseStats
                 total.Keys += archive.Keys;
                 total.Clicks += archive.Clicks;
                 total.Wheel += archive.Wheel;
+                total.HWheel += archive.HWheel;
                 total.MoveMeters += archive.MoveMeters;
                 total.HoldCount += archive.HoldCount;
                 total.HoldDiscarded += archive.HoldDiscarded;
@@ -715,6 +1068,17 @@ namespace KeyMouseStats
         public bool HasWindowLayout;
             /// <summary>2.0:上次自动生成日报的日期(字符串形式,便于和文件里那一行直读)。</summary>
             public string DailyReportDay = "";
+            /// <summary>v3.4:外设硬件纪元配置/计数器与点击热区选屏身份。</summary>
+            public string Hardware, WearKeys, WearMouse;
+            public bool HasWearKeys, HasWearMouse;
+            public readonly List<string> KeyboardProfiles = new List<string>();
+            public readonly List<string> KeyboardKeys = new List<string>();
+            public readonly List<string> MouseProfiles = new List<string>();
+            public readonly List<string> MouseButtons = new List<string>();
+            public readonly List<string> MouseDays = new List<string>();
+            public string ClickScreenDevice = "";
+            public Rectangle ClickScreenBounds = Rectangle.Empty;
+            public bool HasClickScreen;
         }
 
         private static Parsed Parse(string[] lines)
@@ -766,6 +1130,7 @@ namespace KeyMouseStats
                         case "middle": cur.Middle = ParseL(val); break;
                         case "xbuttons": cur.XButtons = ParseL(val); break;
                         case "wheel": cur.Wheel = ParseL(val); break;
+                        case "hwheel": cur.HWheel = ParseL(val); break;
                         case "move": cur.MovePx = ParseD(val); break;
                         case "move_m": cur.MoveMeters = NonNegative(ParseD(val)); break;
                         case "hk": ParseHourBuckets(val, cur.HourKeys); break;
@@ -803,6 +1168,14 @@ namespace KeyMouseStats
                         case "all_time_peak_apm": result.AllTimePeakApm = Math.Max(0, ParseL(val)); break;
                         case "app_rule": result.AppRules.Add(val); break;
                         case "wellbeing_v1": result.Wellbeing = val; break;
+                        case "hardware_v1": result.Hardware = val; break;
+                        case "wear_keys_v1": result.WearKeys = val; result.HasWearKeys = true; break;
+                        case "wear_mouse_v1": result.WearMouse = val; result.HasWearMouse = true; break;
+                        case "keyboard_v1": result.KeyboardProfiles.Add(val); break;
+                        case "keyboard_keys_v1": result.KeyboardKeys.Add(val); break;
+                        case "mouse_v1": result.MouseProfiles.Add(val); break;
+                        case "mouse_buttons_v1": result.MouseButtons.Add(val); break;
+                        case "mouse_days_v1": result.MouseDays.Add(val); break;
                         case "keep_days":
                             int keepDays = (int)ParseL(val);
                             result.KeepDays = keepDays <= 0 ? 0 : Math.Max(30, Math.Min(3650, keepDays));
@@ -829,6 +1202,24 @@ namespace KeyMouseStats
                     result.HasWindowLayout = true;
                     break;
                 }
+                case "click_screen_v1":
+                {
+                    string[] screen = (val ?? "").Split('|');
+                    if (screen.Length >= 5)
+                    {
+                        int x = (int)ParseL(screen[1]);
+                        int y = (int)ParseL(screen[2]);
+                        int width = (int)ParseL(screen[3]);
+                        int height = (int)ParseL(screen[4]);
+                        if (width > 0 && height > 0)
+                        {
+                            result.ClickScreenDevice = screen[0] ?? "";
+                            result.ClickScreenBounds = new Rectangle(x, y, width, height);
+                            result.HasClickScreen = true;
+                        }
+                    }
+                    break;
+                }
                 case "text_refresh_v1":
                             result.TextRefreshSeconds = RimeTextStats.NormalizeRefresh((int)ParseL(val));
                             result.HasTextRefresh = true;
@@ -843,7 +1234,8 @@ namespace KeyMouseStats
                         case "shortcut_model_v1": result.ShortcutModel = val;break;
                         case "idle_threshold":
                             long seconds = ParseL(val);
-                            result.IdleThresholdSeconds = seconds >= 10 && seconds <= 3600 ? (int)seconds : 60;
+                            result.IdleThresholdSeconds = seconds < MinIdleThresholdSeconds ? 60
+                                : (seconds > MaxIdleThresholdSeconds ? MaxIdleThresholdSeconds : (int)seconds);
                             result.HasIdleThreshold = true;
                             break;
                         case "pos_x": result.PosX = (int)ParseL(val); break;
@@ -856,6 +1248,7 @@ namespace KeyMouseStats
                         case "total_middle": result.Total.Middle = ParseL(val); break;
                         case "total_xbuttons": result.Total.XButtons = ParseL(val); break;
                         case "total_wheel": result.Total.Wheel = ParseL(val); break;
+                        case "total_hwheel": result.Total.HWheel = ParseL(val); break;
                         case "total_move": result.Total.MovePx = ParseD(val); break;
                         case "total_move_m": result.Total.MoveMeters = NonNegative(ParseD(val)); break;
                         // 1.7.6 新增的可选行:按住时长的全量累计
@@ -891,6 +1284,9 @@ namespace KeyMouseStats
                         case "today_wheel":
                             if (result.LegacyToday == null) result.LegacyToday = new DayRecord();
                             result.LegacyToday.Wheel = ParseL(val); break;
+                        case "today_hwheel":
+                            if (result.LegacyToday == null) result.LegacyToday = new DayRecord();
+                            result.LegacyToday.HWheel = ParseL(val); break;
                         case "today_move":
                             if (result.LegacyToday == null) result.LegacyToday = new DayRecord();
                             result.LegacyToday.MovePx = ParseD(val); break;
@@ -911,6 +1307,9 @@ namespace KeyMouseStats
         {
             // 每次读取都重新判定:成功的读取会清掉上一次的失败标记。
             LoadFailed = false;
+            ClickScreenDevice = "";
+            ClickScreenBounds = Rectangle.Empty;
+            PeripheralWear.BeginLoad();
             bool fileExisted = false;
             bool readFailed = false;
             bool hasDayLines = false;
@@ -918,12 +1317,13 @@ namespace KeyMouseStats
             bool loaded = false;
             try
             {
-                if (File.Exists(FilePath))
+                string loadPath = LongPath(FilePath);
+                if (LongPathIO.FileExists(loadPath))
                 {
                     fileExisted = true;
                     try
                     {
-                        string[] lines = File.ReadAllLines(FilePath, Encoding.UTF8);
+                        string[] lines = LongPathIO.ReadAllLines(loadPath);
                         foreach (string line in lines)
                             if (line.TrimStart().StartsWith("[day=", StringComparison.Ordinal)) { hasDayLines = true; break; }
                         Parsed parsed = Parse(lines);
@@ -960,6 +1360,7 @@ namespace KeyMouseStats
                     RebuildTotalFromHistory();
                     if (repaired > 0) Program.LogEvent("数据自检:修正 " + repaired + " 天的派生计数，以 keys/clicks 为准");
                 }
+                PeripheralWear.EnsureSeeded(SnapshotHistory(), Total);
             }
             catch { }
         }
@@ -970,19 +1371,20 @@ namespace KeyMouseStats
             MonthlyKnown.Clear();
             try
             {
-                if (!Directory.Exists(Dir)) return;
-                foreach (string yearDir in Directory.GetDirectories(Dir))
+                string root = LongPath(Dir);
+                if (!LongPathIO.DirectoryExists(root)) return;
+                foreach (string yearDir in LongPathIO.GetDirectories(root))
                 {
-                    string yearName = Path.GetFileName(yearDir);
+                    string yearName = Path.GetFileName(StripLongPrefix(yearDir));
                     int year;
                     if (yearName.Length != 4 || !int.TryParse(yearName, NumberStyles.Integer, CultureInfo.InvariantCulture, out year)) continue;
-                    foreach (string file in Directory.GetFiles(yearDir, "*.txt"))
+                    foreach (string file in LongPathIO.GetFiles(yearDir, "*.txt"))
                     {
-                        string monthName = Path.GetFileNameWithoutExtension(file);
+                        string monthName = Path.GetFileNameWithoutExtension(StripLongPrefix(file));
                         DateTime month;
                         if (!DateTime.TryParseExact(monthName + "-01", "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out month)) continue;
                         MonthlyKnown.Add(monthName);
-                        Parsed parsed = Parse(File.ReadAllLines(file, Encoding.UTF8));
+                        Parsed parsed = Parse(LongPathIO.ReadAllLines(LongPath(file)));
                         bool added = false;
                         lock (HistoryGate)
                         {
@@ -997,7 +1399,7 @@ namespace KeyMouseStats
         }
 
         /// <summary>把解析结果写入静态状态。applySettings 为 false 时只接管日记录(导入合并用)。</summary>
-        internal static void ApplyParsed(Parsed parsed, bool applySettings)
+        internal static void ApplyParsed(Parsed parsed, bool applySettings, bool applyHardware = true)
         {
             // 整体替换会丢掉所有旧的 DayRecord 对象:还按着的键必须在这里丢弃,
             // 否则之后那次抬起会结算到一个已经脱离 History 的记录上,样本既不落盘也不计丢弃。
@@ -1044,6 +1446,18 @@ namespace KeyMouseStats
                 AppActivity.Rules.Clear();
                 foreach (string rule in parsed.AppRules) AppActivity.LoadRule(rule);
                 if (!string.IsNullOrEmpty(parsed.ShortcutModel)) ShortcutSavings.LoadModel(parsed.ShortcutModel);
+                if (applyHardware)
+                {
+                    if (parsed.HasClickScreen)
+                    {
+                        ClickScreenDevice = parsed.ClickScreenDevice ?? "";
+                        ClickScreenBounds = parsed.ClickScreenBounds;
+                    }
+                    PeripheralWear.LoadRaw(parsed.Hardware, parsed.WearKeys, parsed.WearMouse,
+                        parsed.HasWearKeys, parsed.HasWearMouse,
+                        parsed.KeyboardProfiles, parsed.KeyboardKeys,
+                        parsed.MouseProfiles, parsed.MouseButtons, parsed.MouseDays);
+                }
             }
 
             // v1 数据迁移:把扁平 today_* 并入对应日期的分节(已存在则合并)
@@ -1062,6 +1476,7 @@ namespace KeyMouseStats
                     existing.Middle += parsed.LegacyToday.Middle;
                     existing.XButtons += parsed.LegacyToday.XButtons;
                     existing.Wheel += parsed.LegacyToday.Wheel;
+                    existing.HWheel += parsed.LegacyToday.HWheel;
                     existing.MovePx += parsed.LegacyToday.MovePx;
                 }
                 else if (!parsed.LegacyToday.IsEmpty)
@@ -1075,6 +1490,8 @@ namespace KeyMouseStats
             foreach(DayRecord record in SnapshotHistory())ActivityMonitor.RemoveLegacyPhantomSessions(record);
             RollDay(DateTime.Today);
             Prune();
+            if (CanPersist) CustomThemeStore.Load();
+            if (CanPersist) IconPack.Load();
         }
 
         private static void ParseHourBuckets(string val, long[] buckets)
@@ -1204,7 +1621,11 @@ namespace KeyMouseStats
                 snapshot = SnapshotHistory();
                 return Serialize(false, snapshot);
             }
-            catch { return null; }
+            catch (Exception error)
+            {
+                ReportSaveFailure(error, "序列化本地统计快照失败");
+                return null;
+            }
         }
 
         private static void WriteWorker(object state)
@@ -1243,14 +1664,19 @@ namespace KeyMouseStats
                 }
                 try
                 {
-                    if (!Directory.Exists(Dir)) Directory.CreateDirectory(Dir);
+                    string dir = LongPath(Dir);
+                    string file = LongPath(FilePath);
+                    if (!LongPathIO.DirectoryExists(dir)) LongPathIO.CreateDirectory(dir);
                     WriteMonthlyFiles(snapshot);
-                    string tmp = FilePath + ".tmp";
-                    File.WriteAllText(tmp, text, Encoding.UTF8);
-                    if (File.Exists(FilePath)) File.Replace(tmp, FilePath, FilePath + ".bak");
-                    else File.Move(tmp, FilePath);
+                    string tmp = file + ".tmp";
+                    LongPathIO.WriteAllText(tmp, text, Encoding.UTF8);
+                    LongPathIO.ReplaceOrMove(tmp, file, file + ".bak");
+                    ReportSaveSuccess();
                 }
-                catch { }
+                catch (Exception error)
+                {
+                    ReportSaveFailure(error, "写入本地统计文件失败");
+                }
             }
         }
 
@@ -1276,9 +1702,10 @@ namespace KeyMouseStats
                 DateTime month = months[i];
                 string key = month.ToString("yyyy-MM", CultureInfo.InvariantCulture);
                 string path = Path.Combine(Dir, month.Year.ToString("0000", CultureInfo.InvariantCulture), key + ".txt");
+                string safePath = LongPath(path);
                 if (!_monthlyMigration && MonthlyKnown.Contains(key)) continue;
-                if (!_monthlyMigration && File.Exists(path)) { MonthlyKnown.Add(key); continue; }
-                WriteTextAtomic(path, SerializeMonth(month.Year, month.Month, snapshot));
+                if (!_monthlyMigration && LongPathIO.FileExists(safePath)) { MonthlyKnown.Add(key); continue; }
+                WriteTextAtomic(safePath, SerializeMonth(month.Year, month.Month, snapshot));
                 MonthlyKnown.Add(key);
             }
             _monthlyMigration = false;
@@ -1303,12 +1730,12 @@ namespace KeyMouseStats
 
         private static void WriteTextAtomic(string path, string text)
         {
-            string dir = Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            string tmp = path + ".tmp";
-            File.WriteAllText(tmp, text, Encoding.UTF8);
-            if (File.Exists(path)) File.Replace(tmp, path, path + ".bak");
-            else File.Move(tmp, path);
+            string safe = LongPath(path);
+            string dir = Path.GetDirectoryName(StripLongPrefix(safe));
+            if (!string.IsNullOrEmpty(dir)) LongPathIO.CreateDirectory(LongPath(dir));
+            string tmp = safe + ".tmp";
+            LongPathIO.WriteAllText(tmp, text, Encoding.UTF8);
+            LongPathIO.ReplaceOrMove(tmp, safe, safe + ".bak");
         }
 
         /// <summary>导出用的文本,与落盘内容一致;失败返回 null。</summary>
@@ -1329,6 +1756,11 @@ namespace KeyMouseStats
                 sb.AppendLine("idle_threshold=" + IdleThresholdSeconds.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("backup_keep=" + BackupKeep.ToString(CultureInfo.InvariantCulture));
                 sb.AppendLine("wellbeing_v1=" + WellbeingSettings.Encode());
+                sb.AppendLine("hardware_v1=" + PeripheralWear.EncodeProfile());
+                sb.AppendLine("wear_keys_v1=" + PeripheralWear.EncodeKeys());
+                sb.AppendLine("wear_mouse_v1=" + PeripheralWear.EncodeMouse());
+                PeripheralWear.AppendProfiles(sb);
+                PeripheralWear.AppendMice(sb);
                 sb.AppendLine("keep_days=" + KeepDays.ToString(CultureInfo.InvariantCulture));
                 // 1.8.0 新增的可选行:动效档位 | 跟随系统 | 全局快捷键
                 sb.AppendLine("motion_v1=" + MotionLevel.ToString(CultureInfo.InvariantCulture) + "|" + (MotionFollowSystem ? "1" : "0") + "|" + (GlobalHotkey ? "1" : "0"));
@@ -1336,6 +1768,7 @@ namespace KeyMouseStats
                 // Milestone 2 / 3.1:窗口宽 | 高 | 是否最大化(format 仍为 13,旧版忽略未知行)
                 sb.AppendLine("window_layout_v1=" + WindowW.ToString(CultureInfo.InvariantCulture) + "|"
                     + WindowH.ToString(CultureInfo.InvariantCulture) + "|" + (WindowMaximized ? "1" : "0"));
+                sb.AppendLine("click_screen_v1=" + EncodeClickScreen());
                 sb.AppendLine("daily_report_v1=" + (DailyReportDay == DateTime.MinValue ? "" : DailyReportDay.ToString("yyyy-MM-dd")));
                 foreach (MonthArchive archive in Archives.Values) sb.AppendLine("archive_v1=" + MonthArchive.Encode(archive));
                 sb.AppendLine("art_theme=" + ArtTheme.Validate(ThemeId).ToString(CultureInfo.InvariantCulture));
@@ -1373,6 +1806,7 @@ namespace KeyMouseStats
                     sb.AppendLine("middle=" + r.Middle.ToString(CultureInfo.InvariantCulture));
                     sb.AppendLine("xbuttons=" + r.XButtons.ToString(CultureInfo.InvariantCulture));
                     sb.AppendLine("wheel=" + r.Wheel.ToString(CultureInfo.InvariantCulture));
+                    if (r.HWheel > 0) sb.AppendLine("hwheel=" + r.HWheel.ToString(CultureInfo.InvariantCulture));
                     sb.AppendLine("move=" + r.MovePx.ToString("0.###", CultureInfo.InvariantCulture));
                     sb.AppendLine("move_m=" + r.MoveMeters.ToString("R", CultureInfo.InvariantCulture));
                     sb.AppendLine("hk=" + EncodeHourBuckets(r.HourKeys));
@@ -1403,6 +1837,17 @@ namespace KeyMouseStats
                     CrossTelemetry.Save(sb,r);
         }
 
+        private static string EncodeClickScreen()
+        {
+            if (string.IsNullOrEmpty(ClickScreenDevice)
+                && (ClickScreenBounds.Width <= 0 || ClickScreenBounds.Height <= 0)) return "";
+            string device = (ClickScreenDevice ?? "").Replace("|", "/");
+            return device + "|" + ClickScreenBounds.X.ToString(CultureInfo.InvariantCulture)
+                + "|" + ClickScreenBounds.Y.ToString(CultureInfo.InvariantCulture)
+                + "|" + ClickScreenBounds.Width.ToString(CultureInfo.InvariantCulture)
+                + "|" + ClickScreenBounds.Height.ToString(CultureInfo.InvariantCulture);
+        }
+
         private static void AppendTotals(StringBuilder sb, Counters c)
         {
             sb.AppendLine("total_keys=" + c.Keys.ToString(CultureInfo.InvariantCulture));
@@ -1412,6 +1857,7 @@ namespace KeyMouseStats
             sb.AppendLine("total_middle=" + c.Middle.ToString(CultureInfo.InvariantCulture));
             sb.AppendLine("total_xbuttons=" + c.XButtons.ToString(CultureInfo.InvariantCulture));
             sb.AppendLine("total_wheel=" + c.Wheel.ToString(CultureInfo.InvariantCulture));
+            if (c.HWheel > 0) sb.AppendLine("total_hwheel=" + c.HWheel.ToString(CultureInfo.InvariantCulture));
             sb.AppendLine("total_move=" + c.MovePx.ToString("0.###", CultureInfo.InvariantCulture));
             sb.AppendLine("total_move_m=" + c.MoveMeters.ToString("R", CultureInfo.InvariantCulture));
             // 1.7.6 新增的可选行:按住时长的全量累计。旧版本读到会忽略。
@@ -1494,11 +1940,34 @@ namespace KeyMouseStats
         [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT point);
         public const int WM_MOUSEMOVE = 0x0200;
         public const int WM_LBUTTONDOWN = 0x0201;
+        public const int WM_LBUTTONUP = 0x0202;
         public const int WM_RBUTTONDOWN = 0x0204;
+        public const int WM_RBUTTONUP = 0x0205;
         public const int WM_MBUTTONDOWN = 0x0207;
+        public const int WM_MBUTTONUP = 0x0208;
         public const int WM_XBUTTONDOWN = 0x020B;
+        public const int WM_XBUTTONUP = 0x020C;
         public const int WM_MOUSEWHEEL = 0x020A;
         public const int WM_MOUSEHWHEEL = 0x020E;
+        public const int WM_DISPLAYCHANGE = 0x007E;
+        public const int WM_INPUT_DEVICE_CHANGE = 0x00FE;
+
+        /// <summary>
+        /// 把鼠标消息统一成统计编号:1=左 2=右 3=中 4=XButton1 5=XButton2。
+        /// 钩子与 Raw Input 必须共用这一套编号,否则按下/抬起会消不掉同一个 held 项。
+        /// </summary>
+        public static int MouseButtonId(int message, uint mouseData)
+        {
+            if (message == WM_LBUTTONDOWN || message == WM_LBUTTONUP) return 1;
+            if (message == WM_RBUTTONDOWN || message == WM_RBUTTONUP) return 2;
+            if (message == WM_MBUTTONDOWN || message == WM_MBUTTONUP) return 3;
+            if (message == WM_XBUTTONDOWN || message == WM_XBUTTONUP)
+            {
+                int x = (int)((mouseData >> 16) & 0xFFFF);
+                return x >= 1 && x <= 2 ? 3 + x : 0;
+            }
+            return 0;
+        }
 
         [StructLayout(LayoutKind.Sequential)]
         public struct POINT { public int X; public int Y; }
@@ -1556,6 +2025,23 @@ namespace KeyMouseStats
             // 用户本来就没动,不算停滞。
             if (systemIdleMs >= SystemIdleLimitMs) return false;
             return msSinceLastEvent > StallWindowMs;
+        }
+
+        /// <summary>
+        /// 键盘/鼠标分别判定。两条时间线互不掩盖:键盘停了但鼠标在动,仍会修键盘;反之亦然。
+        /// </summary>
+        public static void Evaluate(bool keyboardAlive, bool mouseAlive, bool busy,
+            uint systemIdleMs, long msSinceLastKeyboardEvent, long msSinceLastMouseEvent,
+            out bool repairKeyboard, out bool repairMouse)
+        {
+            repairKeyboard = ShouldRepair(keyboardAlive, busy, systemIdleMs, msSinceLastKeyboardEvent);
+            repairMouse = ShouldRepair(mouseAlive, busy, systemIdleMs, msSinceLastMouseEvent);
+        }
+
+        /// <summary>TickCount 差值按 32 位无符号处理,跨越约 49.7 天回绕时不会变成负数。</summary>
+        public static long Elapsed(long now, long then)
+        {
+            return unchecked((uint)(now - then));
         }
     }
 
@@ -1642,6 +2128,54 @@ namespace KeyMouseStats
             }
         }
     }
+    /// <summary>把悬浮窗夹到最近的有效工作区。纯函数,便于多屏/负坐标回归。</summary>
+    internal static class WidgetPlacement
+    {
+        internal static Rectangle Clamp(Rectangle window, Rectangle[] workAreas, Rectangle fallback)
+        {
+            if (workAreas == null || workAreas.Length == 0)
+                workAreas = new Rectangle[] { fallback.Width > 0 && fallback.Height > 0 ? fallback : new Rectangle(0, 0, 1920, 1080) };
+
+            int bestIndex = 0;
+            long bestScore = long.MinValue;
+            int wx = window.X + window.Width / 2;
+            int wy = window.Y + window.Height / 2;
+            for (int i = 0; i < workAreas.Length; i++)
+            {
+                Rectangle area = workAreas[i];
+                if (area.Width <= 0 || area.Height <= 0) continue;
+                Rectangle overlap = Rectangle.Intersect(window, area);
+                long score;
+                if (overlap.Width > 0 && overlap.Height > 0)
+                {
+                    score = (long)overlap.Width * overlap.Height;
+                }
+                else
+                {
+                    long dx = wx - (area.Left + area.Width / 2);
+                    long dy = wy - (area.Top + area.Height / 2);
+                    score = -(dx * dx + dy * dy);
+                }
+                if (score > bestScore) { bestScore = score; bestIndex = i; }
+            }
+
+            Rectangle target = workAreas[bestIndex];
+            int maxX = Math.Max(target.Left, target.Right - window.Width);
+            int maxY = Math.Max(target.Top, target.Bottom - window.Height);
+            int x = Math.Min(Math.Max(window.X, target.Left), maxX);
+            int y = Math.Min(Math.Max(window.Y, target.Top), maxY);
+            return new Rectangle(x, y, window.Width, window.Height);
+        }
+
+        internal static Rectangle[] WorkingAreas()
+        {
+            Screen[] screens = Screen.AllScreens;
+            Rectangle[] areas = new Rectangle[screens.Length];
+            for (int i = 0; i < screens.Length; i++) areas[i] = screens[i].WorkingArea;
+            return areas;
+        }
+    }
+
     internal sealed class StatsWidget : Form
     {
         private const int BaseW = 248;
@@ -1651,8 +2185,9 @@ namespace KeyMouseStats
         private readonly Native.HookProc _msProc;
         private IntPtr _kbHook = IntPtr.Zero;
         private IntPtr _msHook = IntPtr.Zero;
-        /// <summary>最近一次收到键鼠事件的 TickCount,看门狗用它判断「是不是停摆了」。</summary>
-        private long _lastCountedTick;
+        /// <summary>键盘/鼠标钩子各自最近一次收到事件的 TickCount,看门狗独立判断。</summary>
+        private long _lastKbTick;
+        private long _lastMsTick;
         private long _lastHealthTick;
         private int _healthFailures;
         private bool _hookWarningShown;
@@ -1668,6 +2203,9 @@ namespace KeyMouseStats
         private bool _initialized = false;
         private Dashboard _dash;
         private readonly RawMouseInput _rawMouse = new RawMouseInput();
+        // 垂直/水平各自保留 WHEEL_DELTA 余数,避免高分辨率滚轮按包虚增次数。
+        private readonly WheelAccumulator _wheelVertical = new WheelAccumulator();
+        private readonly WheelAccumulator _wheelHorizontal = new WheelAccumulator();
         /// <summary>键盘原始输入探针:只报「有按键」,计数仍由低级钩子做。</summary>
         private readonly RawKeyInput _rawKeys = new RawKeyInput();
         private long _lastKeyTick;
@@ -1677,6 +2215,7 @@ namespace KeyMouseStats
         private DistanceSettings _distanceSettings;
 
         private bool _dragging = false;
+        private bool _displaySettingsHooked;
         // --- 悬停微控件(Milestone 2 / 3.4):分页圆点 + 展开图标,只在悬停时淡入 ---
         private System.Windows.Forms.Timer _hoverTimer;
         private double _hoverAlpha;
@@ -1692,9 +2231,17 @@ namespace KeyMouseStats
 
         private int _lastX, _lastY;
         private bool _lastValid = false;
+        // ShadowPipeline 的 Move 合并:8 kHz 下每包一条会把 32768 环很快灌满。
+        private const int MoveCoalesceMs = 10;
+        private bool _shadowMovePending;
+        private double _shadowMoveDistance;
+        private long _shadowMoveStart;
+        private long _shadowMoveLast;
+        private int _shadowMoveX, _shadowMoveY;
         private bool _dirtyUI = false;
         private bool _dirtySave = false;
         private DateTime _lastSave = DateTime.Now;
+        private long _lastSaveFailureVersion;
 
         private NotifyIcon _tray;
         private ContextMenuStrip _menu;
@@ -1702,6 +2249,17 @@ namespace KeyMouseStats
         private ToolStripMenuItem _miTopMost;
         private ToolStripMenuItem _miClickThrough;
         private ToolStripMenuItem _miAutoStart;
+        private ToolStripMenuItem _miFocusStatus;
+        private ToolStripMenuItem _miFocusSnooze;
+        private ToolStripMenuItem _miFocusMute;
+        private readonly FocusMonitor _focusMonitor = new FocusMonitor();
+        private readonly FocusBreak _focusBreak;
+        private FocusPillForm _focusPill;
+        private FocusBreakToast _focusToast;
+        private FocusSnapshot _focusSnapshot;
+        private bool _focusPillActive;
+        private bool _focusPillManualHidden;
+        private bool _widgetVisibleBeforePill;
         private System.Windows.Forms.Timer _timer;
         private Font _fTitle, _fMode, _fLabel, _fValue;
         private StringFormat _rightAlign;
@@ -1724,6 +2282,15 @@ namespace KeyMouseStats
 
             _kbProc = KbHookProc;
             _msProc = MsHookProc;
+            KeyboardDeviceRegistry.ResolveCompleted = OnKeyboardResolveCompleted;
+            MouseDeviceRegistry.ResolveCompleted = OnMouseResolveCompleted;
+
+            FocusBreakConfig focusConfig = new FocusBreakConfig();
+            focusConfig.AfterMinutes = WellbeingSettings.FocusBreakAfterMinutes;
+            focusConfig.IdleBufferSeconds = WellbeingSettings.FocusBreakIdleSeconds;
+            _focusBreak = new FocusBreak(focusConfig);
+            _focusBreak.SnoozeUntil = WellbeingSettings.BreakSnoozeUntil;
+            _focusBreak.MutedDay = WellbeingSettings.BreakMutedDay;
 
             BuildMenu();
             BuildTray();
@@ -1827,6 +2394,11 @@ namespace KeyMouseStats
         protected override void WndProc(ref Message m)
         {
             ActivityMonitor.Message(m.Msg, m.WParam);
+            if (m.Msg == Native.WM_DISPLAYCHANGE)
+            {
+                ClampWidgetToScreen();
+                Invalidate();
+            }
             // 1.8.0:全局快捷键(默认关闭)打开详细面板。
             if (m.Msg == Native.WM_HOTKEY && m.WParam.ToInt32() == Native.HotkeyId) OpenDashboard();
             if(m.Msg==0x02B1||m.Msg==0x0218)_mouseVectors.Reset();
@@ -1835,6 +2407,7 @@ namespace KeyMouseStats
             else if (m.Msg == 0x0218 && (m.WParam.ToInt64() == 0x07 || m.WParam.ToInt64() == 0x12)) InstallHooks();
             if (_combos != null && (m.Msg == 0x02B1 || m.Msg == 0x0218
                 && (m.WParam.ToInt64() == 4 || m.WParam.ToInt64() == 7 || m.WParam.ToInt64() == 18))) _combos.Reset();
+            if (m.Msg == 0x02B1 || m.Msg == 0x0218) KeyboardDeviceRegistry.ClearPressed();
             // Milestone 2 / 3.1:跨 DPI 显示器时按新缩放重建布局(点字号由 GDI+ 自行按 DPI 缩放,这里只换 _s)。
             if (m.Msg == 0x02E0)
             {
@@ -1851,14 +2424,30 @@ namespace KeyMouseStats
                 base.WndProc(ref m);
                 return;
             }
+            if (m.Msg == Native.WM_INPUT_DEVICE_CHANGE)
+            {
+                IntPtr changed = m.LParam;
+                if (m.WParam.ToInt64() == 2 && changed != IntPtr.Zero)
+                {
+                    KeyboardDeviceRegistry.OnDeviceRemoved(changed);
+                    MouseDeviceRegistry.OnDeviceRemoved(changed);
+                    if (_dash != null && !_dash.IsDisposed) _dash.RefreshHealthAfterDeviceChange();
+                }
+            }
             if (m.Msg == 0x00FF && _rawMouse != null)
             {
-                // 键盘探针:只判断「钩子是不是已经不干活了」,不参与计数。
-                if (_rawKeys.Registered)
+                // 键盘探针 + 多设备路由:RawInput 负责每设备磨损,钩子负责全局统计。
+                if (_rawKeys != null && _rawKeys.Registered)
                 {
-                    ushort rawVk;
-                    bool rawDown;
-                    if (_rawKeys.Read(m.LParam, out rawVk, out rawDown)) NoteRawKeyArrived();
+                    RawKeyData rawKey;
+                    if (_rawKeys.Read(m.LParam, out rawKey))
+                    {
+                        // 示例预览只验证钩子/原始输入是否活着,绝不污染真实磨损档案。
+                        if (!SampleData.Active)
+                            KeyboardDeviceRegistry.HandleRawKey(rawKey.Device, rawKey.VKey,
+                                rawKey.MakeCode, rawKey.Flags, rawKey.Down);
+                        NoteRawKeyArrived();
+                    }
                 }
 
                 double counts;
@@ -1932,18 +2521,36 @@ namespace KeyMouseStats
 
             RebuildWidgetFonts();   // 3.0:字号与几何共用 _s,不再用点单位交给 GDI+ 二次缩放
 
-            Rectangle vs = SystemInformation.VirtualScreen;
-            bool posOk = Store.PosX != -1 &&
-                vs.Contains(new Point(Store.PosX + ClientSize.Width / 2, Store.PosY + 20));
-            if (posOk)
+            if (Store.PosX != -1)
             {
-                Location = new Point(Store.PosX, Store.PosY);
+                Rectangle saved = new Rectangle(Store.PosX, Store.PosY, ClientSize.Width, ClientSize.Height);
+                Rectangle clamped = WidgetPlacement.Clamp(saved, WidgetPlacement.WorkingAreas(),
+                    SystemInformation.WorkingArea);
+                Location = clamped.Location;
+                if (Store.PosX != Location.X || Store.PosY != Location.Y)
+                {
+                    Store.PosX = Location.X;
+                    Store.PosY = Location.Y;
+                }
             }
             else
             {
                 Rectangle wa = Screen.PrimaryScreen.WorkingArea;
                 Location = new Point(wa.Right - Width - (int)(24 * _s),
                                      wa.Bottom - Height - (int)(24 * _s));
+            }
+            ClampWidgetToScreen();
+
+            // 显示器分辨率/拓扑变化:Windows 会发 WM_DISPLAYCHANGE,但远程桌面/驱动
+            // 有时只触发 SystemEvents;两个入口都接,避免小组件留在屏幕外。
+            if (!_displaySettingsHooked)
+            {
+                try
+                {
+                    SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+                    _displaySettingsHooked = true;
+                }
+                catch { }
             }
 
             InstallHooks();
@@ -1965,6 +2572,32 @@ namespace KeyMouseStats
             _timer.Start();
         }
 
+        private void OnDisplaySettingsChanged(object sender, EventArgs e)
+        {
+            if (!IsHandleCreated || IsDisposed) return;
+            try { BeginInvoke(new MethodInvoker(ClampWidgetToScreen)); }
+            catch { }
+        }
+
+        /// <summary>把窗口夹到最近有效屏幕工作区;拖拽结束与显示器变更都走这里。</summary>
+        private void ClampWidgetToScreen()
+        {
+            if (!IsHandleCreated || IsDisposed) return;
+            Rectangle clamped = WidgetPlacement.Clamp(Bounds, WidgetPlacement.WorkingAreas(),
+                SystemInformation.WorkingArea);
+            if (clamped.Location != Location)
+            {
+                Location = clamped.Location;
+                Invalidate();
+            }
+            if (Store.PosX != Location.X || Store.PosY != Location.Y)
+            {
+                Store.PosX = Location.X;
+                Store.PosY = Location.Y;
+                _dirtySave = true;
+            }
+        }
+
         private void ApplyRoundedRegion()
         {
             try
@@ -1979,31 +2612,96 @@ namespace KeyMouseStats
             catch { }
         }
 
+        private void OnKeyboardResolveCompleted(KeyboardDeviceSlot slot, KeyboardProfile pending, KeyboardIdentity identity)
+        {
+            if (IsDisposed || slot == null || pending == null) return;
+            try
+            {
+                if (IsHandleCreated)
+                {
+                    BeginInvoke(new MethodInvoker(delegate { ApplyKeyboardResolution(slot, pending, identity); }));
+                    return;
+                }
+            }
+            catch { }
+            ApplyKeyboardResolution(slot, pending, identity);
+        }
+
+        private void ApplyKeyboardResolution(KeyboardDeviceSlot slot, KeyboardProfile pending, KeyboardIdentity identity)
+        {
+            if (slot == null || pending == null) return;
+            KeyboardProfile resolved = PeripheralWear.ResolvePending(pending, identity);
+            if (slot.Profile == pending && resolved != null) slot.Profile = resolved;
+            slot.Resolving = false;
+            if (_dash != null && !_dash.IsDisposed && _dash.Visible) _dash.RefreshHealthAfterDeviceChange();
+        }
+
+        private void OnMouseResolveCompleted(MouseDeviceSlot slot, MouseProfile pending, MouseIdentity identity)
+        {
+            if (IsDisposed || slot == null || pending == null) return;
+            try
+            {
+                if (IsHandleCreated)
+                {
+                    BeginInvoke(new MethodInvoker(delegate { ApplyMouseResolution(slot, pending, identity); }));
+                    return;
+                }
+            }
+            catch { }
+            ApplyMouseResolution(slot, pending, identity);
+        }
+
+        private void ApplyMouseResolution(MouseDeviceSlot slot, MouseProfile pending, MouseIdentity identity)
+        {
+            if (slot == null || pending == null) return;
+            MouseProfile resolved = PeripheralMouseWear.ResolvePending(pending, identity);
+            if (slot.Profile == pending && resolved != null) slot.Profile = resolved;
+            slot.Resolving = false;
+            if (_dash != null && !_dash.IsDisposed && _dash.Visible) _dash.RefreshHealthAfterDeviceChange();
+        }
+
         private void InstallHooks()
         {
             _combos.Seed(Native.IsKeyDown);
             // 幂等:重复安装前必须先卸,否则旧钩子会一直挂在系统里。
             ReleaseHooks();
             InstallHooksRaw();
-            _lastCountedTick = Environment.TickCount;
-            _lastHealthTick = _lastCountedTick;
+            _lastKbTick = Environment.TickCount;
+            _lastMsTick = _lastKbTick;
+            _lastHealthTick = _lastKbTick;
         }
 
         /// <summary>真正调 SetWindowsHookEx 的地方。装失败不算致命:看门狗每 5 秒会再试。</summary>
         private bool InstallHooksRaw()
         {
+            bool kb = InstallKeyboardHookRaw();
+            bool ms = InstallMouseHookRaw();
+            return kb && ms;
+        }
+
+        private bool InstallKeyboardHookRaw()
+        {
             IntPtr hMod = Native.GetModuleHandle(null);
             _kbHook = Native.SetWindowsHookEx(Native.WH_KEYBOARD_LL, _kbProc, hMod, 0);
+            if (_kbHook == IntPtr.Zero) WarnHookInstallFailure();
+            return _kbHook != IntPtr.Zero;
+        }
+
+        private bool InstallMouseHookRaw()
+        {
+            IntPtr hMod = Native.GetModuleHandle(null);
             _msHook = Native.SetWindowsHookEx(Native.WH_MOUSE_LL, _msProc, hMod, 0);
-            bool ok = _kbHook != IntPtr.Zero && _msHook != IntPtr.Zero;
-            if (!ok && _tray != null && !_hookWarningShown)
-            {
-                _hookWarningShown = true;
-                _tray.ShowBalloonTip(6000, "键鼠统计",
-                    "统计钩子安装失败(可能被安全软件拦截),计数可能不准确。程序会每 5 秒自动重试。",
-                    ToolTipIcon.Warning);
-            }
-            return ok;
+            if (_msHook == IntPtr.Zero) WarnHookInstallFailure();
+            return _msHook != IntPtr.Zero;
+        }
+
+        private void WarnHookInstallFailure()
+        {
+            if (_tray == null || _hookWarningShown) return;
+            _hookWarningShown = true;
+            _tray.ShowBalloonTip(6000, "键鼠统计",
+                "统计钩子安装失败(可能被安全软件拦截),计数可能不准确。程序会每 5 秒自动重试。",
+                ToolTipIcon.Warning);
         }
 
         private void ReleaseHooks()
@@ -2020,19 +2718,37 @@ namespace KeyMouseStats
         private void HookHealth()
         {
             long now = Environment.TickCount;
-            if (now - _lastHealthTick < HookWatchdog.CheckIntervalMs) return;
+            if (HookWatchdog.Elapsed(now, _lastHealthTick) < HookWatchdog.CheckIntervalMs) return;
             _lastHealthTick = now;
 
-            bool alive = _kbHook != IntPtr.Zero && _msHook != IntPtr.Zero;
+            bool kbAlive = _kbHook != IntPtr.Zero;
+            bool msAlive = _msHook != IntPtr.Zero;
             uint idle = ActivityMonitor.SystemIdleMilliseconds();
-            bool repair = HookWatchdog.ShouldRepair(alive, ActivityMonitor.Busy, idle, now - _lastCountedTick);
-            if (!repair) { _healthFailures = 0; return; }
+            bool kbRepair, msRepair;
+            HookWatchdog.Evaluate(kbAlive, msAlive, ActivityMonitor.Busy, idle,
+                HookWatchdog.Elapsed(now, _lastKbTick), HookWatchdog.Elapsed(now, _lastMsTick),
+                out kbRepair, out msRepair);
+            if (!kbRepair && !msRepair) { _healthFailures = 0; return; }
 
-            string reason = alive ? "计数停滞 30 秒(系统仍在收输入)" : "钩子句柄丢失";
-            ReleaseHooks();
-            _combos.Seed(Native.IsKeyDown);   // 重装期间正按着的修饰键要重新对齐
-            bool ok = InstallHooksRaw();
-            _lastCountedTick = now;
+            bool ok = true;
+            string reason = "";
+            if (kbRepair)
+            {
+                reason += (kbAlive ? "键盘计数停滞" : "键盘钩子句柄丢失");
+                if (_kbHook != IntPtr.Zero) { Native.UnhookWindowsHookEx(_kbHook); _kbHook = IntPtr.Zero; }
+                _combos.Seed(Native.IsKeyDown);   // 重装期间正按着的修饰键要重新对齐
+                if (InstallKeyboardHookRaw()) _lastKbTick = now;
+                else { ok = false; reason += "(重装失败)"; }
+            }
+            if (msRepair)
+            {
+                if (reason.Length > 0) reason += " · ";
+                reason += (msAlive ? "鼠标计数停滞" : "鼠标钩子句柄丢失");
+                if (_msHook != IntPtr.Zero) { Native.UnhookWindowsHookEx(_msHook); _msHook = IntPtr.Zero; }
+                if (InstallMouseHookRaw()) _lastMsTick = now;
+                else { ok = false; reason += "(重装失败)"; }
+            }
+
             if (ok)
             {
                 _healthFailures = 0;
@@ -2055,18 +2771,66 @@ namespace KeyMouseStats
             _dirtySave = true;
         }
 
+        /// <summary>
+        /// Move 入环前按 8–12 ms 窗口合并。文本路程仍在每个钩子回调里同步累加,
+        /// 这里只减少 ShadowPipeline 的事件条数,不影响总路程/会话判定。
+        /// </summary>
+        private void QueueShadowMove(int x, int y, double distance, long ticks)
+        {
+            if (distance <= 0 || SampleData.Active) return;
+            if (!_shadowMovePending)
+            {
+                _shadowMovePending = true;
+                _shadowMoveDistance = 0;
+                _shadowMoveStart = ticks;
+            }
+            _shadowMoveDistance += distance;
+            _shadowMoveX = x;
+            _shadowMoveY = y;
+            _shadowMoveLast = ticks;
+
+            long window = (long)(MoveCoalesceMs / 1000.0 * System.Diagnostics.Stopwatch.Frequency);
+            if (ticks - _shadowMoveStart >= window) FlushShadowMove();
+        }
+
+        /// <summary>把当前窗口累计的 Move 写入环。余数留到下一窗口,避免逐窗口四舍五入损失路程。</summary>
+        private void FlushShadowMove()
+        {
+            if (!_shadowMovePending) return;
+            int delta = (int)Math.Round(_shadowMoveDistance);
+            if (delta > 0)
+            {
+                ShadowPipeline.Enqueue(InputEventKind.Move, IntPtr.Zero, 0,
+                    _shadowMoveX, _shadowMoveY, delta, _shadowMoveLast);
+                _shadowMoveDistance -= delta;
+            }
+            if (_shadowMoveDistance <= 0.0)
+            {
+                _shadowMovePending = false;
+                _shadowMoveDistance = 0;
+                _shadowMoveStart = 0;
+                _shadowMoveLast = 0;
+            }
+            else
+            {
+                // 保留不足 1 px 的余数,从最后一次采样重新开窗。
+                _shadowMoveStart = _shadowMoveLast;
+            }
+        }
+
         private IntPtr KbHookProc(int code, IntPtr wParam, IntPtr lParam)
         {
             if (code >= 0)
             {
                 long nowTick = Environment.TickCount;
-                _lastCountedTick = nowTick;   // 看门狗:我确实收到了事件
+                _lastKbTick = nowTick;        // 看门狗:键盘钩子确实收到了事件
                 _lastKeyTick = nowTick;       // 键盘探针用它判断「钩子还活着」
                 // 示例预览期间不记账:既不累加示例记录,也不入环写库;但仍把事件交还系统。
                 if (SampleData.Active) return Native.CallNextHookEx(_kbHook, code, wParam, lParam);
                 try
                 {
                     int msg = unchecked((int)wParam.ToInt64());
+                    FlushShadowMove();
                     if (msg == Native.WM_KEYUP || msg == Native.WM_SYSKEYUP)
                     {
                         Native.KBDLLHOOKSTRUCT released = (Native.KBDLLHOOKSTRUCT)
@@ -2109,6 +2873,10 @@ namespace KeyMouseStats
                                 long c;
                                 t.KeyCounts.TryGetValue(vk, out c);
                                 t.KeyCounts[vk] = c + 1;
+                                // 多键盘磨损由 RawInput 每设备位图负责;只有 RawInput 不可用时
+                                // 才回退到 unknown 档案,避免同一次击键被两条路径各记一次。
+                                if (_rawKeys == null || !_rawKeys.Registered || _rawKeys.ReadFailed)
+                                    PeripheralWear.CountUnknown(vk);
                                 KeyboardHeat.Record(t, vk, info.scanCode, info.flags);
                                 Store.Total.Keys++;
                                 HoldTracker.Press(t, vk, downTicks);
@@ -2129,7 +2897,7 @@ namespace KeyMouseStats
             if (code >= 0)
             {
                 long nowTick = Environment.TickCount;
-                _lastCountedTick = nowTick;   // 看门狗:我确实收到了事件
+                _lastMsTick = nowTick;        // 看门狗:鼠标钩子确实收到了事件
                 // 鼠标事件不算键盘存活证据:
                 // (这里不更新 _lastKeyTick)
                 // 示例预览期间不记账(同上)。
@@ -2144,19 +2912,21 @@ namespace KeyMouseStats
                     bool isClick = msg == Native.WM_LBUTTONDOWN || msg == Native.WM_RBUTTONDOWN
                         || msg == Native.WM_MBUTTONDOWN || msg == Native.WM_XBUTTONDOWN;
                     bool isWheel = msg == Native.WM_MOUSEWHEEL || msg == Native.WM_MOUSEHWHEEL;
+                    // 点击/滚轮前先结清待入环的移动,保证 ShadowPipeline 里事件顺序不反。
+                    if (isClick || isWheel) FlushShadowMove();
                     // 原始输入可用时,点击/滚轮由 WM_INPUT 那条路径计数(它不会被摘钩),
                     // 这里只保留作为「原始输入注册失败」时的兜底。
-                    bool countHere = !_rawMouse.Registered;
+                    // Raw 注册成功但读取失败时必须回退到钩子,否则会永久失明。
+                    bool countHere = !(_rawMouse.Registered && !_rawMouse.ReadFailed);
                     if (countHere && (isClick || isWheel)) AppActivity.Record(Store.Today, ForegroundApp.Cached(), isClick ? 1 : 2);
                     DayRecord t = Store.Today;
                     Counters g = Store.Total;
-                    int button=msg==0x0201||msg==0x0202?1:msg==0x0204||msg==0x0205?2:msg==0x0207||msg==0x0208?3:msg==0x020B||msg==0x020C?4+(int)((info.mouseData>>16)&0xffff):0;
+                    // 钩子与 Raw Input 共用 Native.MouseButtonId 的编号:侧键固定 4/5。
+                    // 这样 Raw 按下记 4、钩子抬起也移除 4,不会再让 MouseVectorTracker.held 残留。
+                    int button = Native.MouseButtonId(msg, info.mouseData);
                     // 2.0.7:钩子拿到的是精确屏幕坐标,点击热区优先在这里记录;原始输入那条路
                     // 用 GetCursorPos 兜底(两条路看到的是同一次按下,ClickHeat 内部 30 ms 去重)。
-                    // 钩子的侧键编号是 4 + XButton 序号(5/6),原始输入是 4/5,这里先统一成 4/5,
-                    // 否则同一次侧键点击会被两条通路各记一次。
-                    int heatButton = button > 3 ? button - 1 : button;
-                    if (isClick && heatButton != 0) ClickHeat.Record(t, info.pt.X, info.pt.Y, heatButton);
+                    if (isClick && button != 0) ClickHeat.Record(t, info.pt.X, info.pt.Y, button);
                     // 按下事件由原始输入计数(见 DispatchRawButtons),这里只处理「抬起」和兜底,
                     // 免得同一次点击被两条路径各记一遍。
                     if(button!=0&&(!isClick||(countHere&&_rawMouse.RelativeSeen&&!(_distanceSettings!=null&&_distanceSettings.Collect(0)))))_mouseVectors.Button(t,VectorNow(),button,isClick);
@@ -2176,8 +2946,7 @@ namespace KeyMouseStats
                                     double d = Math.Sqrt((double)dx * dx + (double)dy * dy);
                                     t.MovePx += d;
                                     g.MovePx += d;
-                                    ShadowPipeline.Enqueue(InputEventKind.Move, IntPtr.Zero, 0,
-                                        info.pt.X, info.pt.Y, (int)Math.Round(d), evtTicks);
+                                    QueueShadowMove(info.pt.X, info.pt.Y, d, evtTicks);
                                 }
                                 _lastX = info.pt.X;
                                 _lastY = info.pt.Y;
@@ -2202,15 +2971,18 @@ namespace KeyMouseStats
                             case Native.WM_XBUTTONDOWN:
                                 t.Clicks++; t.XButtons++; t.HourClicks[h]++;
                                 g.Clicks++; g.XButtons++;
-                                ShadowPipeline.Enqueue(InputEventKind.MouseDown, evtHwnd, 4, info.pt.X, info.pt.Y, 0, evtTicks);
+                                ShadowPipeline.Enqueue(InputEventKind.MouseDown, evtHwnd, button, info.pt.X, info.pt.Y, 0, evtTicks);
                                 LiveRate.AddClick(); MarkDirty(); break;
                             case Native.WM_MOUSEWHEEL:
                             case Native.WM_MOUSEHWHEEL:
                                 t.Wheel++;
                                 g.Wheel++;
+                                if (msg == Native.WM_MOUSEHWHEEL) { t.HWheel++; g.HWheel++; }
                                 ShadowPipeline.Enqueue(InputEventKind.Wheel, evtHwnd, 0, info.pt.X, info.pt.Y, (short)((info.mouseData >> 16) & 0xFFFF), evtTicks);
                                 MarkDirty(); break;
                         }
+                        if (isClick && countHere && button != 0)
+                            PeripheralMouseWear.CountUnknown(button, DateTime.Now);
                     }
                 }
                 catch { }
@@ -2233,8 +3005,25 @@ namespace KeyMouseStats
             if ((flags & 0x0010) != 0) CountClick(3);
             if ((flags & 0x0040) != 0) CountClick(4);
             if ((flags & 0x0100) != 0) CountClick(5);
-            if ((flags & 0x0400) != 0 || (flags & 0x0800) != 0) CountWheel();
-            GC.KeepAlive(wheelDelta);
+            // 磨损按 RawInput 的 hDevice 归到具体鼠标档案;上面的 CountClick 只做全局日统计。
+            MouseDeviceRegistry.HandleButtons((IntPtr)_rawMouse.LastDevice, flags, DateTime.Now);
+            // 垂直与水平各自累计 WHEEL_DELTA 余数,不能把两种方向的 delta 混在一起。
+            // Wheel 总数仍保持“垂直 + 水平”的旧口径,不影响现有 UI 与导出。
+            if ((flags & 0x0400) != 0) SettleWheel(_wheelVertical, wheelDelta, false);
+            if ((flags & 0x0800) != 0) SettleWheel(_wheelHorizontal, wheelDelta, true);
+        }
+
+        private void SettleWheel(WheelAccumulator accumulator, short delta, bool horizontal)
+        {
+            int steps = accumulator.Add(delta);
+            if (steps > 0)
+            {
+                for (int i = 0; i < steps; i++) CountWheel(horizontal);
+            }
+            else if (steps < 0)
+            {
+                for (int i = 0; i < -steps; i++) CountWheel(horizontal);
+            }
         }
 
         private void CountClick(int button)
@@ -2267,18 +3056,26 @@ namespace KeyMouseStats
             MarkDirty();
         }
 
-        private void CountWheel()
+        private void CountWheel(bool horizontal)
         {
             DateTime now = DateTime.Now;
             if (Store.Day != now.Date) Store.RollDay(now.Date);
             AppActivity.Record(Store.Today, ForegroundApp.Cached(), 2);
             Native.POINT wheelCursor;
             bool wheelPos = Native.GetCursorPos(out wheelCursor);
+            // Delta 高 16 位带方向标记:0x0400=垂直,0x0800=水平;当前 SQLite 只累计次数,
+            // 但保留方向能让后续版本无损补上横滚维度。
+            int axis = horizontal ? 0x0800 : 0x0400;
             ShadowPipeline.Enqueue(InputEventKind.Wheel, Native.GetForegroundWindow(), 0,
-                wheelPos ? wheelCursor.X : 0, wheelPos ? wheelCursor.Y : 0, 0,
+                wheelPos ? wheelCursor.X : 0, wheelPos ? wheelCursor.Y : 0, axis,
                 System.Diagnostics.Stopwatch.GetTimestamp());
             Store.Today.Wheel++;
             Store.Total.Wheel++;
+            if (horizontal)
+            {
+                Store.Today.HWheel++;
+                Store.Total.HWheel++;
+            }
             MarkDirty();
         }
 
@@ -2374,13 +3171,13 @@ namespace KeyMouseStats
             LiveRate.PaintTrend(g,new RectangleF(16*s,172*s,ClientSize.Width-32*s,19*s),ArtTheme.Current.Cyan);
             using(SolidBrush label=new SolidBrush(ArtTheme.Current.Muted))g.DrawString("最近 5 分钟 APM",_fMode,label,16*s,192*s);
             // 数值滚动期间按 30 ms 出帧;没有动效时立刻停表。
-            if (Motion.Active || Motion.AnyChaseMoving(0.4)) EnsureMotionFrames();
+            if (Motion.Active || Motion.AnyChaseMoving(0.4, "w-")) EnsureMotionFrames();
         }
 
         private static DayRecord ToDayRecord(Counters c)
         {
             DayRecord r = new DayRecord();
-            r.Keys = c.Keys; r.Clicks = c.Clicks; r.Wheel = c.Wheel; r.MovePx = c.MovePx;
+            r.Keys = c.Keys; r.Clicks = c.Clicks; r.Wheel = c.Wheel; r.HWheel = c.HWheel; r.MovePx = c.MovePx;
             r.MoveMeters = c.MoveMeters;
             r.HoldCount = c.HoldCount; r.HoldDiscarded = c.HoldDiscarded;
             r.HoldTotalMs = c.HoldTotalMs; r.HoldMaxMs = c.HoldMaxMs;
@@ -2692,7 +3489,12 @@ namespace KeyMouseStats
                 {
                     Motion.Paused = ActivityMonitor.Busy || HoldTracker.PendingCount > 0;
                     Invalidate();
-                    if (!Motion.Active && !Motion.AnyChaseMoving(0.4)) { _celebrateTimer.Stop(); Motion.Sweep(); }
+                    if (!Motion.Active && !Motion.AnyChaseMoving(0.4, "w-"))
+                    {
+                        if (!Motion.Paused) Motion.SettleChases("w-");
+                        _celebrateTimer.Stop();
+                        Motion.Sweep();
+                    }
                 };
             }
             if (!_celebrateTimer.Enabled) _celebrateTimer.Start();
@@ -2825,6 +3627,7 @@ namespace KeyMouseStats
                 _dragging = false;
                 if (_dragMoved)
                 {
+                    ClampWidgetToScreen();
                     Store.PosX = Location.X;
                     Store.PosY = Location.Y;
                     _dirtySave = true;
@@ -2930,7 +3733,7 @@ namespace KeyMouseStats
             ToolStripMenuItem miResetAll = new ToolStripMenuItem("重置全部统计...", null, delegate
             {
                 DialogResult r = ThemeMessage.Show(this,
-                    "确定要清空全部统计吗?\n今日和历史数据都会归零。",
+                    "确定要清空全部统计吗?\n今日和历史数据都会归零；外设健康里程碑不受影响，可在「外设健康」中单独重置。",
                     "重置全部统计", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
                 if (r != DialogResult.Yes) return;
                 Store.ClearHistory();
@@ -2944,6 +3747,16 @@ namespace KeyMouseStats
             });
 
             ToolStripSeparator sep3 = new ToolStripSeparator();
+
+            ToolStripMenuItem focusMenu = new ToolStripMenuItem("心流护航");
+            _miFocusStatus = new ToolStripMenuItem("当前：等待采样") { Enabled = false };
+            _miFocusSnooze = new ToolStripMenuItem("延后休息 10 分钟", null,
+                delegate { SnoozeFocusBreak(DateTime.Now); });
+            _miFocusMute = new ToolStripMenuItem("今日静音休息提示", null,
+                delegate { MuteFocusBreak(DateTime.Now); });
+            focusMenu.DropDownItems.AddRange(new ToolStripItem[] {
+                _miFocusStatus, new ToolStripSeparator(), _miFocusSnooze, _miFocusMute });
+            focusMenu.DropDownOpening += delegate { UpdateFocusMenu(); };
 
             // 1.8.0:外观 / 动效(默认完整;可关;可跟随系统的「减少动态效果」)
             ToolStripMenuItem motionMenu = new ToolStripMenuItem("外观 / 动效");
@@ -2982,7 +3795,7 @@ namespace KeyMouseStats
                 new ToolStripMenuItem("今日连续使用段...", null, delegate { using (SessionDetails dialog = new SessionDetails()) dialog.ShowDialog(this); }),
                 new ToolStripMenuItem("数据管理(备份 / 导入 / 校验)...", null, delegate { using (DataSettingsDialog dialog = new DataSettingsDialog()) dialog.ShowDialog(this); }),
                 new ToolStripMenuItem("目标 / 提醒...", null, delegate { using (WellbeingSettingsDialog dialog = new WellbeingSettingsDialog()) dialog.ShowDialog(this); }),
-                motionMenu,
+                focusMenu, motionMenu,
                 _miShow, hudMenu, sep1, _miTopMost, _miClickThrough, _miAutoStart,
                 sep2, miResetToday, miResetAll, sep3, miExit });
         }
@@ -2999,6 +3812,14 @@ namespace KeyMouseStats
 
         private void ToggleVisible()
         {
+            if (_focusPillActive)
+            {
+                _focusPillManualHidden = true;
+                _widgetVisibleBeforePill = false;
+                HideFocusPill(false);
+                _miShow.Text = "显示小组件";
+                return;
+            }
             if (Visible)
             {
                 Hide();
@@ -3088,6 +3909,14 @@ namespace KeyMouseStats
         private long _lastTickStamp;
         private void OnTick(object sender, EventArgs e)
         {
+            FlushShadowMove();
+            long saveFailure = Store.SaveFailureVersion;
+            if (saveFailure != _lastSaveFailureVersion)
+            {
+                _lastSaveFailureVersion = saveFailure;
+                if (_tray != null && !string.IsNullOrEmpty(Store.LastSaveError))
+                    _tray.ShowBalloonTip(8000, "本地保存失败", Store.LastSaveError, ToolTipIcon.Error);
+            }
             int revision=System.Threading.Volatile.Read(ref ThemeImages.Revision);
             if(revision!=_artRevision)
             {
@@ -3112,6 +3941,7 @@ namespace KeyMouseStats
             LiveRate.Tick();
             CheckWellbeing();
             if (ActivityMonitor.Tick()) MarkDirty();
+            UpdateFocusState(DateTime.Now);
             if (previousTrend != LiveRate.TrendVersion || previousApm != LiveRate.Apm || !object.ReferenceEquals(previousSession, ActivityMonitor.CurrentSession)) _dirtyUI = true;
 
             if (Store.Day != DateTime.Today)
@@ -3134,6 +3964,138 @@ namespace KeyMouseStats
             }
         }
 
+        // ---------------------------------------------------------------- 心流护航
+
+        private void UpdateFocusState(DateTime now)
+        {
+            _focusSnapshot = _focusMonitor.SampleLive();
+            FocusBreakConfig config = _focusBreak.Config;
+            if (config != null)
+            {
+                config.AfterMinutes = WellbeingSettings.FocusBreakAfterMinutes;
+                config.IdleBufferSeconds = WellbeingSettings.FocusBreakIdleSeconds;
+            }
+
+            bool enabled = WellbeingSettings.FocusBreakEnabled;
+            bool dnd = enabled && _focusBreak.Pending && FocusDnd.Active();
+            FocusBreakStatus status = _focusBreak.Update(now, _focusSnapshot, dnd);
+            if (enabled && status == FocusBreakStatus.Ready) ShowFocusBreakToast(now, _focusSnapshot);
+            if (!enabled && _focusToast != null && _focusToast.Visible) _focusToast.HideToast();
+
+            UpdateFocusPill();
+        }
+
+        private void UpdateFocusPill()
+        {
+            bool focus = _focusSnapshot != null
+                && (_focusSnapshot.State == FlowState.Deep || _focusSnapshot.State == FlowState.Normal)
+                && _focusSnapshot.FocusSeconds >= WellbeingSettings.FocusPillAfterMinutes * 60.0;
+            if (!focus)
+            {
+                _focusPillManualHidden = false;
+                if (_focusPillActive) HideFocusPill(true);
+                return;
+            }
+            if (!WellbeingSettings.FocusPillEnabled)
+            {
+                _focusPillManualHidden = false;
+                if (_focusPillActive) HideFocusPill(true);
+                return;
+            }
+            if (_focusPillActive)
+            {
+                if (_focusPill != null) _focusPill.UpdateSnapshot(_focusSnapshot);
+                return;
+            }
+            if (!Visible || _focusPillManualHidden) return;
+            ShowFocusPill();
+        }
+
+        private void ShowFocusPill()
+        {
+            if (!Visible) return;
+            if (_focusPill == null || _focusPill.IsDisposed)
+            {
+                _focusPill = new FocusPillForm(
+                    delegate { OpenDashboard(); },
+                    delegate { _focusPillManualHidden = true; HideFocusPill(true); });
+            }
+            _widgetVisibleBeforePill = true;
+            _focusPill.ShowAt(Location, _focusSnapshot);
+            _focusPillActive = true;
+            Hide();
+        }
+
+        private void HideFocusPill(bool restoreWidget)
+        {
+            _focusPillActive = false;
+            if (_focusPill != null && !_focusPill.IsDisposed)
+            {
+                if (restoreWidget && _widgetVisibleBeforePill) Location = _focusPill.Location;
+                _focusPill.HidePill();
+            }
+            if (restoreWidget && _widgetVisibleBeforePill && !IsDisposed)
+            {
+                ClampWidgetToScreen();
+                Show();
+                _miShow.Text = "隐藏小组件";
+            }
+            _widgetVisibleBeforePill = false;
+        }
+
+        private void ShowFocusBreakToast(DateTime now, FocusSnapshot snapshot)
+        {
+            if (!WellbeingSettings.FocusBreakEnabled) return;
+            if (_focusToast == null || _focusToast.IsDisposed)
+            {
+                _focusToast = new FocusBreakToast(
+                    delegate { SnoozeFocusBreak(DateTime.Now); },
+                    delegate { MuteFocusBreak(DateTime.Now); });
+            }
+            int minutes = snapshot == null ? 0 : (int)Math.Round(snapshot.FocusSeconds / 60.0);
+            if (minutes <= 0) minutes = WellbeingSettings.FocusBreakAfterMinutes;
+            _focusToast.ShowToast(minutes, snapshot == null ? "当前应用" : snapshot.MainAppName,
+                Screen.FromControl(this).WorkingArea);
+        }
+
+        private void SnoozeFocusBreak(DateTime now)
+        {
+            _focusBreak.Snooze(now);
+            WellbeingSettings.BreakSnoozeUntil = _focusBreak.SnoozeUntil;
+            Store.SaveAsync();
+            if (_focusToast != null) _focusToast.HideToast();
+            UpdateFocusMenu();
+        }
+
+        private void MuteFocusBreak(DateTime now)
+        {
+            _focusBreak.MuteToday(now);
+            WellbeingSettings.BreakMutedDay = _focusBreak.MutedDay;
+            Store.SaveAsync();
+            if (_focusToast != null) _focusToast.HideToast();
+            UpdateFocusMenu();
+        }
+
+        private void UpdateFocusMenu()
+        {
+            if (_miFocusStatus == null) return;
+            if (_focusSnapshot == null)
+            {
+                _miFocusStatus.Text = "当前：等待采样";
+            }
+            else
+            {
+                int minutes = (int)Math.Floor(Math.Max(0, _focusSnapshot.FocusSeconds) / 60.0);
+                string text = "当前：" + FocusPillForm.StateName(_focusSnapshot.State) + " · " + minutes + "m";
+                if (_focusBreak.Pending) text += " · 待休息";
+                if (_focusBreak.IsSnoozed(DateTime.Now)) text += " · 已延后";
+                if (_focusBreak.IsMuted(DateTime.Now)) text += " · 今日静音";
+                _miFocusStatus.Text = text;
+            }
+            _miFocusSnooze.Enabled = WellbeingSettings.FocusBreakEnabled;
+            _miFocusMute.Enabled = WellbeingSettings.FocusBreakEnabled;
+        }
+
         // v3.0:SQLite 阴影双写接管高频事实,文本快照降频为「每日一次 + 退出时」,
         // 不再每 30 秒重写整份历史(旧注释见 OnTick)。
         private const int SaveIntervalSeconds = 86400;
@@ -3149,6 +4111,7 @@ namespace KeyMouseStats
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             base.OnFormClosing(e);
+            FlushShadowMove();
             SaveNow(true);
             // 退出前把环形缓冲里剩下的样本落库,最多等 3 秒。
             ShadowPipeline.Flush(3000);
@@ -3157,9 +4120,19 @@ namespace KeyMouseStats
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             base.OnFormClosed(e);
+            KeyboardDeviceRegistry.ResolveCompleted = null;
+            KeyboardDeviceRegistry.ClearPressed();
+            MouseDeviceRegistry.ResolveCompleted = null;
             HoldTracker.DiscardPending();   // 退出时未抬起的按键不计入时长
             if(_hud!=null){_hud.Close();_hud.Dispose();}
+            if (_focusPill != null) { _focusPill.Close(); _focusPill.Dispose(); _focusPill = null; }
+            if (_focusToast != null) { _focusToast.Close(); _focusToast.Dispose(); _focusToast = null; }
             if (_dashWait != null) { try { _dashWait.Unregister(null); } catch { } }
+            if (_displaySettingsHooked)
+            {
+                try { SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged; } catch { }
+                _displaySettingsHooked = false;
+            }
             ReleaseHooks();
             if (_storageTimer != null) { _storageTimer.Dispose(); _storageTimer = null; }
             if (_timer != null) { _timer.Stop(); _timer.Dispose(); }

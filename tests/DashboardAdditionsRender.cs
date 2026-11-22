@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -10,7 +11,10 @@ using KeyMouseStats;
 internal static class DashboardAdditionsRender
 {
     private static readonly BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
+    private static int _checks;
+    private static void Check(bool value, string name) { if (!value) throw new Exception(name); _checks++; }
     private static void Set(Dashboard form, string name, object value) { typeof(Dashboard).GetField(name, Private).SetValue(form, value); }
+    private static object Get(Dashboard form, string name) { return typeof(Dashboard).GetField(name, Private).GetValue(form); }
     private static void Main()
     {
         string output = Environment.GetEnvironmentVariable("CLICKHEAT_PREVIEW_DIR");
@@ -77,6 +81,11 @@ internal static class DashboardAdditionsRender
             Set(form, "_hourRecordDate", DateTime.MinValue);
             object keys = Enum.ToObject(typeof(Dashboard).GetNestedType("TabId", BindingFlags.NonPublic), 3);
             Set(form, "_tab", keys); Set(form, "_keyView", 0); Set(form, "_keyMetric", 0); Set(form, "_keyRange", 0); Render(form, Path.Combine(output, "dashboard-keys-redesign.png"));
+            CheckPeripheralChip(form, "100%");
+            Set(form, "_s", 1.5f); form.ClientSize = new Size(1608, 1000);
+            RenderSized(form, Path.Combine(output, "dashboard-keys-health-150.png"));
+            CheckPeripheralChip(form, "150%/negative-ElasticH");
+            Set(form, "_s", 1f); form.ClientSize = new Size(1072, 724);
             object apps = Enum.ToObject(typeof(Dashboard).GetNestedType("TabId", BindingFlags.NonPublic), 4);
             Set(form, "_tab", apps); Set(form, "_appDays", 7);
             Render(form, Path.Combine(output, "dashboard-apps-table.png"));
@@ -102,15 +111,34 @@ internal static class DashboardAdditionsRender
             typeof(Dashboard).GetMethod("OnFormClosed", Private).Invoke(form, new object[] { new FormClosedEventArgs(CloseReason.None) });
         }
         Store.History.Clear(); Store.RollDay(DateTime.Today);
-        Console.WriteLine("Dashboard additions render written");
+        Console.WriteLine("Dashboard additions render written (" + _checks + " checks)");
     }
     private static void Render(Dashboard form, string path)
     {
-        using (Bitmap bitmap = new Bitmap(1072, 724))
+        RenderSized(form, path);
+    }
+    private static void RenderSized(Dashboard form, string path)
+    {
+        int width = Math.Max(1, form.ClientSize.Width), height = Math.Max(1, form.ClientSize.Height);
+        using (Bitmap bitmap = new Bitmap(width, height))
         using (Graphics graphics = Graphics.FromImage(bitmap))
         {
             typeof(Dashboard).GetMethod("OnPaint", Private).Invoke(form, new object[] { new PaintEventArgs(graphics, new Rectangle(Point.Empty, bitmap.Size)) });
             bitmap.Save(path, ImageFormat.Png);
         }
+    }
+    private static void CheckPeripheralChip(Dashboard form, string label)
+    {
+        List<int> ids = (List<int>)Get(form, "_chipIds");
+        List<RectangleF> rects = (List<RectangleF>)Get(form, "_chips");
+        int index = ids.IndexOf(Dashboard.KeySubviewHealthChipId);
+        Check(index >= 0, label + " 外设健康 chip 已登记");
+        RectangleF chip = rects[index];
+        Check(chip.Width >= 90 && chip.Height >= 24, label + " chip 几何有效");
+        int export = ids.IndexOf(Dashboard.ExportChipId);
+        Check(export >= 0, label + " 导出 CSV 仍存在");
+        RectangleF exportRect = rects[export];
+        Check(!chip.IntersectsWith(exportRect), label + " 外设健康与导出按钮不重叠");
+        Check(chip.Right <= form.ClientSize.Width, label + " chip 不越出窗口");
     }
 }

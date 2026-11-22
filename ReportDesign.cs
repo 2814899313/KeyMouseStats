@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
@@ -176,11 +177,14 @@ namespace KeyMouseStats
     /// </summary>
     internal sealed class ReportHelpOverlay : Form
     {
-        private readonly Timer _timer=new Timer{Interval=16};
+        private readonly Timer _timer=new Timer{Interval=8};
+        private readonly Stopwatch _slideWatch=new Stopwatch();
         private readonly Font _titleFont=new Font("Microsoft YaHei UI",18f,FontStyle.Bold,GraphicsUnit.Pixel);
         private readonly Font _bodyFont=new Font("Microsoft YaHei UI",12f,GraphicsUnit.Pixel);
         private readonly Font _smallFont=new Font("Microsoft YaHei UI",11f,GraphicsUnit.Pixel);
         private float _progress,_scroll,_scale=1;
+        private float _slideFrom,_slideTo;
+        private const float SlideMs=160f;
         private int _direction;private string _title="",_scope="",_note="";
         private RectangleF _closeRect,_drawerRect;private float _contentHeight;
         internal ReportHelpOverlay()
@@ -189,15 +193,29 @@ namespace KeyMouseStats
             BackColor=ArtTheme.Current.Background;DoubleBuffered=true;TopMost=true;
             _timer.Tick+=delegate
             {
-                _progress+=_direction*0.12f;
-                if(_direction>0&&_progress>=1){_progress=1;_timer.Stop();}
-                if(_direction<0&&_progress<=0){_progress=0;_timer.Stop();Close();}
+                double t=SlideMs<=0?1:Math.Min(1,_slideWatch.Elapsed.TotalMilliseconds/SlideMs);
+                _progress=_slideFrom+(_slideTo-_slideFrom)*Ease((float)t);
+                if(t>=1)
+                {
+                    _progress=_slideTo;
+                    _timer.Stop();_slideWatch.Stop();
+                    if(_direction<0){Close();return;}
+                }
                 Invalidate();
             };
         }
+        private void StartSlide(int direction)
+        {
+            _direction=direction;
+            _slideFrom=_progress;
+            _slideTo=direction>0?1f:0f;
+            _slideWatch.Reset();_slideWatch.Start();
+            _timer.Interval=8;
+            if(!_timer.Enabled)_timer.Start();
+        }
         private void Prepare(Control source,string title,string scope,string note,float scale)
         {
-            _title=title??"";_scope=scope??"";_note=note??"";_scale=scale>0?scale:1;_scroll=0;_direction=1;_progress=0;
+            _title=title??"";_scope=scope??"";_note=note??"";_scale=scale>0?scale:1;_scroll=0;_direction=1;_progress=0;_slideFrom=0;_slideTo=1;
             Form owner=source==null?null:source.FindForm();
             ClientSize=owner==null?new Size(900,700):owner.ClientSize;
             if(owner!=null)Location=owner.PointToScreen(Point.Empty);
@@ -206,7 +224,7 @@ namespace KeyMouseStats
         internal void ShowHelp(Control source,string title,string scope,string note,float scale)
         {
             Prepare(source,title,scope,note,scale);
-            _timer.Start();
+            StartSlide(1);
             Form owner=Owner;
             if(owner!=null)ShowDialog(owner);else ShowDialog();
         }
@@ -214,12 +232,12 @@ namespace KeyMouseStats
         internal void ShowPreview(Control source,string title,string scope,string note,float scale)
         {
             Prepare(source,title,scope,note,scale);
-            Show(Owner);_timer.Start();
+            Show(Owner);StartSlide(1);
         }
         internal void CloseHelp()
         {
             if(!Visible)return;
-            _direction=-1;_timer.Start();
+            StartSlide(-1);
         }
         private float Ease(float t){return t*t*(3-2*t);}
         protected override void OnPaint(PaintEventArgs e)

@@ -8,7 +8,7 @@
 //    1. 归一化:过滤无效区间,同一应用且间隔 ≤ 20s(微确认容忍)的相邻会话合并;
 //    2. 5 分钟滑窗 / 60s 步长,逐窗计算:粘性、类别数、工作→非工作切换、输入节律、
 //       长切出、连续无关切换;
-//    3. 三态:深度心流 / 常规活跃 / 碎片化高频切换;
+//    3. 四态:深度心流 / 常规活跃 / 碎片化高频切换 / 空闲挂机;
 //    4. 连续满足 ≥ 15 分钟判为 Deep,并把不足 15 分钟的 Deep 降级为 Normal;
 //    5. 专注分 0-100,四项权重分解可解释。
 //
@@ -31,6 +31,8 @@ namespace KeyMouseStats
         public string ProcessName;
         public string WindowTitle;
         public long KeyCount;
+        /// <summary>键盘 + 鼠标点击 + 滚轮的有效输入总数;旧数据缺失时回退到 KeyCount。</summary>
+        public long InputCount;
         public int CategoryId;
         public long ActiveMs;
 
@@ -39,7 +41,7 @@ namespace KeyMouseStats
             FlowSessionRow row = new FlowSessionRow();
             row.Id = Id; row.StartMs = StartMs; row.EndMs = EndMs;
             row.ProcessPath = ProcessPath; row.ProcessName = ProcessName; row.WindowTitle = WindowTitle;
-            row.KeyCount = KeyCount; row.CategoryId = CategoryId; row.ActiveMs = ActiveMs;
+            row.KeyCount = KeyCount; row.InputCount = InputCount; row.CategoryId = CategoryId; row.ActiveMs = ActiveMs;
             return row;
         }
     }
@@ -60,12 +62,13 @@ namespace KeyMouseStats
     }
 
 #pragma warning restore 0649
-    /// <summary>三态。</summary>
+    /// <summary>四态。Idle 表示没有有效键鼠输入,不参与碎片化惩罚。</summary>
     internal enum FlowState
     {
         Fragmented = 0,
         Normal = 1,
-        Deep = 2
+        Deep = 2,
+        Idle = 3
     }
 
     /// <summary>引擎参数。默认值即产品默认行为,测试可逐项覆盖。</summary>
@@ -77,21 +80,27 @@ namespace KeyMouseStats
         public int BreakSeconds = 45;
         /// <summary>连续切换多少个无关窗口即判中断。</summary>
         public int UnrelatedSwitchLimit = 3;
-        /// <summary>主工作窗口停留占比门槛。</summary>
-        public double StickinessThreshold = 0.85;
-        /// <summary>窗内允许出现的不同类别数上限。</summary>
-        public int MaxCategoriesPerWindow = 2;
+        /// <summary>主工作窗口停留占比门槛(深度心流)。</summary>
+        public double StickinessThreshold = 0.72;
+        /// <summary>常规专注的最低粘性;低于此值仍视为碎片切换。</summary>
+        public double NormalStickinessThreshold = 0.45;
+        /// <summary>窗内允许出现的不同类别数上限(IDE / 浏览器 / 终端协同)。</summary>
+        public int MaxCategoriesPerWindow = 3;
         /// <summary>窗内允许的工作→非工作切换次数上限。</summary>
         public int MaxWorkToNonWork = 2;
         public int WindowSeconds = 300;
         public int StepSeconds = 60;
         /// <summary>连续满足判据达到此分钟数才算深度心流。</summary>
-        public int DeepMinMinutes = 15;
-        /// <summary>窗内最少击键数,用于排除挂机。</summary>
-        public long MinKeysPerWindow = 30;
-        /// <summary>IKI 方差合理区间(毫秒²),用于排除连点器与长时间停顿。</summary>
+        public int DeepMinMinutes = 10;
+        /// <summary>5 分钟窗内最少有效输入(键盘 + 鼠标点击 + 滚轮),用于兼顾调试/阅览/操作。</summary>
+        public long MinInputPerWindow = 15;
+        /// <summary>IKI 方差绝对下限,用于排除机械连点。</summary>
         public double IkiVarMin = 40;
-        public double IkiVarMax = 9000;
+        /// <summary>IKI 方差绝对上限;仅作极端值保险,节奏主要由变异系数判定。</summary>
+        public double IkiVarMax = 50000000;
+        /// <summary>IKI 变异系数区间:容忍思考停顿,同时排除固定间隔连点。</summary>
+        public double IkiCvMin = 0.03;
+        public double IkiCvMax = 6.0;
         /// <summary>专注分里「平静度」项的计算上限(每次无关切换扣分)。</summary>
         public int ScoreSwitchCap = 12;
     }
@@ -106,6 +115,8 @@ namespace KeyMouseStats
         public string PrimaryProcess;
         public double Stickiness;
         public long Keys;
+        /// <summary>最终分钟段的每分钟击键数;仅 Analyze 输出的分钟段非空。</summary>
+        public List<long> MinuteKeys;
         public long LengthMs { get { return EndMs > StartMs ? EndMs - StartMs : 0; } }
     }
 
@@ -127,7 +138,32 @@ namespace KeyMouseStats
         public FlowScoreParts Parts = new FlowScoreParts();
         public double FocusScore;
         public long LongestDeepMs;
+        /// <summary>深度心流 + 常规专注的最长连续时长。</summary>
+        public long LongestFocusMs;
         public long TotalMs;
+        /// <summary>空闲段总时长;不计入三态分母与碎片化惩罚。</summary>
+        public long IdleMs;
+    }
+
+    /// <summary>某个分钟背后的 5 分钟窗口诊断,供悬停提示使用(纯内存)。</summary>
+    internal sealed class FlowDiagnostic
+    {
+        public long WindowStartMs;
+        public FlowState State;
+        public double Stickiness;
+        public long Keys;
+        public long InputCount;
+        public long EffectiveInput;
+        public int BurstCount;
+        public double IkiAvg;
+        public double IkiVar;
+        public double IkiCv;
+        public int DistinctCategories;
+        public int WorkToNonWork;
+        public int LongCheckouts;
+        public int MaxUnrelatedRun;
+        public int PrimaryCategory;
+        public string PrimaryProcess;
     }
 
     internal static class FlowAnalyzer
@@ -160,20 +196,25 @@ namespace KeyMouseStats
             {
                 long w1 = w0 + windowsMs;
                 WindowStat stat = Measure(normalized, bursts, w0, w1, cfg);
-                // 空窗(没有会话重叠、也没有输入)不是「碎片化」,它是没在电脑前。
-                // 直接跳过,否则整段离线时间都会被算进 Fragmented。
-                if (stat.Dwell == 0 && stat.Keys == 0) continue;
+                // 空窗(没有任何会话重叠、也没有输入)不是「碎片化」,它是没在电脑前。
+                // 用原始停留判断窗口是否存在;有效停留只负责粘性与主类别核算。
+                if (stat.RawDwell == 0 && stat.BurstCount == 0) continue;
+                FlowState state = Classify(stat, cfg);
                 FlowSegment segment = new FlowSegment();
                 segment.StartMs = w0;
                 segment.EndMs = Math.Min(w1, end);
-                segment.State = Classify(stat, cfg);
+                segment.State = state;
                 segment.PrimaryCategory = stat.PrimaryCategory;
                 segment.PrimaryProcess = stat.PrimaryProcess;
                 segment.Stickiness = stat.Stickiness;
                 segment.Keys = stat.Keys;
                 windows.Add(segment);
-                stickinessSum += stat.Stickiness;
-                stickinessCount++;
+                // 挂机窗口没有切换惩罚,也不应把粘性均值拉低。
+                if (state != FlowState.Idle)
+                {
+                    stickinessSum += stat.Stickiness;
+                    stickinessCount++;
+                }
             }
 
             // 分钟桶单次归属:每个 60 秒桶只能被计入一次,彻底消除 300/60 窗口重叠重复累加。
@@ -226,6 +267,7 @@ namespace KeyMouseStats
                     {
                         if (current.EndMs > last.EndMs) last.EndMs = current.EndMs;
                         last.KeyCount += current.KeyCount;
+                        last.InputCount += current.InputCount;
                         last.ActiveMs += current.ActiveMs;
                         continue;
                     }
@@ -245,9 +287,44 @@ namespace KeyMouseStats
             public int LongCheckouts;
             public int MaxUnrelatedRun;
             public long Keys;
-            public long Dwell;          // 窗内真实会话停留;为 0 表示这是个空窗
+            public long RawDwell;      // 窗内原始会话停留;用于判断窗口是否存在于前台
+            public long Dwell;          // 按 ActiveMs 约束后的有效停留;用于粘性与主类别
+            public long InputCount;     // 窗内有效键鼠输入(键盘 + 点击 + 滚轮)
+            public long EffectiveInput; // max(Keys, InputCount),用于最少输入阈值
             public int BurstCount;
+            public double IkiAvg;
             public double IkiVar;
+            public double IkiCv;
+        }
+
+        /// <summary>
+        /// 原始前台停留 → 有效停留。用 ActiveMs / 会话跨度做比例约束,
+        /// 让 93 分钟但只有 3.6 秒输入的挂机会话不再霸占整天 Dwell。
+        /// </summary>
+        private static long EffectiveDwell(FlowSessionRow row, long rawDwell)
+        {
+            if (rawDwell <= 0) return 0;
+            long span = row.EndMs - row.StartMs;
+            if (span <= 0) return rawDwell;
+            double ratio;
+            if (row.ActiveMs > 0) ratio = row.ActiveMs * 1.0 / span;
+            else if (row.InputCount <= 0 && row.KeyCount <= 0) ratio = 0;
+            else ratio = 1.0;   // 旧数据没有 active_ms,但确实有输入 → 不惩罚
+            if (ratio <= 0) return 0;
+            if (ratio > 1) ratio = 1;
+            long effective = (long)Math.Round(rawDwell * ratio);
+            return effective < 0 ? 0 : effective;
+        }
+
+        /// <summary>会话输入总量(键盘 + 点击 + 滚轮;旧行回退 KeyCount)按窗口重叠比例折算。</summary>
+        private static long ProratedInput(FlowSessionRow row, long rawDwell)
+        {
+            long input = row.InputCount > 0 ? row.InputCount : row.KeyCount;
+            if (input <= 0 || rawDwell <= 0) return 0;
+            long span = row.EndMs - row.StartMs;
+            if (span <= 0) return input;
+            // 向下取整:长时间会话里零星几次输入不能被摊成「每个窗口都有 1 次」。
+            return (long)(input * (double)rawDwell / span);
         }
 
         private static WindowStat Measure(IList<FlowSessionRow> sessions, IList<FlowBurstRow> bursts,
@@ -267,32 +344,41 @@ namespace KeyMouseStats
                 long from = Math.Max(row.StartMs, w0);
                 long to = Math.Min(row.EndMs, w1);
                 if (to <= from) continue;
-                long dwell = to - from;
+                long rawDwell = to - from;
+                long dwell = EffectiveDwell(row, rawDwell);
+                stat.RawDwell += rawDwell;
+                stat.InputCount += ProratedInput(row, rawDwell);
                 totalDwell += dwell;
 
-                string key = row.ProcessPath == null ? "" : row.ProcessPath;
-                long processDwell;
-                dwellByProcess.TryGetValue(key, out processDwell);
-                dwellByProcess[key] = processDwell + dwell;
-
+                // 有效停留不足 1 秒的会话视为挂机背景:不参与主类别、
+                // 类别数、工作→非工作和连续无关切换的判定。
+                bool structural = dwell >= 1000;
                 int category = row.CategoryId;
-                long categoryDwell;
-                dwellByCategory.TryGetValue(category, out categoryDwell);
-                dwellByCategory[category] = categoryDwell + dwell;
+                if (structural)
+                {
+                    string key = row.ProcessPath == null ? "" : row.ProcessPath;
+                    long processDwell;
+                    dwellByProcess.TryGetValue(key, out processDwell);
+                    dwellByProcess[key] = processDwell + dwell;
 
-                if (previousCategory >= 0 && previousCategory != category)
-                    if (IsWorkCategory(previousCategory) && !IsWorkCategory(category)) stat.WorkToNonWork++;
+                    long categoryDwell;
+                    dwellByCategory.TryGetValue(category, out categoryDwell);
+                    dwellByCategory[category] = categoryDwell + dwell;
+
+                    if (previousCategory >= 0 && previousCategory != category)
+                        if (IsWorkCategory(previousCategory) && !IsWorkCategory(category)) stat.WorkToNonWork++;
+
+                    if (!IsWorkCategory(category))
+                    {
+                        unrelatedRun++;
+                        if (unrelatedRun > stat.MaxUnrelatedRun) stat.MaxUnrelatedRun = unrelatedRun;
+                    }
+                    else unrelatedRun = 0;
+                }
 
                 if (previousEnd >= 0 && row.StartMs - previousEnd > cfg.BreakSeconds * 1000L) stat.LongCheckouts++;
                 previousEnd = Math.Max(previousEnd, row.EndMs);
-                previousCategory = category;
-
-                if (!IsWorkCategory(category))
-                {
-                    unrelatedRun++;
-                    if (unrelatedRun > stat.MaxUnrelatedRun) stat.MaxUnrelatedRun = unrelatedRun;
-                }
-                else unrelatedRun = 0;
+                if (structural) previousCategory = category;
             }
 
             stat.DistinctCategories = dwellByCategory.Count;
@@ -316,6 +402,7 @@ namespace KeyMouseStats
             if (bursts != null)
             {
                 double varSum = 0;
+                double avgSum = 0;
                 for (int i = 0; i < bursts.Count; i++)
                 {
                     FlowBurstRow burst = bursts[i];
@@ -326,8 +413,16 @@ namespace KeyMouseStats
                     stat.BurstCount++;
                     stat.Keys += burst.KeyCount;
                     varSum += burst.IkiVar;
+                    avgSum += burst.IkiAvgMs;
                 }
-                stat.IkiVar = stat.BurstCount > 0 ? varSum / stat.BurstCount : 0;
+                if (stat.BurstCount > 0)
+                {
+                    stat.IkiVar = varSum / stat.BurstCount;
+                    stat.IkiAvg = avgSum / stat.BurstCount;
+                    stat.IkiCv = stat.IkiAvg > 0
+                        ? Math.Sqrt(Math.Max(0.0, stat.IkiVar)) / stat.IkiAvg
+                        : 0;
+                }
             }
             // 没有突发段时用会话击键数按窗口占比折算,避免整窗判为 0。
             if (stat.BurstCount == 0)
@@ -343,15 +438,15 @@ namespace KeyMouseStats
                     stat.Keys += (long)Math.Round(row.KeyCount * (to - from) * 1.0 / span);
                 }
             }
+            stat.EffectiveInput = stat.Keys > stat.InputCount ? stat.Keys : stat.InputCount;
             return stat;
         }
 
         private static FlowState Classify(WindowStat stat, FlowConfig cfg)
         {
-            bool rhythm = stat.BurstCount > 0
-                && stat.Keys >= cfg.MinKeysPerWindow
-                && stat.IkiVar >= cfg.IkiVarMin
-                && stat.IkiVar <= cfg.IkiVarMax;
+            // 没有输入突发,且键盘/鼠标有效输入为 0:这是挂机,不是高频切换。
+            if (stat.BurstCount == 0 && stat.EffectiveInput == 0) return FlowState.Idle;
+            bool rhythm = stat.EffectiveInput >= cfg.MinInputPerWindow && RhythmOk(stat, cfg);
             bool qualified = stat.Stickiness >= cfg.StickinessThreshold
                 && stat.DistinctCategories <= cfg.MaxCategoriesPerWindow
                 && stat.WorkToNonWork <= cfg.MaxWorkToNonWork
@@ -359,13 +454,63 @@ namespace KeyMouseStats
                 && stat.MaxUnrelatedRun < cfg.UnrelatedSwitchLimit
                 && rhythm;
             if (qualified) return FlowState.Deep;
-            if (rhythm && stat.Stickiness >= 0.5) return FlowState.Normal;
+            if (rhythm && stat.Stickiness >= cfg.NormalStickinessThreshold) return FlowState.Normal;
             return FlowState.Fragmented;
+        }
+
+        /// <summary>输入节律:用变异系数容忍思考停顿,并保留极端方差保险。</summary>
+        private static bool RhythmOk(WindowStat stat, FlowConfig cfg)
+        {
+            if (stat.BurstCount == 0) return true;   // 纯鼠标/阅览窗口没有 IKI 样本
+            if (stat.IkiVar < cfg.IkiVarMin || stat.IkiVar > cfg.IkiVarMax) return false;
+            if (stat.IkiAvg <= 0) return true;
+            return stat.IkiCv >= cfg.IkiCvMin && stat.IkiCv <= cfg.IkiCvMax;
+        }
+
+        /// <summary>悬停诊断:按与 Analyze 相同的窗口起点复算某分钟的 5 分钟窗口。</summary>
+        internal static FlowDiagnostic DiagnoseAt(IList<FlowSessionRow> sessions, IList<FlowBurstRow> bursts,
+            long atMs, FlowConfig config)
+        {
+            FlowConfig cfg = config == null ? new FlowConfig() : config;
+            return DiagnoseNormalized(Normalize(sessions, cfg), bursts, atMs, cfg);
+        }
+
+        /// <summary>已归一化列表上的悬停诊断,避免每次悬停重复排序。</summary>
+        internal static FlowDiagnostic DiagnoseNormalized(IList<FlowSessionRow> normalized,
+            IList<FlowBurstRow> bursts, long atMs, FlowConfig config)
+        {
+            if (normalized == null || normalized.Count == 0) return null;
+            FlowConfig cfg = config == null ? new FlowConfig() : config;
+            long origin = normalized[0].StartMs;
+            long end = normalized[normalized.Count - 1].EndMs;
+            if (atMs < origin || atMs >= end) return null;
+            long stepMs = Math.Max(1, cfg.StepSeconds) * 1000L;
+            long windowsMs = Math.Max(stepMs, cfg.WindowSeconds * 1000L);
+            long w0 = origin + ((atMs - origin) / stepMs) * stepMs;
+            WindowStat stat = Measure(normalized, bursts, w0, w0 + windowsMs, cfg);
+            FlowDiagnostic diag = new FlowDiagnostic();
+            diag.WindowStartMs = w0;
+            diag.State = Classify(stat, cfg);
+            diag.Stickiness = stat.Stickiness;
+            diag.Keys = stat.Keys;
+            diag.InputCount = stat.InputCount;
+            diag.EffectiveInput = stat.EffectiveInput;
+            diag.BurstCount = stat.BurstCount;
+            diag.IkiAvg = stat.IkiAvg;
+            diag.IkiVar = stat.IkiVar;
+            diag.IkiCv = stat.IkiCv;
+            diag.DistinctCategories = stat.DistinctCategories;
+            diag.WorkToNonWork = stat.WorkToNonWork;
+            diag.LongCheckouts = stat.LongCheckouts;
+            diag.MaxUnrelatedRun = stat.MaxUnrelatedRun;
+            diag.PrimaryCategory = stat.PrimaryCategory;
+            diag.PrimaryProcess = stat.PrimaryProcess;
+            return diag;
         }
 
         /// <summary>
         /// 把 5 分钟滑窗的判别结果落到 60 秒分钟桶上,每个桶只计一次。
-        /// 保证 Deep + Normal + Fragmented 严格等于「有实际活动的分钟」总时长,
+        /// 保证四态总时长严格等于「有实际活动的分钟」总时长,
         /// 不会因为相邻窗口重叠而把同一分钟算 5 次。
         /// </summary>
         private static List<FlowSegment> BuildMinuteSegments(IList<FlowSessionRow> sessions,
@@ -382,10 +527,13 @@ namespace KeyMouseStats
                 if (!HasActivity(sessions, bursts, t, tEnd)) { current = null; continue; }
                 int index = WindowIndex(windows, t);
                 FlowSegment window = windows[index];
+                long minuteKeys = BurstKeysInRange(bursts, t, tEnd);
                 if (current != null && current.State == window.State)
                 {
                     current.EndMs = tEnd;
-                    current.Keys += 0;
+                    current.Keys += minuteKeys;
+                    if (current.MinuteKeys == null) current.MinuteKeys = new List<long>();
+                    current.MinuteKeys.Add(minuteKeys);
                     continue;
                 }
                 current = new FlowSegment();
@@ -395,9 +543,31 @@ namespace KeyMouseStats
                 current.PrimaryCategory = window.PrimaryCategory;
                 current.PrimaryProcess = window.PrimaryProcess;
                 current.Stickiness = window.Stickiness;
+                current.Keys = minuteKeys;
+                current.MinuteKeys = new List<long>();
+                current.MinuteKeys.Add(minuteKeys);
                 result.Add(current);
             }
             return result;
+        }
+
+        /// <summary>按 burst 与分钟桶的重叠比例折算击键数,供轨道脉冲渲染。</summary>
+        private static long BurstKeysInRange(IList<FlowBurstRow> bursts, long from, long to)
+        {
+            if (bursts == null || to <= from) return 0;
+            long keys = 0;
+            for (int i = 0; i < bursts.Count; i++)
+            {
+                FlowBurstRow burst = bursts[i];
+                if (burst == null) continue;
+                long a = Math.Max(burst.StartMs, from);
+                long b = Math.Min(burst.EndMs, to);
+                if (b <= a) continue;
+                long span = burst.EndMs - burst.StartMs;
+                if (span <= 0) { keys += burst.KeyCount; continue; }
+                keys += (long)Math.Round(burst.KeyCount * (double)(b - a) / span);
+            }
+            return keys;
         }
 
         /// <summary>该分钟桶内是否有真实会话停留或输入事件。</summary>
@@ -442,10 +612,16 @@ namespace KeyMouseStats
                 if (result.Count > 0)
                 {
                     FlowSegment last = result[result.Count - 1];
-                    if (last.State == window.State)
+                    // 只有时间连续（无空洞）的同态段才允许合并,避免跨数小时空白桥接。
+                    if (last.State == window.State && last.EndMs >= window.StartMs)
                     {
                         last.EndMs = window.EndMs;
                         last.Keys += window.Keys;
+                        if (window.MinuteKeys != null)
+                        {
+                            if (last.MinuteKeys == null) last.MinuteKeys = new List<long>();
+                            last.MinuteKeys.AddRange(window.MinuteKeys);
+                        }
                         if (window.Stickiness > last.Stickiness)
                         {
                             last.Stickiness = window.Stickiness;
@@ -463,28 +639,60 @@ namespace KeyMouseStats
                 copy.PrimaryProcess = window.PrimaryProcess;
                 copy.Stickiness = window.Stickiness;
                 copy.Keys = window.Keys;
+                if (window.MinuteKeys != null) copy.MinuteKeys = new List<long>(window.MinuteKeys);
                 result.Add(copy);
             }
             return result;
+        }
+
+        /// <summary>深度心流 + 常规专注的最长连续时长;Fragmented / Idle / 空洞会切断。</summary>
+        internal static long LongestFocusRun(List<FlowSegment> segments)
+        {
+            if (segments == null) return 0;
+            long best = 0;
+            long run = 0;
+            long previousEnd = -1;
+            for (int i = 0; i < segments.Count; i++)
+            {
+                FlowSegment segment = segments[i];
+                bool focus = segment.State == FlowState.Deep || segment.State == FlowState.Normal;
+                if (focus)
+                {
+                    if (previousEnd >= 0 && segment.StartMs <= previousEnd) run += segment.LengthMs;
+                    else run = segment.LengthMs;
+                    if (run > best) best = run;
+                }
+                else run = 0;
+                previousEnd = segment.EndMs;
+            }
+            return best;
         }
 
         private static void ComputeScore(FlowReport report, List<FlowSegment> segments, double stickiness, FlowConfig cfg)
         {
             long total = 0, deep = 0, normal = 0;
             int workSwitch = 0;
+            FlowSegment previous = null;
+            report.LongestFocusMs = LongestFocusRun(segments);
             for (int i = 0; i < segments.Count; i++)
             {
                 FlowSegment segment = segments[i];
+                // 空闲段单独累计,不进入三态分母,也不参与切换惩罚。
+                if (segment.State == FlowState.Idle)
+                {
+                    report.IdleMs += segment.LengthMs;
+                    continue;
+                }
                 total += segment.LengthMs;
                 if (segment.State == FlowState.Deep) deep += segment.LengthMs;
                 else if (segment.State == FlowState.Normal) normal += segment.LengthMs;
                 if (segment.LengthMs > report.LongestDeepMs && segment.State == FlowState.Deep)
                     report.LongestDeepMs = segment.LengthMs;
-            }
-            // 段之间的切换次数用作「平静度」的分子。
-            for (int i = 1; i < segments.Count; i++)
-                if (IsWorkCategory(segments[i - 1].PrimaryCategory) && !IsWorkCategory(segments[i].PrimaryCategory))
+                // 段之间的切换次数用作「平静度」的分子;空闲段跳过。
+                if (previous != null && IsWorkCategory(previous.PrimaryCategory) && !IsWorkCategory(segment.PrimaryCategory))
                     workSwitch++;
+                previous = segment;
+            }
 
             double deepShare = total > 0 ? deep * 1.0 / total : 0;
             double normalShare = total > 0 ? normal * 1.0 / total : 0;

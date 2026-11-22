@@ -143,6 +143,21 @@ internal static class ClickHeatTests
         ClickHeat.Decode(null, null);
         Check(bad.ClickCells.Count == 1, "empty input does not touch existing cells");
 
+        // ---- 3b. 4K/多屏容量:写入超过旧 4000 上限,保存重载后不能截断 ----
+        DayRecord wide = new DayRecord();
+        ClickHeat.ResetDedupe();
+        for (int i = 0; i < 5000; i++)
+        {
+            int x = (i % 100) * ClickHeat.Cell;
+            int y = (i / 100) * ClickHeat.Cell;
+            Check(ClickHeat.Record(wide, x, y, 1), "大桌面点击应被记录: " + i);
+        }
+        Check(wide.ClickCells.Count == 5000, "写入端应保留 5000 个不同格子");
+        DayRecord wideReloaded = new DayRecord();
+        ClickHeat.Decode(ClickHeat.Encode(wide.ClickCells), wideReloaded.ClickCells);
+        Check(wideReloaded.ClickCells.Count == 5000, "5000 格保存重载后必须完整保留");
+        Check(ClickHeat.MaxCellsPerDay >= 5000, "容量上限必须覆盖 4K 常见桌面");
+
         // ---- 4. 九宫格聚合:范围外只计入总数,不参与区域 ----
         DayRecord sample = new DayRecord();
         sample.ClickCells[ClickHeat.CellKey(0, 0)] = 5;        // 屏幕 (10,10) → 左上

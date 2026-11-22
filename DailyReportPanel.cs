@@ -49,14 +49,13 @@ namespace KeyMouseStats
             if (id == 420)
             {
                 if (!CanStepDay(-1)) return;      // 到 364 天下界就停,不再翻进没有数据的年份
-                _dayShown = _dayShown.AddDays(-1); _dayReport = null; Motion.Start(EnterMotionKey, 240, Ease.OutCubic); return;
+                _dayShown = _dayShown.AddDays(-1); _dayReport = null; return;
             }
             if (id == 421)
             {
                 DateTime next = _dayShown.AddDays(1);
                 if (next > DateTime.Today) return;
                 _dayShown = next; _dayReport = null;
-                Motion.Start(EnterMotionKey, 240, Ease.OutCubic);
                 return;
             }
             if (id == 422) { _dayShown = DefaultDay; _dayReport = null; return; }

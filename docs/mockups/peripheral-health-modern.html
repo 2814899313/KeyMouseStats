@@ -1,0 +1,1096 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>外设健康 · 现代数据面板原型</title>
+<style>
+  :root{
+    --bg:#070b11; --sidebar:#0a1017; --card:rgba(19,27,38,.88); --card2:rgba(26,36,49,.9);
+    --line:rgba(255,255,255,.06); --line2:rgba(255,255,255,.09);
+    --text:#edf5fc; --muted:#8a9caf; --dim:#63768a;
+    --blue:#78a7ff; --blue-soft:rgba(120,167,255,.14); --blue-line:rgba(120,167,255,.30);
+    --green:#4ade80; --orange:#f8c15c; --red:#f87171;
+    --scale:1; --card-h:482px; color-scheme:dark;
+    --font-ui:"Segoe UI Variable Display","Segoe UI","Microsoft YaHei UI","Microsoft YaHei","PingFang SC",system-ui,sans-serif;
+    --font-num:"Segoe UI Variable Display","Segoe UI","SF Pro Display","Microsoft YaHei UI",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#05080d;color:var(--text);font-family:var(--font-ui);
+    font-size:13px;font-feature-settings:"tnum" 1,"lnum" 1;-webkit-font-smoothing:antialiased}
+  button,input{font-family:inherit}
+  button{cursor:pointer}
+  .num,.hero-value,.metric-value,.mbar-pct,.k-count,.hero-sub,.metric-sub,.mini-stats b{
+    font-family:var(--font-num);font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1,"lnum" 1}
+
+  /* ---------------- toolbar ---------------- */
+  .toolbar{position:sticky;top:0;z-index:80;display:flex;align-items:center;gap:18px;
+    padding:11px 24px;background:rgba(7,11,17,.92);border-bottom:1px solid rgba(255,255,255,.05);
+    backdrop-filter:blur(14px)}
+  .toolbar .brand{display:flex;align-items:center;gap:10px;font-size:12px;font-weight:600;
+    letter-spacing:.2px;white-space:nowrap;color:#dce8f5}
+  .toolbar .brand span{font-size:9px;font-weight:400;color:var(--dim);letter-spacing:1.1px}
+  .toolbar .spacer{flex:1}
+  .toolbar .seg{display:flex;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.06);
+    border-radius:9px;padding:2px}
+  .toolbar .seg button{height:26px;padding:0 12px;border:0;border-radius:7px;background:transparent;
+    color:#8fa4b8;font-size:11px}
+  .toolbar .seg button.active{background:var(--blue-soft);color:#dbe9ff;box-shadow:0 0 0 1px var(--blue-line) inset}
+  .toolbar label{display:flex;align-items:center;gap:7px;font-size:10px;color:#8fa4b8;white-space:nowrap}
+  .toolbar input[type=checkbox]{accent-color:var(--blue)}
+  .toolbar .demo{height:30px;padding:0 13px;border:1px solid rgba(255,255,255,.07);border-radius:8px;
+    background:rgba(255,255,255,.03);color:#a9bccf;font-size:10px}
+  .toolbar .demo:hover{background:rgba(255,255,255,.06);color:#edf5fc}
+
+  .stage{overflow:auto;padding:26px 24px 10px;display:flex;justify-content:flex-start}
+  .app-frame{position:relative;flex:0 0 auto;margin:0 auto;
+    width:calc(1072px * var(--scale));height:calc(724px * var(--scale))}
+  .app{position:absolute;left:0;top:0;width:1072px;height:724px;overflow:hidden;
+    background:
+      radial-gradient(900px 420px at 80% -16%,rgba(120,167,255,.07),transparent 62%),
+      radial-gradient(720px 380px at 4% 110%,rgba(74,222,128,.03),transparent 58%),
+      var(--bg);
+    border:1px solid rgba(255,255,255,.06);border-radius:16px;
+    box-shadow:0 34px 90px rgba(0,0,0,.55);
+    transform:scale(var(--scale));transform-origin:top left}
+  .app.compact{--card-h:404px}
+
+  /* ---------------- sidebar ---------------- */
+  .sidebar{position:absolute;left:0;top:0;bottom:0;width:160px;background:rgba(9,14,21,.9);
+    border-right:1px solid rgba(255,255,255,.05);padding:18px 14px}
+  .logo{display:flex;align-items:center;gap:10px;margin-bottom:26px}
+  .logo-mark{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;
+    background:linear-gradient(140deg,#5b8dff,#6d7cff);box-shadow:0 8px 22px rgba(91,141,255,.25)}
+  .logo-mark svg{width:20px;height:20px;color:#fff}
+  .logo-text b{display:block;font-size:15px;letter-spacing:.4px;color:#eaf3fd}
+  .logo-text span{display:block;font-size:8px;letter-spacing:1.5px;color:#52667b;margin-top:2px;white-space:nowrap}
+  .nav{display:flex;flex-direction:column;gap:3px}
+  .nav-item{display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:9px;
+    color:#8fa3b7;font-size:12px;white-space:nowrap}
+  .nav-item svg{width:16px;height:16px;flex:none;opacity:.9}
+  .nav-item.active{background:linear-gradient(90deg,rgba(120,167,255,.16),rgba(120,167,255,.04));
+    color:#dceaff;box-shadow:inset 2px 0 0 rgba(120,167,255,.75)}
+  .side-bottom{position:absolute;left:14px;right:14px;bottom:14px}
+  .theme-label{font-size:9px;color:#52667b;margin-bottom:7px}
+  .theme-dots{display:flex;flex-wrap:wrap;gap:6px;width:120px}
+  .theme-dot{width:14px;height:14px;border-radius:50%;border:2px solid transparent}
+  .theme-dot.active{box-shadow:0 0 0 2px #0a1017,0 0 0 3px rgba(140,180,255,.6)}
+  .shortcuts{margin-top:12px;font-size:9px;line-height:1.75;color:#6c8094}
+  .shortcuts b{color:#9fb4c8;font-weight:500}
+  .version{margin-top:10px;display:flex;align-items:center;gap:6px;font-size:10px;color:#6c8094}
+  .version i{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;
+    box-shadow:0 0 8px rgba(74,222,128,.5)}
+
+  /* ---------------- header ---------------- */
+  .main{position:absolute;left:160px;top:0;right:0;bottom:0;padding:20px 40px 0}
+  .crumb{font-size:10px;color:#667a8e;letter-spacing:.4px}
+  .title-row{display:flex;align-items:center;gap:13px;height:42px;margin-top:8px}
+  h1{margin:0;font-size:28px;line-height:1;font-weight:700;letter-spacing:.2px;white-space:nowrap;color:#f2f8ff}
+  .sample-pill{height:28px;padding:0 13px;display:flex;align-items:center;gap:8px;
+    border:1px solid rgba(255,255,255,.06);border-radius:999px;background:rgba(255,255,255,.025);
+    color:#a9bccf;font-size:10px;white-space:nowrap}
+  .sample-pill i{width:5px;height:5px;border-radius:50%;background:var(--blue);
+    box-shadow:0 0 8px rgba(120,167,255,.6)}
+  .subview{display:flex;gap:7px;margin-left:34px}
+  .sub-chip{height:28px;padding:0 16px;border-radius:8px;border:1px solid rgba(255,255,255,.06);
+    background:rgba(255,255,255,.025);color:#9fb3c7;font-size:10px;display:flex;align-items:center;gap:7px;white-space:nowrap}
+  .sub-chip:hover{background:rgba(255,255,255,.05);color:#d8e6f4}
+  .sub-chip.active{background:var(--blue-soft);border-color:var(--blue-line);color:#dcebff}
+  .sub-chip:focus-visible,.pill:focus-visible,.text-btn:focus-visible,.icon-btn:focus-visible,
+  .btn-primary:focus-visible,.btn-ghost:focus-visible,.btn-danger:focus-visible{outline:2px solid rgba(140,180,255,.7);outline-offset:2px}
+  .clock{margin-left:auto;height:40px;padding:0 15px;border:1px solid rgba(255,255,255,.05);
+    border-radius:12px;background:rgba(255,255,255,.02);display:flex;align-items:center;gap:9px;
+    font-size:10px;color:#9fb2c6;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .clock i{width:6px;height:6px;border-radius:50%;background:var(--green);
+    box-shadow:0 0 9px rgba(74,222,128,.55)}
+  .subtitle{margin-top:7px;font-size:11px;color:#71859a}
+
+  /* ---------------- cards ---------------- */
+  .cards{display:grid;grid-template-columns:408px 408px;gap:16px;margin-top:22px}
+  .card{position:relative;display:flex;flex-direction:column;height:var(--card-h);padding:20px;
+    border-radius:16px;background:linear-gradient(180deg,rgba(23,32,44,.9),rgba(11,17,25,.94));
+    border:1px solid var(--line);box-shadow:0 24px 60px rgba(0,0,0,.26);overflow:hidden}
+  .card:before{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+    background:radial-gradient(520px 180px at 84% -18%,rgba(120,167,255,.055),transparent 70%)}
+  .card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;min-height:42px;position:relative;z-index:2}
+  .head-main{min-width:0}
+  .eyebrow{font-size:9px;font-weight:600;letter-spacing:.12em;color:#63778b;text-transform:uppercase}
+  .device-name{font-size:18px;font-weight:600;letter-spacing:.01em;color:#edf5fd;margin-top:3px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:268px}
+  .card-actions{display:flex;align-items:center;gap:2px;flex:none;margin-top:1px}
+  .type-tag{display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:6px;
+    background:rgba(255,255,255,.035);color:#8fa5bb;font-size:9px;font-weight:500;letter-spacing:.02em}
+  .text-btn{border:0;background:transparent;color:#8095a9;font-size:10px;padding:5px 6px;border-radius:6px;
+    display:inline-flex;align-items:center;gap:4px;transition:background .15s,color .15s}
+  .text-btn:hover{color:#e2eef9;background:rgba(255,255,255,.04)}
+  .text-btn svg{width:11px;height:11px}
+  .icon-btn{width:24px;height:24px;border:0;background:transparent;color:#8095a9;border-radius:6px;
+    font-size:14px;line-height:1;display:inline-grid;place-items:center}
+  .icon-btn:hover{color:#e2eef9;background:rgba(255,255,255,.04)}
+
+  .device-pills{display:flex;align-items:center;gap:5px;margin-top:14px;position:relative;z-index:6}
+  .pill{height:26px;padding:0 9px;border-radius:999px;border:1px solid rgba(255,255,255,.055);
+    background:rgba(255,255,255,.022);color:#8fa3b8;font-size:10px;display:inline-flex;align-items:center;
+    gap:5px;flex:0 0 auto;max-width:126px;min-width:0;white-space:nowrap;transition:background .15s,border-color .15s,color .15s}
+  .pill:hover{background:rgba(255,255,255,.05);color:#d2e2f1}
+  .pill.active{background:var(--blue-soft);border-color:var(--blue-line);color:#d9e9ff}
+  .pill svg{width:11px;height:11px;flex:none;opacity:.85}
+  .pill .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;max-width:96px}
+  .pill[data-mouse="all"] .name,.pill[data-kbd="all"] .name{max-width:none}
+  .pill.more{padding:0 8px;color:#7e93a7}
+  .status{width:5px;height:5px;border-radius:50%;flex:none;background:var(--green);
+    box-shadow:0 0 8px rgba(74,222,128,.55)}
+  .status.orange{background:var(--orange);box-shadow:0 0 8px rgba(248,193,92,.55)}
+  .status.red{background:var(--red);box-shadow:0 0 8px rgba(248,113,113,.55)}
+  .more-menu{position:absolute;right:0;top:32px;z-index:40;width:270px;padding:6px;
+    background:rgba(17,25,35,.98);border:1px solid rgba(255,255,255,.08);border-radius:11px;
+    box-shadow:0 24px 54px rgba(0,0,0,.55);display:none;backdrop-filter:blur(18px)}
+  .more-menu.show{display:block}
+  .more-title{font-size:9px;color:#60758a;padding:5px 8px 7px;letter-spacing:.06em}
+  .more-item{display:grid;grid-template-columns:14px 1fr auto auto;gap:7px;align-items:center;
+    width:100%;padding:7px 8px;border:0;border-radius:6px;background:transparent;color:#b7c8d9;
+    font-size:10px;text-align:left}
+  .more-item:hover,.more-item.active{background:rgba(120,167,255,.10);color:#e9f4ff}
+  .more-item svg{width:12px;height:12px;color:#7e93a7}
+  .more-item .mi-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .more-item .mi-type{font-size:8px;color:#6d8195}
+  .more-item .mi-pct{font-size:9px;color:#8fa4b8;font-variant-numeric:tabular-nums}
+
+  /* read-first hero */
+  .hero{margin-top:24px}
+  .hero-label{font-size:9px;font-weight:600;letter-spacing:.1em;color:#63778b;text-transform:uppercase}
+  .hero-line{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-top:9px}
+  .keycap{display:inline-flex;align-items:center;justify-content:center;height:26px;padding:0 9px;
+    border-radius:6px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);
+    color:#d6e4f2;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px}
+  .keycap.lg{height:38px;padding:0 14px;font-size:17px;font-weight:600;color:#e4efff;
+    background:rgba(120,167,255,.10);border-color:rgba(120,167,255,.25)}
+  .hero-value{font-size:38px;line-height:.9;font-weight:700;letter-spacing:-.035em;color:#f3f9ff}
+  .hero-value.warn{color:var(--orange)}
+  .hero-value.danger{color:var(--red)}
+  .hero-value .pct-sign,.metric-value .pct-sign{font-size:15px;font-weight:500;color:#8095a9;
+    margin-left:2px;letter-spacing:0;vertical-align:2px}
+  .track{height:6px;border-radius:999px;background:rgba(255,255,255,.055);overflow:hidden;margin-top:12px}
+  .track i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#2fbf71,#5ee6a0);
+    box-shadow:0 0 12px rgba(74,222,128,.16)}
+  .track i.orange{background:linear-gradient(90deg,#d99a1b,#ffc857);box-shadow:0 0 12px rgba(248,193,92,.16)}
+  .track i.red{background:linear-gradient(90deg,#d94f4f,#ff8b8b);box-shadow:0 0 12px rgba(248,113,113,.18)}
+  .track i.blue{background:linear-gradient(90deg,#4d7fd6,#8bb8ff);box-shadow:none}
+  .hero-sub{display:flex;justify-content:space-between;gap:10px;margin-top:8px;font-size:9px;color:#6d8195}
+
+  /* keyboard list */
+  .list{display:flex;flex-direction:column;flex:1;min-height:0;margin-top:23px}
+  .list-head{display:flex;justify-content:space-between;font-size:9px;color:#60758a;letter-spacing:.04em;margin-bottom:7px;flex:none}
+  .list-row{display:grid;grid-template-columns:68px 1fr 50px 40px;gap:9px;align-items:center;
+    flex:1;min-height:37px}
+  .list-row .keycap{height:24px;font-size:9px;max-width:68px}
+  .list-row .track{height:4px;margin:0}
+  .list-row .count{font-size:9px;color:#7e93a7;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .list-row .pct{font-size:9px;color:#7e93a7;text-align:right;font-variant-numeric:tabular-nums}
+  .agg-row{display:grid;grid-template-columns:104px 62px 1fr 40px;gap:8px;align-items:center;flex:1;min-height:37px}
+  .agg-row .aname{font-size:9px;color:#8fa4b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .agg-row .keycap{height:24px;font-size:9px;max-width:62px}
+  .agg-row .track{height:4px;margin:0}
+  .agg-row .pct{font-size:9px;color:#7e93a7;text-align:right;font-variant-numeric:tabular-nums}
+
+  /* mouse hero + spark */
+  .metric-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:25px}
+  .metric-label{font-size:9px;font-weight:600;letter-spacing:.1em;color:#63778b;text-transform:uppercase}
+  .metric-value{font-size:36px;line-height:.95;font-weight:700;letter-spacing:-.035em;color:#f3f9ff;margin-top:7px}
+  .metric-value.warn{color:var(--orange)}
+  .metric-value.danger{color:var(--red)}
+  .metric .track{margin-top:11px}
+  .metric-sub{font-size:8.5px;color:#6d8195;margin-top:7px;font-variant-numeric:tabular-nums}
+  .status-line{display:flex;align-items:center;gap:8px;margin-top:17px;min-height:20px;flex-wrap:wrap}
+  .status-pill{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;
+    font-size:9px;background:rgba(248,193,92,.07);color:#eac36b;border:1px solid rgba(248,193,92,.14)}
+  .status-pill.good{background:rgba(74,222,128,.05);color:#79dda2;border-color:rgba(74,222,128,.12)}
+  .status-pill.bad{background:rgba(248,113,113,.07);color:#f3a0a0;border-color:rgba(248,113,113,.16)}
+  .status-pill i{width:5px;height:5px;border-radius:50%;background:currentColor;display:inline-block}
+  .mini-stats{display:flex;gap:17px;margin-top:13px;font-size:9px;color:#6d8195;flex-wrap:wrap}
+  .mini-stats b{font-size:10px;color:#b9cbdc;font-weight:600;margin-left:3px}
+  .spark{margin-top:auto;padding-top:16px;border-top:1px solid rgba(255,255,255,.04)}
+  .spark-head{display:flex;justify-content:space-between;font-size:9px;color:#60758a;margin-bottom:8px}
+  .spark-head b{font-weight:500;color:#8fa4b8}
+  .spark-bars{display:flex;align-items:flex-end;gap:6px;height:56px}
+  .spark-bars i{flex:1;border-radius:4px 4px 2px 2px;background:rgba(120,167,255,.16);min-height:3px}
+  .spark-bars i:last-child{background:rgba(120,167,255,.55);box-shadow:0 0 14px rgba(120,167,255,.18)}
+  .contrib{margin-top:auto;padding-top:16px;border-top:1px solid rgba(255,255,255,.04)}
+  .contrib-head{font-size:9px;color:#60758a;letter-spacing:.04em;margin-bottom:9px}
+  .contrib-row{display:grid;grid-template-columns:1fr 92px 56px;gap:9px;align-items:center;height:26px;font-size:9px;color:#8fa4b8}
+  .contrib-row .cname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .contrib-row .track{height:4px;margin:0}
+  .contrib-row .cval{text-align:right;font-variant-numeric:tabular-nums;color:#7e93a7}
+
+  .card-meta{margin-top:auto;padding-top:12px;display:flex;align-items:center;gap:9px;flex-wrap:wrap;
+    font-size:9px;color:#586d82;font-variant-numeric:tabular-nums}
+  .kbd-card .card-meta{border-top:1px solid rgba(255,255,255,.04)}
+  .card-meta b{font-weight:500;color:#7e93a7}
+
+  /* popovers */
+  .pop,.info-pop,.card-menu{position:absolute;z-index:50;background:rgba(16,24,34,.98);
+    border:1px solid rgba(255,255,255,.08);border-radius:12px;box-shadow:0 26px 60px rgba(0,0,0,.55);
+    backdrop-filter:blur(18px)}
+  .pop{top:50px;right:16px;width:304px;padding:15px}
+  .pop-title{font-size:11px;font-weight:600;color:#dce9f6;margin-bottom:12px}
+  .pop-field{display:flex;flex-direction:column;gap:5px;margin-bottom:10px}
+  .pop-field span{font-size:9px;color:#6d8195;letter-spacing:.03em}
+  .pop-input{height:30px;border-radius:7px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);
+    color:#e8f2fc;font-size:11px;padding:0 9px;outline:none;min-width:0}
+  .pop-input:focus{border-color:rgba(120,167,255,.5);box-shadow:0 0 0 3px rgba(120,167,255,.10)}
+  .pop-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .pop-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:3px}
+  .btn-primary,.btn-ghost,.btn-danger{height:28px;padding:0 12px;border-radius:7px;font-size:10px;
+    border:1px solid transparent;display:inline-flex;align-items:center;justify-content:center;gap:5px}
+  .btn-primary{background:rgba(120,167,255,.16);color:#d8e8ff;border-color:rgba(120,167,255,.22)}
+  .btn-primary:hover{background:rgba(120,167,255,.24)}
+  .btn-ghost{background:transparent;color:#8095a9}
+  .btn-ghost:hover{background:rgba(255,255,255,.04);color:#dce8f5}
+  .btn-danger{background:rgba(248,113,113,.10);color:#f3b0b0;border-color:rgba(248,113,113,.18)}
+  .btn-danger:hover{background:rgba(248,113,113,.17)}
+  .card-menu{top:48px;right:14px;width:184px;padding:5px}
+  .menu-item{width:100%;padding:8px 9px;border:0;border-radius:6px;background:transparent;
+    color:#a8bacd;font-size:10px;text-align:left;display:flex;align-items:center;gap:8px}
+  .menu-item:hover{background:rgba(255,255,255,.045);color:#e9f3fd}
+  .menu-item.danger{color:#dca3a3}
+  .menu-item.danger:hover{background:rgba(248,113,113,.07);color:#f5bcbc}
+  .menu-item svg{width:12px;height:12px;opacity:.8}
+  .info-pop{top:48px;right:14px;width:330px;padding:14px}
+  .info-name{font-size:11px;color:#dce9f6;margin-bottom:6px}
+  .info-path{font-family:Consolas,"Cascadia Mono",monospace;font-size:9px;line-height:1.65;color:#7e93a7;
+    word-break:break-all;background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.05);
+    border-radius:7px;padding:8px}
+  .info-actions{display:flex;justify-content:flex-end;margin-top:10px}
+
+  .reset-bar{position:absolute;left:16px;right:16px;bottom:16px;z-index:45;display:flex;align-items:center;gap:9px;
+    padding:10px 12px;border-radius:10px;background:rgba(28,23,18,.97);border:1px solid rgba(248,193,92,.16);
+    box-shadow:0 18px 40px rgba(0,0,0,.45);font-size:9.5px;color:#d8c8ab}
+  .reset-bar span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .reset-bar .btn-ghost{height:24px;padding:0 8px}
+  .reset-bar .btn-danger{height:24px;padding:0 9px}
+  .reset-line{margin-top:9px;font-size:9px;color:#7e93a7;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+  /* stats subview */
+  .stats-card{grid-column:1 / span 2;height:var(--card-h);padding:22px 24px;border-radius:16px;
+    background:linear-gradient(180deg,rgba(23,32,44,.9),rgba(11,17,25,.94));
+    border:1px solid var(--line);box-shadow:0 24px 60px rgba(0,0,0,.26)}
+  .stats-title{font-size:18px;font-weight:600;color:#edf5fd;margin-bottom:3px}
+  .stats-sub{font-size:10px;color:#6d8195;margin-bottom:18px}
+  .stats-head,.stats-row{display:grid;grid-template-columns:34px 130px 96px 70px 1fr;gap:11px;align-items:center}
+  .stats-head{height:24px;font-size:9px;color:#60758a;border-bottom:1px solid rgba(255,255,255,.05)}
+  .stats-row{height:44px;border-bottom:1px solid rgba(255,255,255,.035);font-size:10px;color:#b9cbdc}
+  .stats-row:last-child{border-bottom:0}
+  .stats-rank{color:#5f7489;font-variant-numeric:tabular-nums}
+  .stats-key{display:flex;align-items:center;gap:8px;min-width:0}
+  .stats-key .keycap{width:82px;flex:none}
+  .stats-count{text-align:right;font-variant-numeric:tabular-nums;color:#9fb3c7}
+  .stats-share{text-align:right;font-variant-numeric:tabular-nums;color:#7e93a7}
+  .stats-bar{height:6px;border-radius:999px;background:rgba(255,255,255,.055);overflow:hidden}
+  .stats-bar i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#5b8dff,#8bb8ff)}
+
+  .footer{position:absolute;left:40px;right:40px;bottom:12px;height:42px;
+    border-top:1px solid rgba(255,255,255,.05);display:flex;align-items:center;justify-content:space-between;
+    padding-top:8px;font-size:9px;color:#667a8e}
+  .footer .left{display:flex;align-items:center;gap:8px}
+  .footer .left i{width:5px;height:5px;border-radius:50%;background:var(--green)}
+  .export{height:30px;padding:0 15px;border:0;border-radius:8px;background:var(--blue-soft);color:#d8e8ff;
+    font-size:10px;display:flex;align-items:center;gap:7px;border:1px solid var(--blue-line)}
+  .export:hover{background:rgba(120,167,255,.22)}
+  .win-controls{position:absolute;right:13px;top:12px;display:flex;gap:12px;color:#72879b}
+  .win-controls button{width:16px;height:16px;padding:0;border:0;background:transparent;color:inherit;display:grid;place-items:center}
+  .win-controls button:hover{color:#dce8f5}
+  .win-controls svg{width:12px;height:12px}
+
+  .toast{position:absolute;left:50%;bottom:58px;transform:translate(-50%,8px);z-index:70;
+    padding:8px 14px;border:1px solid rgba(255,255,255,.08);border-radius:999px;background:rgba(22,32,44,.98);
+    color:#d8e7f7;font-size:10px;box-shadow:0 18px 40px rgba(0,0,0,.5);opacity:0;pointer-events:none;
+    transition:opacity .18s ease,transform .18s ease;white-space:nowrap}
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+
+  /* compact */
+  .app.compact .card{padding:16px}
+  .app.compact .device-name{font-size:16px;max-width:238px}
+  .app.compact .device-pills{margin-top:10px}
+  .app.compact .hero{margin-top:17px}
+  .app.compact .hero-value{font-size:30px}
+  .app.compact .keycap.lg{height:32px;font-size:14px}
+  .app.compact .metric-grid{margin-top:17px}
+  .app.compact .metric-value{font-size:29px}
+  .app.compact .list{margin-top:15px}
+  .app.compact .list-row{min-height:32px}
+  .app.compact .spark{padding-top:12px}
+  .app.compact .spark-bars{height:34px}
+  .app.compact .card-meta{padding-top:9px}
+  .app.compact .status-line{margin-top:11px}
+  .app.compact .mini-stats{margin-top:9px}
+  .app.compact .pop{top:44px;width:288px;padding:13px}
+  .app.compact .card-menu,.app.compact .info-pop{top:42px}
+
+  /* review notes */
+  .notes{max-width:1180px;margin:12px auto 60px;padding:0 24px}
+  .notes-head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;
+    border-top:1px solid rgba(255,255,255,.05);padding-top:24px;margin-bottom:16px}
+  .notes-head h2{font-size:18px;margin:0;font-weight:600;letter-spacing:.2px;color:#edf5fd}
+  .notes-head p{margin:4px 0 0;font-size:10px;color:#71859a}
+  .notes-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .note-card{padding:15px;border:1px solid rgba(255,255,255,.055);border-radius:11px;
+    background:linear-gradient(180deg,rgba(19,27,38,.8),rgba(10,16,23,.9))}
+  .note-num{width:20px;height:20px;border-radius:6px;background:rgba(120,167,255,.10);color:#9fc2f0;
+    display:grid;place-items:center;font-size:10px;font-weight:600;margin-bottom:9px}
+  .note-card h3{margin:0 0 5px;font-size:12px;font-weight:600;color:#d6e4f2}
+  .note-card p{margin:0;font-size:10px;line-height:1.7;color:#7e93a7}
+  .review-list{margin:16px 0 0;padding:13px 16px;border:1px dashed rgba(255,255,255,.08);border-radius:10px;
+    font-size:10px;line-height:1.8;color:#8095a9}
+  .review-list b{color:#b9cbdc;font-weight:600}
+  @media (max-width:1100px){.notes-grid{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:680px){.notes-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <div class="brand">外设健康 <span>· 现代数据面板原型</span></div>
+  <div class="spacer"></div>
+  <div class="seg" id="scaleSeg">
+    <button data-scale="1" class="active">100%</button>
+    <button data-scale="1.5">150%</button>
+    <button data-scale="1.75">175%</button>
+  </div>
+  <label><input type="checkbox" id="compactToggle"> 紧凑高度（模拟短窗口）</label>
+  <button class="demo" id="resetDemo">恢复示例数据</button>
+</div>
+
+<div class="stage">
+  <div class="app-frame">
+    <div class="app" id="app">
+      <aside class="sidebar">
+        <div class="logo">
+          <div class="logo-mark">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/>
+              <rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>
+            </svg>
+          </div>
+          <div class="logo-text"><b>键鼠统计</b><span>ACTIVITY MONITOR</span></div>
+        </div>
+        <nav class="nav">
+          <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>总览</div>
+          <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 17l5-5 4 3 7-8"/><path d="M15 7h4v4"/></svg>趋势</div>
+          <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg>时段分布</div>
+          <div class="nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 7h10M4 12h16M4 17h7"/><circle cx="18" cy="7" r="1.6"/><circle cx="14" cy="17" r="1.6"/></svg>按键排行</div>
+          <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 8.5h17"/></svg>应用统计</div>
+          <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8.5"/><path d="M8 14c1.5 1.4 6.5 1.4 8 0M9 9.5h.01M15 9.5h.01"/></svg>使用洞察</div>
+          <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h5"/></svg>字符内容</div>
+          <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/></svg>日报</div>
+          <div class="nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M7 15l3-3 2 2 3-4 2 2"/></svg>点击热区</div>
+        </nav>
+        <div class="side-bottom">
+          <div class="theme-label">外观 · 午夜蓝</div>
+          <div class="theme-dots">
+            <span class="theme-dot active" style="background:#5b8dff"></span>
+            <span class="theme-dot" style="background:#b26bff"></span>
+            <span class="theme-dot" style="background:#35c9c1"></span>
+            <span class="theme-dot" style="background:#f0a85a"></span>
+            <span class="theme-dot" style="background:#f26d7d"></span>
+            <span class="theme-dot" style="background:#79d46a"></span>
+            <span class="theme-dot" style="background:#d7a7ff"></span>
+            <span class="theme-dot" style="background:#6ec6ff"></span>
+            <span class="theme-dot" style="background:#ffd166"></span>
+            <span class="theme-dot" style="background:#ff8f70"></span>
+            <span class="theme-dot" style="background:#8ff0c8"></span>
+            <span class="theme-dot" style="background:#c9d3df"></span>
+            <span class="theme-dot" style="background:#8a9bb0"></span>
+          </div>
+          <div class="shortcuts"><b>1–9 / ←→</b> 切换页面<br><b>Tab</b> 选中筛选项<br><b>Ctrl+C</b> 复制明细<br><b>Esc</b> 返回 / 关闭</div>
+          <div class="version"><i></i> 3.2.2 · 本地记录 365 天</div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <div class="crumb">工作空间 / 按键排行</div>
+        <div class="title-row">
+          <h1>按键排行</h1>
+          <div class="sample-pill"><i></i>今日 · 累积中</div>
+          <div class="subview">
+            <button class="sub-chip" data-subview="stats">按键统计</button>
+            <button class="sub-chip active" data-subview="health"><span id="healthDot" class="status orange" style="width:5px;height:5px;border-radius:50%;display:inline-block"></span>外设健康</button>
+          </div>
+          <div class="clock"><i></i><span id="clockText">2026.11.22 17:20:00</span></div>
+        </div>
+        <div class="subtitle">从常用按键中，发现你的操作习惯。</div>
+
+        <div id="healthView">
+          <div class="cards">
+            <section class="card kbd-card" id="kbdCard"></section>
+            <section class="card mouse-card" id="mouseCard"></section>
+          </div>
+        </div>
+
+        <div id="statsView" style="display:none">
+          <section class="stats-card" id="statsCard" style="margin-top:22px"></section>
+        </div>
+
+        <div class="footer">
+          <div class="left"><i></i><span>本地数据已自动保存 · 示例原型</span></div>
+          <button class="export">↓ 导出 CSV</button>
+        </div>
+      </main>
+
+      <div class="win-controls">
+        <button title="最大化"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="2" y="2" width="8" height="8"/></svg></button>
+        <button title="关闭"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>
+      </div>
+      <div class="toast" id="toast"></div>
+    </div>
+  </div>
+</div>
+
+<section class="notes">
+  <div class="notes-head">
+    <div><h2>这版为什么更像“数据面板”</h2><p>默认只读：设备名和大数字是主角，编辑/换新/设备信息全部按需展开；轨道、胶囊、键帽改成低透明度层次。</p></div>
+    <div style="font-size:10px;color:#5f7489;text-align:right;line-height:1.7">点「编辑」看输入浮层；点「···」看换新/设备信息<br>100/150/175% 与紧凑高度可切换</div>
+  </div>
+  <div class="notes-grid">
+    <div class="note-card"><div class="note-num">01</div><h3>默认只读，不再摊开表单</h3><p>卡片平时只展示设备名、最高磨损键/左右微动和一条细轨道。编辑别名、额定寿命才打开轻量浮层，换新和设备信息收进「···」。</p></div>
+    <div class="note-card"><div class="note-num">02</div><h3>控件软化</h3><p>不再使用灰底输入框+亮边按钮。输入只在浮层出现；胶囊、键帽、按钮、轨道统一为低透明度底色 + 极淡描边，减少“硬塑料块”感。</p></div>
+    <div class="note-card"><div class="note-num">03</div><h3>信息分层</h3><p>默认只留主角数字；起始日期、额定寿命、中/侧键计数降为弱化小字。HID 路径移入「设备信息」，预警收敛成单个状态胶囊。</p></div>
+    <div class="note-card"><div class="note-num">04</div><h3>数字排版</h3><p>大数字用 36–38px / 700 字重 / tabular-nums，百分比符号缩小；标题用 Segoe UI Variable 与雅黑 UI，减少松散字距。</p></div>
+  </div>
+  <div class="review-list">
+    <b>想请你重点看：</b>1）键盘用「最高磨损键」做主角，鼠标用左右两个大数字，这种主视觉是否成立；2）编辑浮层是否比常驻表单更舒服；3）「···」菜单收纳换新/设备信息是否够好找；4）7 天火花线是加分还是多余；5）紧凑模式下是否还保留足够呼吸感。
+    <br><span style="color:#5f7489">实现映射不变：键盘/鼠标多档案、RawInput 设备路由、legacy 归并、主设备镜像旧格式；这次先定视觉与交互。</span>
+  </div>
+</section>
+
+<script>
+(function(){
+  "use strict";
+
+  var $ = function(sel, root){ return (root || document).querySelector(sel); };
+  var $$ = function(sel, root){ return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
+  var esc = function(s){
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];
+    });
+  };
+  var fmt = function(n){
+    n = Number(n) || 0;
+    if (n >= 100000000) return (n / 100000000).toFixed(2).replace(/\.?0+$/, "") + " 亿";
+    if (n >= 10000) return (n / 10000).toFixed(1).replace(/\.0$/, "") + " 万";
+    return String(Math.round(n));
+  };
+  var pctNum = function(r){ return (Math.max(0, Math.min(9.999, Number(r) || 0)) * 100).toFixed(1); };
+  var pct = function(r){ return pctNum(r) + "%"; };
+  var wearClass = function(r){ return r >= 1 ? "red" : r >= 0.8 ? "orange" : "green"; };
+  var valueClass = function(r){ return r >= 1 ? "danger" : r >= 0.8 ? "warn" : ""; };
+  var ratio = function(count, rated){ return rated > 0 ? (Number(count) || 0) / rated : 0; };
+  var clampWidth = function(r){ return Math.min(100, Math.max(0, r * 100)).toFixed(2); };
+
+  var svgKeyboard = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 9h.01M9 9h.01M12 9h.01M15 9h.01M18 9h.01M7 12h.01M10 12h.01M13 12h.01M16 12h.01M8 16h8"/></svg>';
+  var svgMouse = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="6" y="2.5" width="12" height="19" rx="6"/><path d="M12 2.5v6"/></svg>';
+  var svgTouch = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M8 15l2.5-3 2 2 2-2.5 2 3"/></svg>';
+  var svgLegacy = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v18M5 8l7-5 7 5M5 16l7 5 7-5"/></svg>';
+  var svgPencil = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 20l4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20z"/></svg>';
+  var svgReset = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v5h5"/></svg>';
+
+  var initialMice = [
+    {id:"home", name:"家里 · MX Master 3S", type:"external", friendly:"Logitech MX Master 3S",
+     path:"HID\\VID_046D&PID_B034\\7&2A1C3D4E&0&0000", left:54200000, right:65600000,
+     middle:812000, x:96000, ratedL:80000000, ratedR:80000000, since:"2024-03-12",
+     days:[42,58,51,73,69,84,61]},
+    {id:"office", name:"公司 · G304", type:"external", friendly:"Logitech G304",
+     path:"HID\\VID_046D&PID_C53F\\6&1B2C3D4E&0&0000", left:22400000, right:18100000,
+     middle:210000, x:12000, ratedL:50000000, ratedR:50000000, since:"2025-01-08",
+     days:[28,31,26,39,34,41,30]},
+    {id:"touchpad", name:"笔记本触控板", type:"builtin", friendly:"Precision Touchpad",
+     path:"HID\\VID_06CB&PID_CE44\\5&3A2B1C0D&0&0000", left:6800000, right:2100000,
+     middle:0, x:0, ratedL:20000000, ratedR:20000000, since:"2025-09-20",
+     days:[9,12,8,15,11,14,10]},
+    {id:"legacy", name:"旧版鼠标（升级前）", type:"legacy", friendly:"升级前单鼠标累计",
+     path:"旧版档案（无硬件路径）", left:12600000, right:9400000, middle:180000, x:8000,
+     ratedL:80000000, ratedR:80000000, since:"2024-01-01", days:[0,0,0,0,0,0,0]}
+  ];
+
+  var initialKeyboards = [
+    {id:"builtin", name:"笔记本内置键盘", type:"builtin", friendly:"笔记本内置键盘",
+     path:"ACPI\\PNP0303\\4&2A1B3C4D&0&0000", rated:50000000, since:"2025-01-01",
+     keys:[{n:"Space",k:"Space",c:18600000},{n:"Enter",k:"↵ Enter",c:11200000},
+           {n:"Bksp",k:"⌫ Bksp",c:7400000},{n:"A",k:"A",c:5100000},{n:"S",k:"S",c:3200000}]},
+    {id:"home", name:"家里 · MX Keys", type:"external", friendly:"Logitech MX Keys",
+     path:"HID\\VID_046D&PID_B35B\\8&2C3D4E5F&0&0000", rated:50000000, since:"2024-03-12",
+     keys:[{n:"Space",k:"Space",c:11800000},{n:"Enter",k:"↵ Enter",c:6400000},
+           {n:"Bksp",k:"⌫ Bksp",c:5100000},{n:"E",k:"E",c:4300000},{n:"A",k:"A",c:3900000}]},
+    {id:"office", name:"公司 · G913", type:"external", friendly:"Logitech G913",
+     path:"HID\\VID_046D&PID_C33E\\9&3D4E5F60&0&0000", rated:50000000, since:"2025-01-08",
+     keys:[{n:"Space",k:"Space",c:8200000},{n:"Enter",k:"↵ Enter",c:4100000},
+           {n:"Bksp",k:"⌫ Bksp",c:2800000},{n:"A",k:"A",c:2400000},{n:"S",k:"S",c:1900000}]},
+    {id:"legacy", name:"旧版单键盘", type:"legacy", friendly:"升级前单键盘累计",
+     path:"旧版档案（无硬件路径）", rated:50000000, since:"2024-01-01",
+     keys:[{n:"Space",k:"Space",c:5600000},{n:"Enter",k:"↵ Enter",c:3200000},
+           {n:"Bksp",k:"⌫ Bksp",c:2100000},{n:"A",k:"A",c:1800000},{n:"S",k:"S",c:1200000}]}
+  ];
+
+  var state = {
+    scale: 1, compact: false, subview: "health",
+    mouseId: "home", keyboardId: "builtin",
+    mice: JSON.parse(JSON.stringify(initialMice)),
+    keyboards: JSON.parse(JSON.stringify(initialKeyboards)),
+    moreOpen: false, kbdMoreOpen: false,
+    editTarget: null, infoTarget: null, actionMenu: null, confirmReset: null
+  };
+
+  var app = $("#app");
+  var kbdCard = $("#kbdCard");
+  var mouseCard = $("#mouseCard");
+  var statsCard = $("#statsCard");
+
+  function realMice(){ return state.mice.filter(function(m){ return m.id !== "all"; }); }
+  function findMouse(id){ return state.mice.filter(function(m){ return m.id === id; })[0] || null; }
+  function mouseWorst(m){ return Math.max(ratio(m.left, m.ratedL), ratio(m.right, m.ratedR)); }
+  function mouseSideWorst(side, list){
+    var best = null, max = 0;
+    list.forEach(function(m){
+      var count = side === "left" ? m.left : m.right;
+      var rated = side === "left" ? m.ratedL : m.ratedR;
+      var r = ratio(count, rated);
+      if (best == null || r > max) { max = r; best = {mouse:m, count:count, rated:rated, ratio:r}; }
+    });
+    return best || {mouse:null, count:0, rated:0, ratio:0};
+  }
+  function aggregateMouse(){
+    var list = realMice();
+    var out = {id:"all", name:"全部鼠标", type:"aggregate", friendly:"聚合视图", path:"",
+      left:0,right:0,middle:0,x:0,ratedL:0,ratedR:0,since:"—", days:[0,0,0,0,0,0,0]};
+    list.forEach(function(m){
+      out.left += m.left; out.right += m.right; out.middle += m.middle; out.x += m.x;
+      out.ratedL += m.ratedL; out.ratedR += m.ratedR;
+      m.days.forEach(function(v, i){ out.days[i] += v; });
+    });
+    out.worstLeft = mouseSideWorst("left", list);
+    out.worstRight = mouseSideWorst("right", list);
+    out.worst = Math.max(out.worstLeft.ratio, out.worstRight.ratio);
+    return out;
+  }
+  function currentMouse(){ return state.mouseId === "all" ? aggregateMouse() : findMouse(state.mouseId); }
+  function targetMouse(){
+    var list = realMice().filter(function(m){ return m.type !== "legacy"; });
+    return list[0] || null;
+  }
+
+  function realKeyboards(){ return state.keyboards.filter(function(k){ return k.id !== "all"; }); }
+  function findKeyboard(id){ return state.keyboards.filter(function(k){ return k.id === id; })[0] || null; }
+  function keyboardWorst(k){
+    var worst = 0;
+    k.keys.forEach(function(item){ worst = Math.max(worst, ratio(item.c, k.rated)); });
+    return worst;
+  }
+  function keyboardWorstEntry(k){
+    var item = k.keys[0], max = 0;
+    k.keys.forEach(function(x){
+      var r = ratio(x.c, k.rated);
+      if (r > max) { max = r; item = x; }
+    });
+    return {item:item, ratio:max};
+  }
+  function aggregateKeyboardWorst(){
+    var best = null;
+    realKeyboards().forEach(function(k){
+      var entry = keyboardWorstEntry(k);
+      if (best == null || entry.ratio > best.ratio) {
+        best = {keyboard:k, item:entry.item, ratio:entry.ratio};
+      }
+    });
+    return best;
+  }
+  function aggregateKeyboard(){
+    var list = realKeyboards();
+    var map = {}, order = [];
+    list.forEach(function(k){
+      k.keys.forEach(function(item){
+        if (!map[item.n]) { map[item.n] = {n:item.n,k:item.k,c:0}; order.push(item.n); }
+        map[item.n].c += item.c;
+      });
+    });
+    var keys = order.map(function(n){ return map[n]; }).sort(function(a,b){ return b.c - a.c; }).slice(0,5);
+    return {id:"all", name:"全部键盘", type:"aggregate", friendly:"聚合视图", path:"",
+      rated:list.reduce(function(s,k){ return s + k.rated; },0), since:"—", keys:keys};
+  }
+  function currentKeyboard(){ return state.keyboardId === "all" ? aggregateKeyboard() : findKeyboard(state.keyboardId); }
+  function targetKeyboard(){
+    var list = realKeyboards().filter(function(k){ return k.type !== "legacy"; });
+    return list[0] || null;
+  }
+
+  function shortName(name, list){
+    var text = String(name || "");
+    var parts = text.split(" · ");
+    var short = parts.length > 1 ? parts[0] : text;
+    if (list && list.length) {
+      var same = list.filter(function(x){
+        var p = String(x.name).split(" · ");
+        return (p.length > 1 ? p[0] : String(x.name)) === short;
+      }).length;
+      if (same > 1) short = text;
+    }
+    if (short.length > 9) short = short.slice(0, 8) + "…";
+    return short || "未命名";
+  }
+
+  function iconFor(type){ return type === "builtin" ? svgTouch : type === "legacy" ? svgLegacy : svgMouse; }
+  function typeText(type){ return type === "builtin" ? "内置" : type === "legacy" ? "旧版" : "外接"; }
+
+  function mousePillHtml(m, active, list){
+    return '<button class="pill ' + (active ? "active" : "") + '" data-mouse="' + esc(m.id) + '" title="' + esc(m.name) + '">' +
+      iconFor(m.type) + '<span class="name">' + esc(shortName(m.name, list)) + '</span>' +
+      '<span class="status ' + wearClass(mouseWorst(m)) + '"></span></button>';
+  }
+  function renderMousePills(){
+    var list = realMice();
+    var visible = list.slice(0, 3);
+    if (state.mouseId !== "all") {
+      var sel = findMouse(state.mouseId);
+      if (sel && visible.indexOf(sel) < 0) visible[visible.length - 1] = sel;
+    }
+    visible = visible.filter(Boolean);
+    var html = '<button class="pill ' + (state.mouseId === "all" ? "active" : "") + '" data-mouse="all">' +
+      '<span class="name">全部</span><span class="status ' + wearClass(aggregateMouse().worst) + '"></span></button>';
+    visible.forEach(function(m){ html += mousePillHtml(m, state.mouseId === m.id, list); });
+    if (visible.length < list.length) html += '<button class="pill more" data-more>更多 ▾</button>';
+    var menu = '<div class="more-menu ' + (state.moreOpen ? "show" : "") + '" id="moreMenu"><div class="more-title">全部鼠标 · ' + list.length + ' 个档案</div>';
+    list.forEach(function(m){
+      menu += '<button class="more-item ' + (state.mouseId === m.id ? "active" : "") + '" data-mouse="' + esc(m.id) + '">' +
+        iconFor(m.type) + '<span class="mi-name">' + esc(m.name) + '</span>' +
+        '<span class="mi-type">' + typeText(m.type) + '</span>' +
+        '<span class="mi-pct">' + pct(mouseWorst(m)) + '</span></button>';
+    });
+    return html + menu + '</div>';
+  }
+
+  function keyboardPillHtml(k, active, list){
+    return '<button class="pill ' + (active ? "active" : "") + '" data-kbd="' + esc(k.id) + '" title="' + esc(k.name) + '">' +
+      svgKeyboard + '<span class="name">' + esc(shortName(k.name, list)) + '</span>' +
+      '<span class="status ' + wearClass(keyboardWorst(k)) + '"></span></button>';
+  }
+  function renderKeyboardPills(){
+    var list = realKeyboards();
+    var visible = list.slice(0, 3);
+    if (state.keyboardId !== "all") {
+      var sel = findKeyboard(state.keyboardId);
+      if (sel && visible.indexOf(sel) < 0) visible[visible.length - 1] = sel;
+    }
+    visible = visible.filter(Boolean);
+    var worst = 0;
+    list.forEach(function(k){ worst = Math.max(worst, keyboardWorst(k)); });
+    var html = '<button class="pill ' + (state.keyboardId === "all" ? "active" : "") + '" data-kbd="all">' +
+      '<span class="name">全部</span><span class="status ' + wearClass(worst) + '"></span></button>';
+    visible.forEach(function(k){ html += keyboardPillHtml(k, state.keyboardId === k.id, list); });
+    if (visible.length < list.length) html += '<button class="pill more" data-kbd-more>更多 ▾</button>';
+    var menu = '<div class="more-menu ' + (state.kbdMoreOpen ? "show" : "") + '" id="kbdMoreMenu"><div class="more-title">全部键盘 · ' + list.length + ' 个档案</div>';
+    list.forEach(function(k){
+      menu += '<button class="more-item ' + (state.keyboardId === k.id ? "active" : "") + '" data-kbd="' + esc(k.id) + '">' +
+        svgKeyboard + '<span class="mi-name">' + esc(k.name) + '</span>' +
+        '<span class="mi-type">' + typeText(k.type) + '</span>' +
+        '<span class="mi-pct">' + pct(keyboardWorst(k)) + '</span></button>';
+    });
+    return html + menu + '</div>';
+  }
+
+  function cardTop(kind, item, all, legacy){
+    var isKbd = kind === "keyboard";
+    var count = isKbd ? realKeyboards().length : realMice().length;
+    var eyebrow = (isKbd ? "键盘健康" : "鼠标健康") + " · " + count + " 个档案";
+    var name = all ? (isKbd ? "全部键盘" : "全部鼠标") : item.name;
+    var tag = all ? "聚合" : legacy ? "旧版" : typeText(item.type);
+    var actions = '<span class="type-tag">' + tag + '</span>';
+    if (!all) {
+      if (legacy) actions += '<button class="text-btn" data-merge-' + (isKbd ? "kbd" : "mouse") + '>归入当前</button>';
+      actions += '<button class="text-btn" data-edit-' + (isKbd ? "kbd" : "mouse") + '>' + svgPencil + '编辑</button>';
+      actions += '<button class="icon-btn" data-menu-' + (isKbd ? "kbd" : "mouse") + ' title="更多操作">···</button>';
+    }
+    return '<div class="card-top"><div class="head-main"><div class="eyebrow">' + eyebrow + '</div>' +
+      '<div class="device-name" title="' + esc(name) + '">' + esc(name) + '</div></div>' +
+      '<div class="card-actions">' + actions + '</div></div>';
+  }
+
+  function editPopover(kind, item){
+    var isKbd = kind === "keyboard";
+    var fields = '<label class="pop-field"><span>名称</span><input class="pop-input" data-edit-field="name" value="' + esc(item.name) + '"></label>';
+    if (isKbd) {
+      fields += '<label class="pop-field"><span>额定寿命（万次）</span><input class="pop-input num" data-edit-field="rated" value="' + Math.round(item.rated / 10000) + '"></label>';
+    } else {
+      fields += '<div class="pop-grid"><label class="pop-field"><span>左微动（万次）</span><input class="pop-input num" data-edit-field="ratedL" value="' + Math.round(item.ratedL / 10000) + '"></label>' +
+        '<label class="pop-field"><span>右微动（万次）</span><input class="pop-input num" data-edit-field="ratedR" value="' + Math.round(item.ratedR / 10000) + '"></label></div>';
+    }
+    return '<div class="pop" data-pop="edit"><div class="pop-title">编辑' + (isKbd ? "键盘" : "鼠标") + '</div>' + fields +
+      '<div class="pop-actions"><button class="btn-ghost" data-cancel-edit>取消</button><button class="btn-primary" data-save-edit>保存</button></div></div>';
+  }
+
+  function actionMenu(kind){
+    var isKbd = kind === "keyboard";
+    return '<div class="card-menu" data-card-menu>' +
+      '<button class="menu-item" data-info-' + (isKbd ? "kbd" : "mouse") + '>设备信息</button>' +
+      '<button class="menu-item danger" data-reset-' + (isKbd ? "kbd" : "mouse") + '>' + svgReset + '换新 / 重置…</button></div>';
+  }
+
+  function infoPopover(kind, item){
+    var isKbd = kind === "keyboard";
+    return '<div class="info-pop" data-pop="info"><div class="pop-title">设备信息</div>' +
+      '<div class="info-name">' + esc(item.friendly || item.name) + '</div>' +
+      '<div class="info-path">' + esc(item.path || "无硬件路径") + '</div>' +
+      '<div class="info-actions"><button class="btn-ghost" data-copy-info>复制路径</button></div></div>';
+  }
+
+  function resetBar(kind, item){
+    var isKbd = kind === "keyboard";
+    return '<div class="reset-bar"><span>清零「' + esc(item.name) + '」的' + (isKbd ? "按键" : "左右微动") + '计数？</span>' +
+      '<button class="btn-ghost" data-cancel-reset>取消</button><button class="btn-danger" data-confirm-reset>确认换新</button></div>';
+  }
+
+  function metaLine(kind, item, all, legacy){
+    var isKbd = kind === "keyboard";
+    var parts = [];
+    if (all) parts.push(isKbd ? "汇总 " + realKeyboards().length + " 个键盘" : "汇总 " + realMice().length + " 个鼠标");
+    else {
+      parts.push(typeText(item.type));
+      if (item.since && item.since !== "—") parts.push("起始 " + item.since);
+      if (legacy) parts.push("升级前累计");
+    }
+    return '<div class="card-meta">' + parts.map(function(p){ return '<span>' + esc(p) + '</span>'; }).join("<i style=\"width:2px;height:2px;border-radius:50%;background:#3d4c5e;display:inline-block\"></i>") + '</div>';
+  }
+
+  function keyboardCardHtml(){
+    var k = currentKeyboard();
+    if (!k) return "";
+    var all = k.id === "all";
+    var legacy = k.type === "legacy";
+    var top, topR, hero, list = '';
+    if (all) {
+      var aw = aggregateKeyboardWorst();
+      top = aw ? aw.item : {c:0, k:"—"};
+      topR = aw ? aw.ratio : 0;
+      var source = aw ? shortName(aw.keyboard.name, realKeyboards()) : "—";
+      hero = '<div class="hero"><div class="hero-label">最高磨损键</div>' +
+        '<div class="hero-line"><span class="keycap lg">' + esc(top.k) + '</span>' +
+        '<span class="hero-value ' + valueClass(topR) + '">' + pctNum(topR) + '<span class="pct-sign">%</span></span></div>' +
+        '<div class="track"><i class="' + wearClass(topR) + '" style="width:' + clampWidth(topR) + '%"></i></div>' +
+        '<div class="hero-sub"><span>' + esc(source) + ' · ' + fmt(top.c) + ' 次</span><span>额定 ' + fmt(aw ? aw.keyboard.rated : 0) + ' 次</span></div></div>';
+      var devices = realKeyboards().map(function(item){
+        return {keyboard:item, entry:keyboardWorstEntry(item)};
+      }).sort(function(a,b){ return b.entry.ratio - a.entry.ratio; });
+      list = '<div class="list"><div class="list-head"><span>各设备最高磨损</span><span>占额定</span></div>' +
+        devices.map(function(row){
+          var r = row.entry.ratio;
+          return '<div class="agg-row"><span class="aname" title="' + esc(row.keyboard.name) + '">' + esc(row.keyboard.name) + '</span>' +
+            '<span class="keycap">' + esc(row.entry.item.k) + '</span>' +
+            '<div class="track"><i class="' + wearClass(r) + '" style="width:' + clampWidth(r) + '%"></i></div>' +
+            '<span class="pct">' + pct(r) + '</span></div>';
+        }).join("") + '</div>';
+    } else {
+      top = k.keys[0];
+      topR = ratio(top.c, k.rated);
+      hero = '<div class="hero"><div class="hero-label">最高磨损键</div>' +
+        '<div class="hero-line"><span class="keycap lg">' + esc(top.k) + '</span>' +
+        '<span class="hero-value ' + valueClass(topR) + '">' + pctNum(topR) + '<span class="pct-sign">%</span></span></div>' +
+        '<div class="track"><i class="' + wearClass(topR) + '" style="width:' + clampWidth(topR) + '%"></i></div>' +
+        '<div class="hero-sub"><span>' + fmt(top.c) + ' 次</span><span>额定 ' + fmt(k.rated) + ' 次</span></div></div>';
+      var rest = k.keys.slice(1, 5);
+      if (rest.length) {
+        list = '<div class="list"><div class="list-head"><span>其他高磨损键</span><span>次数 / 占额定</span></div>' +
+          rest.map(function(item){
+            var r = ratio(item.c, k.rated);
+            return '<div class="list-row"><span class="keycap">' + esc(item.k) + '</span>' +
+              '<div class="track"><i class="' + wearClass(r) + '" style="width:' + clampWidth(r) + '%"></i></div>' +
+              '<span class="count">' + fmt(item.c) + '</span><span class="pct">' + pct(r) + '</span></div>';
+          }).join("") + '</div>';
+      }
+    }
+    var status = topR >= 0.8 ? '<div class="status-line"><span class="status-pill ' + (topR >= 1 ? "bad" : "") + '"><i></i>' +
+      esc(top.k) + (topR >= 1 ? " 已超额定" : " 接近寿命") + '</span></div>' : '';
+    var pop = state.editTarget === "keyboard" && !all ? editPopover("keyboard", k) : '';
+    var menu = state.actionMenu === "keyboard" && !all ? actionMenu("keyboard") : '';
+    var info = state.infoTarget === "keyboard" && !all ? infoPopover("keyboard", k) : '';
+    var reset = state.confirmReset === "keyboard" && !all ? resetBar("keyboard", k) : '';
+    return cardTop("keyboard", k, all, legacy) +
+      '<div class="device-pills">' + renderKeyboardPills() + '</div>' + pop + menu + info +
+      hero + status + list + metaLine("keyboard", k, all, legacy) + reset;
+  }
+
+  function metric(label, count, rated){
+    var r = ratio(count, rated);
+    return '<div class="metric"><div class="metric-label">' + label + '</div>' +
+      '<div class="metric-value ' + valueClass(r) + '">' + pctNum(r) + '<span class="pct-sign">%</span></div>' +
+      '<div class="track"><i class="' + wearClass(r) + '" style="width:' + clampWidth(r) + '%"></i></div>' +
+      '<div class="metric-sub">' + fmt(count) + ' / ' + fmt(rated) + ' 次</div></div>';
+  }
+
+  function aggregateMetric(label, worst){
+    var r = worst ? worst.ratio : 0;
+    var who = worst && worst.mouse ? shortName(worst.mouse.name, realMice()) + ' · ' : '';
+    return '<div class="metric"><div class="metric-label">' + label + '</div>' +
+      '<div class="metric-value ' + valueClass(r) + '">' + pctNum(r) + '<span class="pct-sign">%</span></div>' +
+      '<div class="track"><i class="' + wearClass(r) + '" style="width:' + clampWidth(r) + '%"></i></div>' +
+      '<div class="metric-sub">' + esc(who) + fmt(worst ? worst.count : 0) + ' / ' + fmt(worst ? worst.rated : 0) + ' 次</div></div>';
+  }
+
+  function sparkHtml(m, all){
+    var days = m.days || [0,0,0,0,0,0,0];
+    var max = Math.max.apply(null, days.concat([1]));
+    var avg = days.reduce(function(s,v){ return s + v; }, 0) / days.length;
+    return '<div class="spark"><div class="spark-head"><span>近 7 天点击</span><span>日均 <b>' + Math.round(avg) + '</b></span></div>' +
+      '<div class="spark-bars">' + days.map(function(v){ return '<i style="height:' + Math.max(3, v / max * 100).toFixed(1) + '%"></i>'; }).join("") + '</div></div>';
+  }
+
+  function contribHtml(){
+    var list = realMice();
+    var max = 1;
+    list.forEach(function(m){ max = Math.max(max, m.left + m.right); });
+    return '<div class="contrib"><div class="contrib-head">设备贡献 · 左右键合计</div>' + list.map(function(m){
+      var total = m.left + m.right;
+      return '<div class="contrib-row"><span class="cname">' + esc(m.name) + '</span>' +
+        '<div class="track"><i class="blue" style="width:' + clampWidth(total / max) + '%"></i></div>' +
+        '<span class="cval">' + fmt(total) + '</span></div>';
+    }).join("") + '</div>';
+  }
+
+  function mouseCardHtml(){
+    var m = currentMouse();
+    if (!m) return "";
+    var all = m.id === "all";
+    var legacy = m.type === "legacy";
+    var worst = all ? m.worst : mouseWorst(m);
+    var metrics = all
+      ? '<div class="metric-grid">' + aggregateMetric("左键微动", m.worstLeft) + aggregateMetric("右键微动", m.worstRight) + '</div>'
+      : '<div class="metric-grid">' + metric("左键微动", m.left, m.ratedL) + metric("右键微动", m.right, m.ratedR) + '</div>';
+    var status = '';
+    if (worst >= 0.8) {
+      var isLeft = all ? m.worstLeft.ratio >= m.worstRight.ratio : ratio(m.left, m.ratedL) >= ratio(m.right, m.ratedR);
+      status = '<div class="status-line"><span class="status-pill ' + (worst >= 1 ? "bad" : "") + '"><i></i>' +
+        (isLeft ? "左" : "右") + '微动' + (worst >= 1 ? "已超额定" : "接近寿命") + '</span>' +
+        '<span style="font-size:9px;color:#63778b">' + (worst >= 1 ? "建议检查或更换微动" : "建议留意单击变双击") + '</span></div>';
+    }
+    var stats = '<div class="mini-stats"><span>中键<b>' + fmt(m.middle) + '</b></span><span>侧键<b>' + fmt(m.x) + '</b></span></div>';
+    var bottom = all ? contribHtml() : (legacy ? '' : sparkHtml(m, all));
+    var legacyNote = legacy ? '<div class="reset-line">升级前的单鼠标累计档案；可归入当前实体鼠标。</div>' : '';
+    var pop = state.editTarget === "mouse" && !all ? editPopover("mouse", m) : '';
+    var menu = state.actionMenu === "mouse" && !all ? actionMenu("mouse") : '';
+    var info = state.infoTarget === "mouse" && !all ? infoPopover("mouse", m) : '';
+    var reset = state.confirmReset === "mouse" && !all ? resetBar("mouse", m) : '';
+    return cardTop("mouse", m, all, legacy) +
+      '<div class="device-pills">' + renderMousePills() + '</div>' + pop + menu + info +
+      metrics + status + stats + bottom + legacyNote + metaLine("mouse", m, all, legacy) + reset;
+  }
+
+  function statsCardHtml(){
+    var k = currentKeyboard() || aggregateKeyboard();
+    var rows = k.keys.map(function(item, i){
+      var share = k.rated > 0 ? item.c / k.rated : 0;
+      return '<div class="stats-row"><div class="stats-rank">' + (i + 1) + '</div>' +
+        '<div class="stats-key"><span class="keycap">' + esc(item.k) + '</span><span>' + esc(item.n) + '</span></div>' +
+        '<div class="stats-count">' + fmt(item.c) + '</div><div class="stats-share">' + pct(share) + '</div>' +
+        '<div class="stats-bar"><i style="width:' + clampWidth(share) + '%"></i></div></div>';
+    }).join("");
+    return '<div class="stats-title">按键排行 · ' + esc(k.name) + '</div><div class="stats-sub">外设健康子视图的只读按键明细。</div>' +
+      '<div class="stats-head"><div>#</div><div>按键</div><div style="text-align:right">频次</div><div style="text-align:right">占额定</div><div>强度</div></div>' + rows;
+  }
+
+  function render(){
+    app.classList.toggle("compact", state.compact);
+    kbdCard.innerHTML = keyboardCardHtml();
+    mouseCard.innerHTML = mouseCardHtml();
+    statsCard.innerHTML = statsCardHtml();
+    var health = state.subview === "health";
+    $("#healthView").style.display = health ? "" : "none";
+    $("#statsView").style.display = health ? "none" : "";
+    $$(".sub-chip").forEach(function(b){ b.classList.toggle("active", b.getAttribute("data-subview") === state.subview); });
+    var worst = 0;
+    realMice().forEach(function(m){ worst = Math.max(worst, mouseWorst(m)); });
+    realKeyboards().forEach(function(k){ worst = Math.max(worst, keyboardWorst(k)); });
+    var dot = $("#healthDot");
+    if (dot) dot.className = "status " + wearClass(worst);
+  }
+
+  function toast(text){
+    var el = $("#toast");
+    el.textContent = text;
+    el.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function(){ el.classList.remove("show"); }, 1800);
+  }
+
+  function refreshClock(){
+    var d = new Date();
+    var p = function(n){ return (n < 10 ? "0" : "") + n; };
+    $("#clockText").textContent = d.getFullYear() + "." + p(d.getMonth() + 1) + "." + p(d.getDate()) +
+      " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+  }
+
+  function closePanels(){
+    state.editTarget = null; state.infoTarget = null; state.actionMenu = null; state.confirmReset = null;
+    state.moreOpen = false; state.kbdMoreOpen = false;
+  }
+
+  document.addEventListener("click", function(ev){
+    var t = ev.target;
+    var scaleBtn = t.closest("[data-scale]");
+    if (scaleBtn) {
+      state.scale = parseFloat(scaleBtn.getAttribute("data-scale"));
+      document.documentElement.style.setProperty("--scale", state.scale);
+      $$("#scaleSeg button").forEach(function(b){ b.classList.toggle("active", b === scaleBtn); });
+      return;
+    }
+    var sub = t.closest("[data-subview]");
+    if (sub) {
+      state.subview = sub.getAttribute("data-subview");
+      state.moreOpen = false; state.kbdMoreOpen = false; closePanels(); render(); return;
+    }
+    if (t.closest("[data-kbd-more]")) {
+      state.kbdMoreOpen = !state.kbdMoreOpen; state.moreOpen = false; render(); return;
+    }
+    var kbd = t.closest("[data-kbd]");
+    if (kbd && !t.closest("[data-edit-field]")) {
+      state.keyboardId = kbd.getAttribute("data-kbd");
+      state.moreOpen = false; state.kbdMoreOpen = false; closePanels(); render(); return;
+    }
+    var mouse = t.closest("[data-mouse]");
+    if (mouse) {
+      state.mouseId = mouse.getAttribute("data-mouse");
+      state.moreOpen = false; state.kbdMoreOpen = false; closePanels(); render(); return;
+    }
+    if (t.closest("[data-more]")) {
+      state.moreOpen = !state.moreOpen; state.kbdMoreOpen = false; render(); return;
+    }
+    if (t.closest("[data-edit-kbd]")) {
+      state.editTarget = state.editTarget === "keyboard" ? null : "keyboard";
+      state.actionMenu = null; state.infoTarget = null;
+      state.moreOpen = false; state.kbdMoreOpen = false; render(); return;
+    }
+    if (t.closest("[data-edit-mouse]")) {
+      state.editTarget = state.editTarget === "mouse" ? null : "mouse";
+      state.actionMenu = null; state.infoTarget = null;
+      state.moreOpen = false; state.kbdMoreOpen = false; render(); return;
+    }
+    if (t.closest("[data-menu-kbd]")) {
+      state.actionMenu = state.actionMenu === "keyboard" ? null : "keyboard";
+      state.editTarget = null; state.infoTarget = null;
+      state.moreOpen = false; state.kbdMoreOpen = false; render(); return;
+    }
+    if (t.closest("[data-menu-mouse]")) {
+      state.actionMenu = state.actionMenu === "mouse" ? null : "mouse";
+      state.editTarget = null; state.infoTarget = null;
+      state.moreOpen = false; state.kbdMoreOpen = false; render(); return;
+    }
+    if (t.closest("[data-info-kbd]")) {
+      state.infoTarget = "keyboard"; state.actionMenu = null; render(); return;
+    }
+    if (t.closest("[data-info-mouse]")) {
+      state.infoTarget = "mouse"; state.actionMenu = null; render(); return;
+    }
+    if (t.closest("[data-copy-info]")) {
+      var path = state.infoTarget === "keyboard" ? (findKeyboard(state.keyboardId) || {}).path :
+        (findMouse(state.mouseId) || {}).path;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(path || "");
+        toast("设备路径已复制");
+      } catch (e) { toast("复制失败，可手动选择路径"); }
+      return;
+    }
+    if (t.closest("[data-reset-kbd]")) {
+      state.confirmReset = "keyboard"; state.actionMenu = null;
+      state.editTarget = null; state.infoTarget = null; state.moreOpen = false; state.kbdMoreOpen = false;
+      render(); return;
+    }
+    if (t.closest("[data-reset-mouse]")) {
+      state.confirmReset = "mouse"; state.actionMenu = null;
+      state.editTarget = null; state.infoTarget = null; state.moreOpen = false; state.kbdMoreOpen = false;
+      render(); return;
+    }
+    if (t.closest("[data-cancel-reset]")) {
+      state.confirmReset = null; render(); return;
+    }
+    if (t.closest("[data-confirm-reset]")) {
+      var today = new Date();
+      var p = function(n){ return (n < 10 ? "0" : "") + n; };
+      var dateText = today.getFullYear() + "-" + p(today.getMonth() + 1) + "-" + p(today.getDate());
+      if (state.confirmReset === "mouse") {
+        var m = findMouse(state.mouseId);
+        if (m) { m.left = 0; m.right = 0; m.middle = 0; m.x = 0; m.since = dateText; m.days = [0,0,0,0,0,0,0]; }
+        toast("已换新：" + (m ? m.name : "鼠标"));
+      } else if (state.confirmReset === "keyboard") {
+        var k = findKeyboard(state.keyboardId);
+        if (k) { k.keys.forEach(function(item){ item.c = 0; }); k.since = dateText; }
+        toast("已换新：" + (k ? k.name : "键盘"));
+      }
+      state.confirmReset = null; render(); return;
+    }
+    if (t.closest("[data-save-edit]")) {
+      var nameInput = $("[data-edit-field=name]");
+      var name = nameInput ? nameInput.value.trim() : "";
+      if (state.editTarget === "mouse") {
+        var mm = findMouse(state.mouseId);
+        if (mm) {
+          mm.name = name || mm.friendly || "未命名鼠标";
+          var l = $("[data-edit-field=ratedL]"), r = $("[data-edit-field=ratedR]");
+          if (l) mm.ratedL = Math.max(100, Math.min(1000000, Number(l.value) || 100)) * 10000;
+          if (r) mm.ratedR = Math.max(100, Math.min(1000000, Number(r.value) || 100)) * 10000;
+        }
+      } else if (state.editTarget === "keyboard") {
+        var kk = findKeyboard(state.keyboardId);
+        if (kk) {
+          kk.name = name || "未命名键盘";
+          var rr = $("[data-edit-field=rated]");
+          if (rr) kk.rated = Math.max(100, Math.min(1000000, Number(rr.value) || 100)) * 10000;
+        }
+      }
+      state.editTarget = null; render(); toast("已保存"); return;
+    }
+    if (t.closest("[data-cancel-edit]")) { state.editTarget = null; render(); return; }
+    if (t.closest("[data-merge-kbd]")) {
+      var legacyK = findKeyboard("legacy"), targetK = targetKeyboard();
+      if (!legacyK || !targetK) return;
+      legacyK.keys.forEach(function(item){
+        var targetItem = targetK.keys.filter(function(x){ return x.n === item.n; })[0];
+        if (targetItem) targetItem.c += item.c;
+        else targetK.keys.push({n:item.n,k:item.k,c:item.c});
+      });
+      targetK.keys.sort(function(a,b){ return b.c - a.c; });
+      state.keyboards = state.keyboards.filter(function(x){ return x.id !== "legacy"; });
+      state.keyboardId = targetK.id; closePanels(); render();
+      toast("旧版键盘已归入「" + targetK.name + "」"); return;
+    }
+    if (t.closest("[data-merge-mouse]")) {
+      var legacyM = findMouse("legacy"), targetM = targetMouse();
+      if (!legacyM || !targetM) return;
+      targetM.left += legacyM.left; targetM.right += legacyM.right;
+      targetM.middle += legacyM.middle; targetM.x += legacyM.x;
+      state.mice = state.mice.filter(function(x){ return x.id !== "legacy"; });
+      state.mouseId = targetM.id; closePanels(); render();
+      toast("旧版鼠标已归入「" + targetM.name + "」"); return;
+    }
+    if (t.closest(".pop,.card-menu,.info-pop,.device-pills,[data-edit-kbd],[data-edit-mouse],[data-menu-kbd],[data-menu-mouse]")) return;
+    if (state.editTarget || state.infoTarget || state.actionMenu || state.moreOpen || state.kbdMoreOpen) {
+      closePanels(); render();
+    }
+  });
+
+  document.addEventListener("keydown", function(ev){
+    if (ev.key === "Escape" && (state.editTarget || state.infoTarget || state.actionMenu || state.confirmReset)) {
+      closePanels(); render(); ev.preventDefault();
+    }
+  });
+
+  $("#compactToggle").addEventListener("change", function(e){ state.compact = e.target.checked; render(); });
+  $("#resetDemo").addEventListener("click", function(){
+    state.mice = JSON.parse(JSON.stringify(initialMice));
+    state.keyboards = JSON.parse(JSON.stringify(initialKeyboards));
+    state.mouseId = "home"; state.keyboardId = "builtin"; state.subview = "health";
+    state.moreOpen = false; state.kbdMoreOpen = false; closePanels();
+    render(); toast("示例数据已恢复");
+  });
+
+  render();
+  refreshClock();
+  setInterval(refreshClock, 1000);
+})();
+</script>
+</body>
+</html>

@@ -121,11 +121,13 @@ internal static class MotionTests
         Check(Motion.LevelName(Motion.LevelOff) == "关闭" && Motion.LevelName(Motion.LevelReduced) == "精简" && Motion.LevelName(Motion.LevelFull) == "完整",
             "level names are user facing");
 
-        // ---- 帧间隔:目标 16–40 ms,慢帧留余量 ----
-        Check(Motion.FrameInterval(0) == 16, "an unknown frame time floors the interval");
-        Check(Motion.FrameInterval(1) == 16, "a cheap frame does not spin faster than 60 fps");
-        Check(Motion.FrameInterval(20) == 25, "the next interval follows the measured frame cost");
-        Check(Motion.FrameInterval(1000) == 40, "an expensive frame falls back to 25 fps");
+        // ---- 帧间隔:8–30 ms,落在 15.6 / 31.2 ms 两档 ----
+        Check(Motion.FrameInterval(0) == 8, "an unknown frame time floors the interval");
+        Check(Motion.FrameInterval(1) == 8, "a cheap frame uses the 15.6 ms timer bucket");
+        Check(Motion.FrameInterval(20) == 20, "the next interval follows the measured frame cost");
+        Check(Motion.FrameInterval(30) == 30, "a 30 ms frame keeps the 31.2 ms timer bucket");
+        Check(Motion.FrameInterval(31) == 30, "a slow frame is capped instead of amplified");
+        Check(Motion.FrameInterval(1000) == 30, "an expensive frame stays at the 30 ms cap");
 
         // ---- 追值:按半衰期收敛,与帧率无关 ----
         Motion.ForgetChase("chase");
@@ -138,6 +140,51 @@ internal static class MotionTests
         Check(!Motion.ChaseActive("chase", 20, 0.01), "a settled chase stops asking for frames");
         Motion.ForgetChase("chase");
         Near(Motion.ChaseValue("chase", 7), 7, 1e-9, "a forgotten chase falls back");
+
+        // ---- P0-2:暂停冻结、恢复续接、前缀隔离与收尾对齐 ----
+        Motion.ResetForTests();
+        Motion.UseFakeClock(2000000);
+        Motion.Live = true;
+        Motion.Start("pause", 200, Ease.Linear);
+        Motion.AdvanceFakeClock(100);
+        Near(Motion.Progress("pause"), 0.5, 1e-9, "half way before the pause");
+        Motion.Paused = true;
+        Motion.AdvanceFakeClock(500);
+        Near(Motion.Progress("pause"), 0.5, 1e-9, "a paused channel keeps its progress");
+        Check(!Motion.Active, "a paused channel does not drive frames");
+        Motion.Paused = false;
+        Motion.AdvanceFakeClock(100);
+        Near(Motion.Progress("pause"), 1, 1e-9, "the channel resumes from where it paused");
+
+        Motion.ResetForTests();
+        Motion.UseFakeClock(3000000);
+        Motion.Live = true;
+        Motion.Roll("ov-keys", 0, 100);
+        Motion.Roll("w-keys", 0, 100);
+        Motion.AdvanceFakeClock(100);
+        Motion.Roll("ov-keys", 100, 100);
+        Motion.Roll("w-keys", 200, 100);
+        Check(Motion.AnyChaseMoving(0.4, "ov-"), "the dashboard chase is moving");
+        Check(Motion.AnyChaseMoving(0.4, "w-"), "the widget chase is moving");
+        Motion.SettleChases("ov-");
+        Near(Motion.ChaseValue("ov-keys", -1), 100, 1e-9, "settling the dashboard drops the residual");
+        Check(!Motion.AnyChaseMoving(0.4, "ov-"), "the settled dashboard chase stops asking for frames");
+        Check(Motion.AnyChaseMoving(0.4, "w-"), "settling one prefix leaves the other moving");
+        Check(Motion.ChaseValue("w-keys", -1) < 200, "the widget chase was not settled by the dashboard prefix");
+        Motion.Roll("ov-meters", 42.70, 160);
+        Motion.SettleChases("ov-");
+        Near(Motion.ChaseValue("ov-meters", -1), 42.70, 1e-9, "the settled meter value is exact");
+        Check(Analysis.FmtMeters(42.70) == "42.7 m", "42.70 m renders as 42.7 m after settle");
+
+        Motion.Paused = true;
+        Motion.Roll("w-keys", 400, 100);
+        double frozen = Motion.ChaseValue("w-keys", -1);
+        Motion.AdvanceFakeClock(500);
+        Near(Motion.Roll("w-keys", 400, 100), frozen, 1e-9, "a paused chase keeps its current value");
+        Check(!Motion.AnyChaseMoving(0.4, "w-"), "a paused chase never asks for frames");
+        Motion.Paused = false;
+        Motion.AdvanceFakeClock(100);
+        Check(Motion.Roll("w-keys", 400, 100) > frozen, "the chase resumes after the pause");
 
         Motion.ResetForTests();
         Store.MotionLevel = savedLevel;

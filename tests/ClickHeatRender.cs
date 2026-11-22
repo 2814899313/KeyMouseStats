@@ -165,6 +165,18 @@ internal static class ClickHeatRender
                 SetField(form, "_clickFocused", false);
                 SetField(form, "_clickScreen", -1);
 
+                // WM_DISPLAYCHANGE 的清缓存路径:底板/stamp/屏幕矩形必须全部失效。
+                SetField(form, "_clickPlate", new Bitmap(8, 8));
+                SetField(form, "_clickStamp", "stale");
+                SetField(form, "_clickScreenRects", new Rectangle[] { new Rectangle(0, 0, 10, 10) });
+                SetField(form, "_clickScreenBounds", new Rectangle(0, 0, 10, 10));
+                typeof(Dashboard).GetMethod("InvalidateClickScreenCaches", Private).Invoke(form, null);
+                if (typeof(Dashboard).GetField("_clickPlate", Private).GetValue(form) != null
+                    || typeof(Dashboard).GetField("_clickStamp", Private).GetValue(form) != null
+                    || ((Rectangle[])typeof(Dashboard).GetField("_clickScreenRects", Private).GetValue(form)).Length != 0
+                    || (Rectangle)typeof(Dashboard).GetField("_clickScreenBounds", Private).GetValue(form) != Rectangle.Empty)
+                    throw new Exception("display change must clear click plate, stamp and screen rects");
+
                 // 换两套深/浅主题各画一帧,确认新页不依赖主题图标数组的长度。
                 Store.ThemeId = 2;
                 Render(form, "click-heat-theme-ori", 1f);

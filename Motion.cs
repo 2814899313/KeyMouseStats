@@ -68,7 +68,39 @@ namespace KeyMouseStats
         public const double SlowFrameLogMs = 100;
 
         /// <summary>窗口不可见、失焦、锁屏、拖动窗口或按住键时置 true:立即停止推进。</summary>
-        public static bool Paused;
+        private static bool _paused;
+        private static long _pauseAt;
+        public static bool Paused
+        {
+            get { return _paused; }
+            set
+            {
+                if (value == _paused) return;
+                if (value)
+                {
+                    _pauseAt = Now;
+                    _paused = true;
+                }
+                else
+                {
+                    long pausedFor = Now - _pauseAt;
+                    _paused = false;
+                    _pauseAt = 0;
+                    ShiftTime(pausedFor);
+                }
+            }
+        }
+        /// <summary>动画时间源:暂停时冻结在暂停时刻,恢复时整体后移,保证不跳帧。</summary>
+        private static long ClockNow { get { return _paused ? _pauseAt : Now; } }
+        private static void ShiftTime(long delta)
+        {
+            if (delta <= 0) return;
+            foreach (KeyValuePair<string, MotionChannel> pair in Channels)
+                pair.Value.Start += delta;
+            Scratch.Clear();
+            foreach (string key in ChaseStamps.Keys) Scratch.Add(key);
+            for (int i = 0; i < Scratch.Count; i++) ChaseStamps[Scratch[i]] += delta;
+        }
         /// <summary>1.8.0:界面上是否真的有人在看(由窗口在每次绘制时置为 Visible)。
         /// 离屏渲染(测试、截图)时为 false:数值滚动直接落在目标值上,画面保持确定性。
         /// 默认为 true,便于非界面调用方直接使用。</summary>
@@ -98,7 +130,11 @@ namespace KeyMouseStats
         {
             Channels.Clear();
             Chases.Clear();
-            Paused = false;
+            ChaseStamps.Clear();
+            ChaseTargets.Clear();
+            Scratch.Clear();
+            _paused = false;
+            _pauseAt = 0;
             _fakeClock = false;
             _fakeNow = 0;
         }
@@ -173,7 +209,7 @@ namespace KeyMouseStats
             }
             if (Level == LevelReduced) durationMs = Math.Min(durationMs, 120);   // 精简档:更短、更快结束
             MotionChannel channel = new MotionChannel();
-            channel.Start = Now;
+            channel.Start = Paused ? _pauseAt : Now;
             channel.DurationMs = durationMs;
             channel.Kind = kind;
             channel.Rect = rect;
@@ -188,7 +224,7 @@ namespace KeyMouseStats
             MotionChannel channel;
             if (key == null || !Channels.TryGetValue(key, out channel)) return 1;
             if (channel.Finished) return 1;
-            double elapsed = (Now - channel.Start) * 1000.0 / Stopwatch.Frequency;
+            double elapsed = (ClockNow - channel.Start) * 1000.0 / Stopwatch.Frequency;
             double t = channel.DurationMs <= 0 ? 1 : elapsed / channel.DurationMs;
             if (t >= 1)
             {
@@ -204,7 +240,7 @@ namespace KeyMouseStats
         {
             MotionChannel channel;
             if (key == null || !Channels.TryGetValue(key, out channel)) return 1;
-            double elapsed = (Now - channel.Start) * 1000.0 / Stopwatch.Frequency;
+            double elapsed = (ClockNow - channel.Start) * 1000.0 / Stopwatch.Frequency;
             double t = channel.DurationMs <= 0 ? 1 : elapsed / channel.DurationMs;
             return t < 0 ? 0 : t > 1 ? 1 : t;
         }
@@ -223,7 +259,7 @@ namespace KeyMouseStats
                 foreach (KeyValuePair<string, MotionChannel> pair in Channels)
                     if (!pair.Value.Finished)
                     {
-                        double elapsed = (Now - pair.Value.Start) * 1000.0 / Stopwatch.Frequency;
+                        double elapsed = (ClockNow - pair.Value.Start) * 1000.0 / Stopwatch.Frequency;
                         if (elapsed < pair.Value.DurationMs) return true;
                         pair.Value.Finished = true;
                     }
@@ -247,7 +283,7 @@ namespace KeyMouseStats
             Scratch.Clear();
             foreach (KeyValuePair<string, MotionChannel> pair in Channels)
             {
-                double elapsed = (Now - pair.Value.Start) * 1000.0 / Stopwatch.Frequency;
+                double elapsed = (ClockNow - pair.Value.Start) * 1000.0 / Stopwatch.Frequency;
                 if (pair.Value.Finished || elapsed >= pair.Value.DurationMs) Scratch.Add(pair.Key);
             }
             for (int i = 0; i < Scratch.Count; i++) Channels.Remove(Scratch[i]);
@@ -267,7 +303,7 @@ namespace KeyMouseStats
             {
                 MotionChannel channel = pair.Value;
                 if (channel.Finished) continue;
-                double elapsed = (Now - channel.Start) * 1000.0 / Stopwatch.Frequency;
+                double elapsed = (ClockNow - channel.Start) * 1000.0 / Stopwatch.Frequency;
                 if (elapsed >= channel.DurationMs) continue;
                 if (!channel.HasRect) return whole;
                 union = any ? Rectangle.Union(union, channel.Rect) : channel.Rect;
@@ -276,12 +312,14 @@ namespace KeyMouseStats
             return any ? union : Rectangle.Empty;
         }
 
-        /// <summary>按下一次重绘的实测耗时换算下一帧间隔:实测耗时 ×1.25 后夹在 16–40 ms(最快约 60 FPS,最慢 25 FPS),给慢帧留余量。</summary>
+        /// <summary>按下一次重绘的实测耗时换算下一帧间隔:夹在 8–30 ms。
+        /// 8 ms 让 WinForms 定时器落在 15.6 ms 档(约 60 FPS);30 ms 落在 31.2 ms 档(约 30 FPS)。
+        /// 不再乘 1.25:慢帧本身已经会推高下一帧,再放大只会形成 80–90 ms 的自激长帧。</summary>
         public static int FrameInterval(double lastFrameMs)
         {
-            double interval = lastFrameMs <= 0 ? 16 : lastFrameMs * 1.25;
-            if (interval < 16) interval = 16;
-            if (interval > 40) interval = 40;
+            double interval = lastFrameMs <= 0 ? 8 : lastFrameMs;
+            if (interval < 8) interval = 8;
+            if (interval > 30) interval = 30;
             return (int)Math.Round(interval);
         }
         /// <summary>慢帧记账:交给 Program.LogStall,便于用 ui-stalls.log 做回归。</summary>
@@ -308,13 +346,14 @@ namespace KeyMouseStats
             if (!Chases.TryGetValue(key, out current))
             {
                 Chases[key] = target;
-                ChaseStamps[key] = Now;
+                ChaseStamps[key] = Paused ? _pauseAt : Now;
                 return target;
             }
+            if (Paused) return current;
             long last;
             if (!ChaseStamps.TryGetValue(key, out last)) last = Now;
-            double elapsed = Math.Max(0, (Now - last) * 1000.0 / Stopwatch.Frequency);
-            ChaseStamps[key] = Now;
+            double elapsed = Math.Max(0, (ClockNow - last) * 1000.0 / Stopwatch.Frequency);
+            ChaseStamps[key] = ClockNow;
             double factor = 1 - Math.Pow(0.5, elapsed / halfLifeMs);
             current += (target - current) * factor;
             Chases[key] = current;
@@ -329,6 +368,7 @@ namespace KeyMouseStats
         }
         public static bool ChaseActive(string key, double target, double epsilon)
         {
+            if (Paused) return false;
             double value;
             return Chases.TryGetValue(key, out value) && Math.Abs(value - target) > epsilon;
         }
@@ -345,9 +385,15 @@ namespace KeyMouseStats
         /// <summary>是否还有追值没追上目标(决定帧定时器是否继续:数值滚动这类动效不走通道)。</summary>
         public static bool AnyChaseMoving(double epsilon)
         {
-            if (!Enabled) return false;
+            return AnyChaseMoving(epsilon, null);
+        }
+        /// <summary>只检查指定前缀的追值,避免小组件与主面板的 Chase 互相拖帧。</summary>
+        public static bool AnyChaseMoving(double epsilon, string prefix)
+        {
+            if (Paused || !Enabled) return false;
             foreach (KeyValuePair<string, double> pair in Chases)
             {
+                if (prefix != null && prefix.Length > 0 && !pair.Key.StartsWith(prefix, StringComparison.Ordinal)) continue;
                 double target;
                 if (!ChaseTargets.TryGetValue(pair.Key, out target)) continue;
                 if (Math.Abs(pair.Value - target) > epsilon) return true;
@@ -357,7 +403,19 @@ namespace KeyMouseStats
         /// <summary>把所有追值直接落到目标上(档位为关或要立即收尾时用)。</summary>
         public static void SettleChases()
         {
-            foreach (KeyValuePair<string, double> pair in ChaseTargets) Chases[pair.Key] = pair.Value;
+            SettleChases(null);
+        }
+        /// <summary>只收尾指定前缀的追值,并把时间戳对齐到当前帧,避免下次目标变化时瞬间跳值。</summary>
+        public static void SettleChases(string prefix)
+        {
+            if (ChaseTargets.Count == 0) return;
+            long now = ClockNow;
+            foreach (KeyValuePair<string, double> pair in ChaseTargets)
+            {
+                if (prefix != null && prefix.Length > 0 && !pair.Key.StartsWith(prefix, StringComparison.Ordinal)) continue;
+                Chases[pair.Key] = pair.Value;
+                ChaseStamps[pair.Key] = now;
+            }
         }
 
         /// <summary>数值滚动:让显示值按半衰期追上真实值,并记住目标以便驱动帧。</summary>

@@ -19,8 +19,11 @@ namespace KeyMouseStats
         public const int Cell = 32;
         /// <summary>位置明细保留天数。</summary>
         public const int KeepDays = 30;
-        /// <summary>单日格子上限,防止导入异常文件把内存撑爆。</summary>
-        public const int MaxCellsPerDay = 4000;
+        /// <summary>
+        /// 单日格子上限。4K 屏约 120×68=8160 格,多屏会更多;32768 足以覆盖常见桌面,
+        /// 同时仍然限制异常导入文件的内存。写入端、读取端与三通道上限共用这一口径。
+        /// </summary>
+        public const int MaxCellsPerDay = 32768;
 
         /// <summary>
         /// 钩子与原始输入会各自看到同一次按下,两条路都记录位置时用这个小窗口去重。
@@ -64,14 +67,15 @@ namespace KeyMouseStats
             if (day == null || button <= 0) return false;
             int cellX, cellY;
             int key = CellOf(screenX, screenY, out cellX, out cellY);
+            long count;
+            bool existing = day.ClickCells.TryGetValue(key, out count);
+            if (!existing && day.ClickCells.Count >= MaxCellsPerDay) return false;
             long now = Environment.TickCount;
             if (button == _lastButton && key == _lastCellKey && unchecked((uint)(now - _lastTick)) < DedupeWindowMs)
                 return false;
             _lastTick = now;
             _lastButton = button;
             _lastCellKey = key;
-            long count;
-            day.ClickCells.TryGetValue(key, out count);
             day.ClickCells[key] = count + 1;
 
             // v3.0:同一份数据再按通道记一份。ClickCells 仍是「全通道汇总」,
@@ -101,9 +105,11 @@ namespace KeyMouseStats
             if (cells == null || cells.Count == 0) return "";
             List<int> keys = new List<int>(cells.Keys);
             keys.Sort();
-            StringBuilder sb = new StringBuilder(keys.Count * 10);
+            StringBuilder sb = new StringBuilder(Math.Min(keys.Count, MaxCellsPerDay) * 10);
+            int written = 0;
             foreach (int key in keys)
             {
+                if (written >= MaxCellsPerDay) break;
                 long count = cells[key];
                 if (count <= 0) continue;
                 int cellX, cellY;
@@ -112,6 +118,7 @@ namespace KeyMouseStats
                 sb.Append(cellX.ToString(CultureInfo.InvariantCulture)).Append(':')
                   .Append(cellY.ToString(CultureInfo.InvariantCulture)).Append(':')
                   .Append(count.ToString(CultureInfo.InvariantCulture));
+                written++;
             }
             return sb.ToString();
         }
@@ -167,11 +174,14 @@ namespace KeyMouseStats
         public static string EncodeV1(Dictionary<long, long> cells)
         {
             if (cells == null || cells.Count == 0) return "";
+            int capacity = MaxCellsPerDay * 5;
             List<long> keys = new List<long>(cells.Keys);
             keys.Sort();
-            StringBuilder sb = new StringBuilder(keys.Count * 12);
+            StringBuilder sb = new StringBuilder(Math.Min(keys.Count, capacity) * 12);
+            int written = 0;
             foreach (long key in keys)
             {
+                if (written >= capacity) break;
                 long count = cells[key];
                 if (count <= 0) continue;
                 int channel = ChannelOfKey(key);
@@ -182,6 +192,7 @@ namespace KeyMouseStats
                   .Append(cellX.ToString(CultureInfo.InvariantCulture)).Append(':')
                   .Append(cellY.ToString(CultureInfo.InvariantCulture)).Append(':')
                   .Append(count.ToString(CultureInfo.InvariantCulture));
+                written++;
             }
             return sb.ToString();
         }
@@ -661,6 +672,9 @@ namespace KeyMouseStats
         private int _clickRange = 2;
         /// <summary>九宫格与单屏放大针对哪块屏(Screen.AllScreens 下标;-1 表示跟随主屏)。</summary>
         private int _clickScreen = -1;
+        /// <summary>v3.4:选屏身份。DeviceName 优先,边界签名兜底;跨拔插/重排/重启恢复。</summary>
+        private string _clickScreenDevice = Store.ClickScreenDevice;
+        private Rectangle _clickScreenHint = Store.ClickScreenBounds;
         /// <summary>true:画布只画所选屏幕(格子更大);false:画全部屏幕。</summary>
         private bool _clickFocused;
         /// <summary>false 像素网格 / true 平滑热力。</summary>
@@ -708,6 +722,7 @@ namespace KeyMouseStats
             signature = signature * 31 + regionArea.X * 1000003L + regionArea.Y;
             signature = signature * 31 + regionArea.Width * 1003L + regionArea.Height;
             signature = signature * 31 + (_clickFocused ? 1 : 0) + (_clickScreen + 2);
+            signature = signature * 31 + ClickScreenIdentity.Hash(_clickScreenDevice, _clickScreenHint);
             signature = signature * 31 + ClickChannelUi.Clamp(channel);
             if (screens != null)
                 foreach (Rectangle rect in screens)
@@ -728,17 +743,58 @@ namespace KeyMouseStats
             return _clickCache;
         }
 
-        /// <summary>当前选中的屏幕下标;-1 或越界时回落到主屏。</summary>
+        /// <summary>当前选中的屏幕下标;优先设备名,其次边界签名,最后主屏。</summary>
         private int ClickScreenIndex(Screen[] screens)
         {
             if (screens == null || screens.Length == 0) return 0;
-            int index = _clickScreen;
-            if (index < 0 || index >= screens.Length)
+            if (string.IsNullOrEmpty(_clickScreenDevice) && _clickScreenHint.Width <= 0
+                && (!string.IsNullOrEmpty(Store.ClickScreenDevice) || Store.ClickScreenBounds.Width > 0))
             {
-                index = 0;
-                for (int i = 0; i < screens.Length; i++) if (screens[i].Primary) { index = i; break; }
+                _clickScreenDevice = Store.ClickScreenDevice;
+                _clickScreenHint = Store.ClickScreenBounds;
             }
+            // 没有显式设备身份时保持旧版“下标 / 主屏”行为;只有用户真正点选过屏幕
+            // 或 stats.txt 里带有 click_screen_v1 时才走稳定解析。
+            if (string.IsNullOrEmpty(_clickScreenDevice) && _clickScreenHint.Width <= 0)
+            {
+                int legacy = _clickScreen;
+                if (legacy < 0 || legacy >= screens.Length)
+                {
+                    legacy = 0;
+                    for (int i = 0; i < screens.Length; i++) if (screens[i].Primary) { legacy = i; break; }
+                }
+                _clickScreen = legacy;
+                return Math.Max(0, Math.Min(screens.Length - 1, legacy));
+            }
+            ScreenRef[] refs = ClickScreenIdentity.Capture(screens);
+            int index = ClickScreenIdentity.Resolve(_clickScreenDevice, _clickScreenHint, refs);
+            _clickScreen = index;
             return Math.Max(0, Math.Min(screens.Length - 1, index));
+        }
+
+        /// <summary>选中一块屏幕:记录稳定身份并异步持久化,清掉底板/聚合缓存。</summary>
+        private void SelectClickScreen(int index)
+        {
+            Screen[] screens = Screen.AllScreens;
+            if (index < 0 || index >= screens.Length) return;
+            Screen screen = screens[index];
+            _clickScreen = index;
+            _clickScreenDevice = screen.DeviceName ?? "";
+            _clickScreenHint = screen.Bounds;
+            Store.ClickScreenDevice = _clickScreenDevice;
+            Store.ClickScreenBounds = _clickScreenHint;
+            InvalidateClickScreenCaches();
+            if (Store.CanPersist) Store.SaveAsync();
+        }
+
+        private void InvalidateClickScreenCaches()
+        {
+            _clickCache = null;
+            _clickStamp = null;
+            _clickGridHover = -1;
+            _clickScreenRects = new Rectangle[0];
+            _clickScreenBounds = Rectangle.Empty;
+            if (_clickPlate != null) { _clickPlate.Dispose(); _clickPlate = null; }
         }
 
         private void ClickScreenMenu()
@@ -752,7 +808,7 @@ namespace KeyMouseStats
                 ToolStripMenuItem item = new ToolStripMenuItem("屏幕 " + (i + 1) + " · "
                     + screens[i].Bounds.Width + "×" + screens[i].Bounds.Height + (screens[i].Primary ? "（主屏）" : ""));
                 item.Checked = index == current;
-                item.Click += delegate { _clickScreen = index; Invalidate(); };
+                item.Click += delegate { SelectClickScreen(index); Invalidate(); };
                 menu.Items.Add(item);
             }
             menu.Show(this, PointToClient(Cursor.Position));
@@ -1175,6 +1231,7 @@ namespace KeyMouseStats
             string stamp = _clickRange + "|" + Store.ThemeId + "|" + _s.ToString("0.###", CultureInfo.InvariantCulture) + "|"
                 + width + "x" + height + "|" + aggregate.Total + "|" + aggregate.Max + "|" + aggregate.Cells.Count + "|"
                 + (_clickFocused ? "F" : "A") + screenIndex + "|" + (_clickSmooth ? "S" : "G") + "|" + screens.Length + "|" + ClickChannelUi.StampSegment(_clickChannel) + "|"
+                + ClickScreenIdentity.Hash(_clickScreenDevice, _clickScreenHint).ToString(CultureInfo.InvariantCulture) + "|"
                 + _clickScreenBounds.Left + "," + _clickScreenBounds.Top + "," + _clickScreenBounds.Width + "," + _clickScreenBounds.Height;
             if (_clickPlate == null || _clickStamp != stamp || _clickPlate.Width != width || _clickPlate.Height != height)
             {

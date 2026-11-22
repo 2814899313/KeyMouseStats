@@ -310,7 +310,7 @@ namespace KeyMouseStats
             FormBorderStyle = FormBorderStyle.FixedDialog; StartPosition = FormStartPosition.CenterParent;
             MinimizeBox = false; MaximizeBox = false; ShowInTaskbar = false;
             Controls.Add(new Label { Text = "连续无输入多少秒后判为空闲？", Location = new Point(20, 22), AutoSize = true });
-            NumericUpDown seconds = new NumericUpDown { Minimum = 10, Maximum = 3600, Value = Store.IdleThresholdSeconds,
+            NumericUpDown seconds = new NumericUpDown { Minimum = Store.MinIdleThresholdSeconds, Maximum = Store.MaxIdleThresholdSeconds, Value = Store.IdleThresholdSeconds,
                 Location = new Point(20, 60), Width = 120 };
             Controls.Add(seconds);
             Controls.Add(new Label { Text = "秒（默认 60）", Location = new Point(154, 64), AutoSize = true });

@@ -201,6 +201,9 @@ internal static class ActivityTimeTests
             File.WriteAllText(file, "idle_threshold=999999\n[day=" + DateTime.Today.ToString("yyyy-MM-dd") + "]\nkeys=5\n");
             Store.History.Clear(); Store.RollDay(DateTime.Today); Store.Load();
             Check(Store.Today.Keys == 5 && Store.Today.ActiveSeconds == 0 && Store.Today.Sessions.Count == 0, "old records do not invent duration");
+            Check(Store.IdleThresholdSeconds == Store.MaxIdleThresholdSeconds, "over-max threshold clamps to 500");
+            File.WriteAllText(file, "idle_threshold=5\n");
+            Store.History.Clear(); Store.RollDay(DateTime.Today); Store.Load();
             Check(Store.IdleThresholdSeconds == 60, "invalid threshold defaults safely");
         }
         finally

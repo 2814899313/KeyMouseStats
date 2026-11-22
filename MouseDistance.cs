@@ -6,6 +6,31 @@ using System.Windows.Forms;
 
 namespace KeyMouseStats
 {
+    /// <summary>
+    /// 把 Raw Input 的 signed wheelDelta 按 WHEEL_DELTA(120) 结算成标准滚动次数。
+    /// 余数必须跨包保留:高分辨率滚轮/Precision Touchpad 会把一格拆成多个包。
+    /// 垂直与水平各自持有一个实例,互不污染余数。
+    /// </summary>
+    internal sealed class WheelAccumulator
+    {
+        internal const int WheelDelta = 120;
+        private int _remainder;
+
+        internal int Remainder { get { return _remainder; } }
+
+        /// <summary>返回本包结算出的标准滚动次数;正负号保留方向。余数留在下一次。</summary>
+        internal int Add(int delta)
+        {
+            if (delta == 0) return 0;
+            _remainder += delta;
+            int steps = _remainder / WheelDelta;
+            _remainder -= steps * WheelDelta;
+            return steps;
+        }
+
+        internal void Reset() { _remainder = 0; }
+    }
+
     internal static class MouseDistance
     {
         public static bool ValidDpi(double dpi)
@@ -44,6 +69,8 @@ namespace KeyMouseStats
         // RAWINPUTHEADER: DWORD + DWORD + HANDLE + WPARAM; RAWMOUSE: 24 bytes.
         private readonly byte[] _buffer = new byte[8 + 2 * IntPtr.Size + 24];
         public bool Registered { get; private set; }
+        /// <summary>最近一次 GetRawInputData 是否失败。失败时钩子必须接管点击/滚轮计数。</summary>
+        public bool ReadFailed { get { return _readFailed; } }
         public int LastDx { get; private set; }
         public int LastDy { get; private set; }
         public long LastDevice { get; private set; }
@@ -62,7 +89,7 @@ namespace KeyMouseStats
             {
                 if (!Registered) return "鼠标采集注册失败，错误码 " + _error;
                 if (_readFailed) return "鼠标数据读取失败，请重启程序重试。";
-                if (_absoluteSeen) return "已忽略绝对坐标输入；仅支持相对移动的鼠标。";
+                if (_absoluteSeen) return "绝对坐标只用于点击/滚轮；路程与矢量分析仅支持相对移动。";
                 return "鼠标采集已启用（后台和隐藏小组件时仍可统计）。";
             }
         }
@@ -70,7 +97,7 @@ namespace KeyMouseStats
         public void Register(IntPtr window)
         {
             RelativeSeen=false;
-            Device device = new Device { Page = 1, Usage = 2, Flags = 0x100, Target = window };
+            Device device = new Device { Page = 1, Usage = 2, Flags = 0x100 | 0x2000, Target = window };
             Registered = RegisterRawInputDevices(new Device[] { device }, 1, (uint)Marshal.SizeOf(typeof(Device)));
             _error = Registered ? 0 : Marshal.GetLastWin32Error();
         }
@@ -83,28 +110,67 @@ namespace KeyMouseStats
             Registered = false;
         }
 
+        /// <summary>
+        /// 读取一个 WM_INPUT 鼠标包。
+        /// 返回值表示“这是一个结构完整、可派发按钮/滚轮的鼠标包”,不再表示“位移可换算”。
+        /// 绝对坐标包会返回 true,但 counts=0、absolute=true,由调用方跳过路程累计。
+        /// </summary>
         public bool Read(IntPtr input, out double counts)
         {
             counts = 0;
             uint size = (uint)_buffer.Length;
             uint read = GetRawInputData(input, 0x10000003, _buffer, ref size, (uint)(8 + 2 * IntPtr.Size));
             if (read == uint.MaxValue) { _readFailed = true; RelativeSeen=false;return false; }
-            _readFailed = false;
+
             bool absolute;
-            bool valid = Decode(_buffer, (int)read, IntPtr.Size, out counts, out absolute);
+            ushort buttonFlags;
+            short wheelDelta;
+            bool valid = DecodeAll(_buffer, (int)read, IntPtr.Size, out counts,
+                out absolute, out buttonFlags, out wheelDelta);
             _absoluteSeen |= absolute;
-            if(absolute)RelativeSeen=false;
-            if(valid)
+            if (absolute) RelativeSeen = false;
+            if (!valid)
             {
-                int header=8+2*IntPtr.Size;LastDx=BitConverter.ToInt32(_buffer,header+12);LastDy=BitConverter.ToInt32(_buffer,header+16);
-                LastDevice=IntPtr.Size==8?BitConverter.ToInt64(_buffer,8):BitConverter.ToInt32(_buffer,8);
-                ushort flags; short wheel;
-                DecodeButtons(_buffer, IntPtr.Size, out flags, out wheel);
-                LastButtonFlags = flags;
-                LastWheelDelta = wheel;
-                if(counts>0)RelativeSeen=true;
+                LastButtonFlags = 0;
+                LastWheelDelta = 0;
+                return false;
             }
-            return valid;
+
+            // 只有真正解出一个鼠标包才清除失败标记;键盘 WM_INPUT 也会进入这里,
+            // 不能让它把鼠标读取失败的状态顺手清掉。
+            _readFailed = false;
+            LastButtonFlags = buttonFlags;
+            LastWheelDelta = wheelDelta;
+            // hDevice 与坐标模式无关:绝对坐标触控板也必须能归到自己的档案。
+            LastDevice = IntPtr.Size == 8 ? BitConverter.ToInt64(_buffer, 8) : BitConverter.ToInt32(_buffer, 8);
+            if (!absolute)
+            {
+                int header = 8 + 2 * IntPtr.Size;
+                LastDx = BitConverter.ToInt32(_buffer, header + 12);
+                LastDy = BitConverter.ToInt32(_buffer, header + 16);
+                if (counts > 0) RelativeSeen = true;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// 同时解码位移与按钮/滚轮。绝对坐标包的位移不可用于 DPI 换算(Decode 返回 false),
+        /// 但按钮/滚轮仍然必须解码 —— 这条路径是触控板/触控笔/远程桌面点击不漏计的关键。
+        /// </summary>
+        internal static bool DecodeAll(byte[] packet, int length, int pointerSize,
+            out double counts, out bool absolute, out ushort buttonFlags, out short wheelDelta)
+        {
+            counts = 0;
+            absolute = false;
+            buttonFlags = 0;
+            wheelDelta = 0;
+            bool relative = Decode(packet, length, pointerSize, out counts, out absolute);
+            ushort flags;
+            short wheel;
+            if (!DecodeButtons(packet, length, pointerSize, out flags, out wheel)) return false;
+            buttonFlags = flags;
+            wheelDelta = wheel;
+            return relative || absolute;
         }
 
         /// <summary>
@@ -113,12 +179,19 @@ namespace KeyMouseStats
         /// </summary>
         internal static bool DecodeButtons(byte[] packet, int pointerSize, out ushort buttonFlags, out short wheelDelta)
         {
+            return DecodeButtons(packet, packet == null ? 0 : packet.Length, pointerSize, out buttonFlags, out wheelDelta);
+        }
+
+        internal static bool DecodeButtons(byte[] packet, int length, int pointerSize, out ushort buttonFlags, out short wheelDelta)
+        {
             buttonFlags = 0;
             wheelDelta = 0;
             if (pointerSize != 4 && pointerSize != 8) return false;
             int header = 8 + 2 * pointerSize;
-            if (packet == null || packet.Length < header + 24) return false;
+            if (packet == null || length < header + 24 || length > packet.Length) return false;
             if (BitConverter.ToUInt32(packet, 0) != 0) return false;   // 不是鼠标包
+            uint declaredSize = BitConverter.ToUInt32(packet, 4);
+            if (declaredSize < header + 24 || declaredSize > length) return false;
             buttonFlags = BitConverter.ToUInt16(packet, header + 4);
             wheelDelta = BitConverter.ToInt16(packet, header + 6);
             return true;
@@ -149,6 +222,17 @@ namespace KeyMouseStats
     /// 这个类的唯一职责是当「探针」:系统明明在收按键,钩子却一声不吭,说明钩子已经被摘了。
     /// 有了它,键盘停摆的发现时间从「30 秒看门狗」缩短到「1.5 秒」。
     /// </summary>
+    internal struct RawKeyData
+    {
+        public IntPtr Device;
+        public ushort MakeCode;
+        public ushort Flags;
+        public ushort VKey;
+        public uint Message;
+        public uint ExtraInformation;
+        public bool Down;
+    }
+
     internal sealed class RawKeyInput
     {
         [StructLayout(LayoutKind.Sequential)]
@@ -168,15 +252,17 @@ namespace KeyMouseStats
 
         private readonly byte[] _buffer = new byte[8 + 2 * IntPtr.Size + 16];
         public bool Registered { get; private set; }
+        public bool ReadFailed { get; private set; }
         private int _error;
 
         public string Status { get { return Registered ? "键盘探针已启用" : "键盘探针注册失败,错误码 " + _error; } }
 
         public void Register(IntPtr window)
         {
-            Device device = new Device { Page = 1, Usage = 6, Flags = 0x100, Target = window };
+            Device device = new Device { Page = 1, Usage = 6, Flags = 0x100 | 0x2000, Target = window };
             Registered = RegisterRawInputDevices(new Device[] { device }, 1, (uint)Marshal.SizeOf(typeof(Device)));
             _error = Registered ? 0 : Marshal.GetLastWin32Error();
+            ReadFailed = false;
         }
 
         public void Unregister()
@@ -185,30 +271,60 @@ namespace KeyMouseStats
             Device device = new Device { Page = 1, Usage = 6, Flags = 1, Target = IntPtr.Zero };
             RegisterRawInputDevices(new Device[] { device }, 1, (uint)Marshal.SizeOf(typeof(Device)));
             Registered = false;
+            ReadFailed = false;
         }
 
-        /// <summary>这个 WM_INPUT 是不是键盘包;是的话顺便带出虚拟键码与是按下还是抬起。</summary>
+        /// <summary>兼容探针旧调用:只取 VKey/按下态。</summary>
         public bool Read(IntPtr input, out ushort vk, out bool down)
         {
-            vk = 0;
-            down = false;
+            RawKeyData data;
+            bool ok = Read(input, out data);
+            vk = data.VKey;
+            down = data.Down;
+            return ok;
+        }
+
+        /// <summary>读取一个 WM_INPUT 键盘包,带 hDevice 与完整 RAWKEYBOARD 字段。</summary>
+        public bool Read(IntPtr input, out RawKeyData data)
+        {
+            data = new RawKeyData();
             uint size = (uint)_buffer.Length;
             uint read = GetRawInputData(input, 0x10000003, _buffer, ref size, (uint)(8 + 2 * IntPtr.Size));
-            if (read == uint.MaxValue) return false;
-            return Decode(_buffer, (int)read, IntPtr.Size, out vk, out down);
+            if (read == uint.MaxValue)
+            {
+                ReadFailed = true;
+                return false;
+            }
+            if (!DecodeFull(_buffer, (int)read, IntPtr.Size, out data)) return false;
+            ReadFailed = false;
+            return true;
         }
 
         internal static bool Decode(byte[] packet, int length, int pointerSize, out ushort vk, out bool down)
         {
-            vk = 0;
-            down = false;
+            RawKeyData data;
+            bool ok = DecodeFull(packet, length, pointerSize, out data);
+            vk = data.VKey;
+            down = data.Down;
+            return ok;
+        }
+
+        internal static bool DecodeFull(byte[] packet, int length, int pointerSize, out RawKeyData data)
+        {
+            data = new RawKeyData();
             if (pointerSize != 4 && pointerSize != 8) return false;
             int header = 8 + 2 * pointerSize;
-            if (packet == null || length < header + 8 || length > packet.Length) return false;
+            if (packet == null || length < header + 16 || length > packet.Length) return false;
             if (BitConverter.ToUInt32(packet, 0) != 1) return false;   // RIM_TYPEKEYBOARD
-            ushort flags = BitConverter.ToUInt16(packet, header + 2);
-            vk = BitConverter.ToUInt16(packet, header + 6);
-            down = (flags & 1) == 0;    // RI_KEY_BREAK = 1
+            data.Device = pointerSize == 8
+                ? new IntPtr(BitConverter.ToInt64(packet, 8))
+                : new IntPtr(BitConverter.ToInt32(packet, 8));
+            data.MakeCode = BitConverter.ToUInt16(packet, header);
+            data.Flags = BitConverter.ToUInt16(packet, header + 2);
+            data.VKey = BitConverter.ToUInt16(packet, header + 6);
+            data.Message = BitConverter.ToUInt32(packet, header + 8);
+            data.ExtraInformation = BitConverter.ToUInt32(packet, header + 12);
+            data.Down = (data.Flags & 1) == 0;    // RI_KEY_BREAK = 1
             return true;
         }
     }

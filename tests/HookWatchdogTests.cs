@@ -47,6 +47,24 @@ internal static class HookWatchdogTests
         // 读不到空闲时间:只信句柄,不做停摆判断。
         Check(!HookWatchdog.ShouldRepair(true, false, uint.MaxValue, 999999), "unknown idle time never triggers a repair");
 
+        // 键盘/鼠标独立判定:不能因为另一个外设还在动就放过停摆的钩子。
+        bool repairKb, repairMs;
+        HookWatchdog.Evaluate(true, true, false, 800, HookWatchdog.StallWindowMs + 1, 500,
+            out repairKb, out repairMs);
+        Check(repairKb && !repairMs, "only the stalled keyboard hook is repaired");
+        HookWatchdog.Evaluate(true, true, false, 800, 500, HookWatchdog.StallWindowMs + 1,
+            out repairKb, out repairMs);
+        Check(!repairKb && repairMs, "only the stalled mouse hook is repaired");
+        HookWatchdog.Evaluate(false, true, false, 800, 0, 500, out repairKb, out repairMs);
+        Check(repairKb && !repairMs, "a missing keyboard handle is repaired independently");
+        HookWatchdog.Evaluate(true, false, false, 800, 500, 0, out repairKb, out repairMs);
+        Check(!repairKb && repairMs, "a missing mouse handle is repaired independently");
+        HookWatchdog.Evaluate(true, true, true, 800, HookWatchdog.StallWindowMs + 1,
+            HookWatchdog.StallWindowMs + 1, out repairKb, out repairMs);
+        Check(!repairKb && !repairMs, "a busy session never repairs either hook");
+        Check(HookWatchdog.Elapsed(-2147483648L, 2147483647L) == 1,
+            "TickCount wrap is handled without a negative stall");
+
         // 阈值本身也是契约:改小了会误杀,改大了用户又要等更久。
         Check(HookWatchdog.CheckIntervalMs == 5000, "the watchdog checks every five seconds");
         Check(HookWatchdog.StallWindowMs == 30000, "a thirty second stall is the trigger");

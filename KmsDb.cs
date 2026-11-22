@@ -300,7 +300,8 @@ namespace KeyMouseStats
             List<FlowSessionRow> rows = new List<FlowSessionRow>();
             using (KmsStmt statement = Prepare(
                 "SELECT id, start_ts_ms, end_ts_ms, process_path, process_name, window_title, " +
-                "key_count, category_id, active_ms FROM events_window_session " +
+                "key_count, left_clicks, right_clicks, middle_clicks, x_clicks, wheel, " +
+                "category_id, active_ms FROM events_window_session " +
                 "WHERE day = ? ORDER BY start_ts_ms ASC, id ASC;"))
             {
                 statement.Bind(new object[] { day });
@@ -314,8 +315,11 @@ namespace KeyMouseStats
                     row.ProcessName = statement.ColumnText(4);
                     row.WindowTitle = statement.ColumnText(5);
                     row.KeyCount = statement.ColumnLong(6);
-                    row.CategoryId = (int)statement.ColumnLong(7);
-                    row.ActiveMs = statement.ColumnLong(8);
+                    long clicks = statement.ColumnLong(7) + statement.ColumnLong(8)
+                        + statement.ColumnLong(9) + statement.ColumnLong(10);
+                    row.InputCount = row.KeyCount + clicks + statement.ColumnLong(11);
+                    row.CategoryId = (int)statement.ColumnLong(12);
+                    row.ActiveMs = statement.ColumnLong(13);
                     rows.Add(row);
                 }
             }
@@ -352,7 +356,7 @@ namespace KeyMouseStats
         }
 
         /// <summary>
-        /// 批量回填 semantic_tag('deep' | 'normal' | 'fragmented')。
+        /// 批量回填 semantic_tag('deep' | 'normal' | 'fragmented' | 'idle')。
         /// 幂等:只更新值确实不同的行;返回真正改动的行数。单事务提交,失败回滚。
         /// </summary>
         internal static int UpdateSessionSemanticTags(string path, IDictionary<long, string> tags)
@@ -403,7 +407,7 @@ namespace KeyMouseStats
             KmsMergeResult result = new KmsMergeResult();
             if (string.IsNullOrEmpty(path) || package == null) return result;
             string id = string.IsNullOrEmpty(packageId) ? "unknown" : packageId;
-            long now = DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond;
+            long now = UnixTime.NowMs();
             using (KmsDb db = Open(path, false))
             {
                 KmsSchema.Ensure(db);

@@ -15,6 +15,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 namespace KeyMouseStats
 {
@@ -22,6 +23,12 @@ namespace KeyMouseStats
     {
         /// <summary>当前 schema 版本。任何表结构变更都必须 +1 并补迁移分支。</summary>
         internal const int Rev = 1;
+
+        /// <summary>3995 年时间基准缺陷的一次性修复标记。</summary>
+        internal const string EpochFixMarker = "epoch_fix_v1";
+
+        /// <summary>异常时间戳阈值:正常 Unix 毫秒约 1.7e12,3995 年数据约 6.39e13。</summary>
+        internal const long EpochFixThresholdMs = 60000000000000L;
 
         /// <summary>数据库文件名(放在数据根目录下)。</summary>
         internal const string DbFileName = "kmstats.db";
@@ -282,6 +289,10 @@ namespace KeyMouseStats
         internal static void Ensure(KmsDb db)
         {
             if (db == null) throw new KmsDbException("Ensure 需要连接");
+
+            // 3995 年时间基准缺陷:先备份并抢救历史事件,再执行任何 DDL/元数据写入。
+            MigrateEpoch3995IfNeeded(db);
+
             string[] statements = Statements();
             for (int i = 0; i < statements.Length; i++)
             {
@@ -289,7 +300,7 @@ namespace KeyMouseStats
                 db.Execute(statements[i]);
             }
 
-            long now = DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond;
+            long now = UnixTime.NowMs();
             db.RunInTransaction(delegate(KmsDb tx)
             {
                 tx.Execute("INSERT OR IGNORE INTO meta (k, v) VALUES ('schema_rev', ?);",
@@ -304,6 +315,140 @@ namespace KeyMouseStats
             });
 
             db.Execute("PRAGMA user_version = " + Rev.ToString() + ";");
+
+            // 没有 3995 异常时也落一次标记:后续启动直接跳过全表探测。
+            try
+            {
+                string marker = db.ScalarText("SELECT v FROM meta WHERE k=?;", new object[] { EpochFixMarker });
+                if (!string.Equals(marker, "1", StringComparison.Ordinal) && !HasEpoch3995(db))
+                    db.Execute("INSERT OR IGNORE INTO meta (k, v) VALUES (?, ?);",
+                        new object[] { EpochFixMarker, "1" });
+            }
+            catch
+            {
+            }
+        }
+
+        /// <summary>幂等抢救 3995 年事件。备份失败会抛出,由 ShadowPipeline 记录并降级。</summary>
+        private static void MigrateEpoch3995IfNeeded(KmsDb db)
+        {
+            if (!db.TableExists("meta")) return;
+            if (!db.TableExists("events_window_session") && !db.TableExists("events_input_burst")) return;
+            try
+            {
+                if (string.Equals(db.ScalarText("SELECT v FROM meta WHERE k=?;",
+                    new object[] { EpochFixMarker }), "1", StringComparison.Ordinal)) return;
+            }
+            catch
+            {
+                return;
+            }
+            try
+            {
+                if (!HasEpoch3995(db)) return;
+            }
+            catch
+            {
+                return;
+            }
+
+            BackupEpochDb(db);
+            db.RunInTransaction(delegate(KmsDb tx)
+            {
+                FixEventTable(tx, "events_window_session");
+                FixEventTable(tx, "events_input_burst");
+
+                ShiftMetaValue(tx, "last_event_ts_ms");
+                ShiftMetaValue(tx, "db_created_ms");
+                ShiftMetaValue(tx, "imported_ms");
+
+                ShiftColumn(tx, "kms_import_log", "imported_ms");
+                ShiftColumn(tx, "migration_log", "imported_ms");
+                ShiftColumn(tx, "app_category_rule", "updated_ms");
+                ShiftColumn(tx, "window_daily_agg", "first_ts_ms");
+                ShiftColumn(tx, "window_daily_agg", "last_ts_ms");
+
+                DeleteDirtyDayRows(tx, "daily_summary");
+                DeleteDirtyDayRows(tx, "daily_hour_agg");
+                DeleteDirtyDayRows(tx, "daily_key_agg");
+                DeleteDirtyDayRows(tx, "window_daily_agg");
+                DeleteDirtyDayRows(tx, "daily_click_grid");
+
+                tx.Execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?);",
+                    new object[] { EpochFixMarker, "1" });
+            });
+        }
+
+        private static bool HasEpoch3995(KmsDb db)
+        {
+            if (db.TableExists("events_window_session")
+                && db.ScalarLong("SELECT COUNT(*) FROM events_window_session WHERE day >= '3900-01-01' " +
+                    "OR start_ts_ms >= ? OR end_ts_ms >= ? LIMIT 1;",
+                    new object[] { EpochFixThresholdMs, EpochFixThresholdMs }) > 0) return true;
+            if (db.TableExists("events_input_burst")
+                && db.ScalarLong("SELECT COUNT(*) FROM events_input_burst WHERE day >= '3900-01-01' " +
+                    "OR start_ts_ms >= ? OR end_ts_ms >= ? LIMIT 1;",
+                    new object[] { EpochFixThresholdMs, EpochFixThresholdMs }) > 0) return true;
+            if (db.TableExists("meta")
+                && db.ScalarLong("SELECT COUNT(*) FROM meta WHERE k IN ('last_event_ts_ms','db_created_ms','imported_ms') " +
+                    "AND CAST(v AS INTEGER) >= ? LIMIT 1;", new object[] { EpochFixThresholdMs }) > 0) return true;
+            return false;
+        }
+
+        private static void BackupEpochDb(KmsDb db)
+        {
+            string path = db.Path;
+            if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
+            string backup = path + ".bak-3995-fix";
+            if (File.Exists(backup)) return;   // 保留第一次备份,绝不覆盖
+            // 先备 WAL/SHM,最后备主库:任何一步失败都不会留下“只有主库”的半套备份。
+            CopyIfExists(path + "-wal", path + "-wal.bak-3995-fix");
+            CopyIfExists(path + "-shm", path + "-shm.bak-3995-fix");
+            File.Copy(path, backup, false);
+        }
+
+        private static void CopyIfExists(string source, string target)
+        {
+            if (!File.Exists(source) || File.Exists(target)) return;
+            File.Copy(source, target, false);
+        }
+
+        private static void FixEventTable(KmsDb tx, string table)
+        {
+            if (!tx.TableExists(table)) return;
+            string offset = UnixTime.YearOneToUnixMs.ToString();
+            string threshold = EpochFixThresholdMs.ToString();
+            tx.Execute("UPDATE " + table + " SET day = strftime('%Y-%m-%d', " +
+                "(CASE WHEN start_ts_ms >= " + threshold + " THEN start_ts_ms - " + offset + " ELSE start_ts_ms END) / 1000, " +
+                "'unixepoch', 'localtime') " +
+                "WHERE day >= '3900-01-01' OR start_ts_ms >= " + threshold + ";");
+            tx.Execute("UPDATE " + table + " SET " +
+                "start_ts_ms = CASE WHEN start_ts_ms >= " + threshold + " THEN start_ts_ms - " + offset + " ELSE start_ts_ms END, " +
+                "end_ts_ms = CASE WHEN end_ts_ms >= " + threshold + " THEN end_ts_ms - " + offset + " ELSE end_ts_ms END " +
+                "WHERE start_ts_ms >= " + threshold + " OR end_ts_ms >= " + threshold + ";");
+            tx.Execute("UPDATE " + table + " SET end_ts_ms = start_ts_ms WHERE end_ts_ms < start_ts_ms;");
+        }
+
+        private static void ShiftMetaValue(KmsDb tx, string key)
+        {
+            if (!tx.TableExists("meta")) return;
+            tx.Execute("UPDATE meta SET v = CAST(CAST(v AS INTEGER) - " + UnixTime.YearOneToUnixMs.ToString() + " AS TEXT) " +
+                "WHERE k = ? AND CAST(v AS INTEGER) >= " + EpochFixThresholdMs.ToString() + ";",
+                new object[] { key });
+        }
+
+        private static void ShiftColumn(KmsDb tx, string table, string column)
+        {
+            if (!tx.TableExists(table)) return;
+            tx.Execute("UPDATE " + table + " SET " + column + " = " + column + " - " +
+                UnixTime.YearOneToUnixMs.ToString() + " WHERE " + column + " >= " +
+                EpochFixThresholdMs.ToString() + ";");
+        }
+
+        private static void DeleteDirtyDayRows(KmsDb tx, string table)
+        {
+            if (!tx.TableExists(table)) return;
+            tx.Execute("DELETE FROM " + table + " WHERE day >= '3900-01-01';");
         }
 
         /// <summary>返回缺失的表名;空数组表示 schema 完整。</summary>

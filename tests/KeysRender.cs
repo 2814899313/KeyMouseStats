@@ -112,6 +112,21 @@ internal static class KeysRender
                 SetField(form, "_keyMetric", 0);
                 Render(form, "keys-heat-150", 1.5f);
 
+                // P1-03:同 DPI 下只改窗口尺寸,艺术主题键盘底板必须重建。
+                Store.ThemeId = 12;
+                Store.KeyboardLayout = 1;
+                SetField(form, "_keyView", 2);
+                SetField(form, "_keyMetric", 0);
+                form.ClientSize = new Size(1072, 724);
+                SetField(form, "_s", 1f);
+                Render(form, "keys-plate-a", 1f);
+                int plateA = KeyboardPlateWidth(form);
+                form.ClientSize = new Size(1280, 860);
+                Render(form, "keys-plate-b", 1f);
+                int plateB = KeyboardPlateWidth(form);
+                if (plateA <= 0 || plateB <= 0 || plateA == plateB)
+                    throw new Exception("keyboard plate cache must be rebuilt when ClientSize changes at the same DPI");
+
                 typeof(Dashboard).GetMethod("OnFormClosed", Private).Invoke(form, new object[] { new FormClosedEventArgs(CloseReason.None) });
             }
             Console.WriteLine("Keys render: previews/keys-*.png written");
@@ -120,6 +135,13 @@ internal static class KeysRender
         {
             try { foreach (string file in Directory.GetFiles(dir)) File.Delete(file); Directory.Delete(dir); } catch { }
         }
+    }
+
+    private static int KeyboardPlateWidth(Dashboard form)
+    {
+        object value = typeof(Dashboard).GetField("_keyboardPlate", Private).GetValue(form);
+        Bitmap bitmap = value as Bitmap;
+        return bitmap == null ? 0 : bitmap.Width;
     }
 
     private static void Render(Dashboard form, string name, float scale)

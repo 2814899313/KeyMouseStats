@@ -35,6 +35,14 @@ internal static class RawInputTests
         Array.Copy(BitConverter.GetBytes(value), 0, bytes, offset, 2);
     }
 
+    private static void PutPtr(byte[] bytes, int offset, IntPtr value, int pointerSize)
+    {
+        if (pointerSize == 8)
+            Array.Copy(BitConverter.GetBytes(value.ToInt64()), 0, bytes, offset, 8);
+        else
+            Array.Copy(BitConverter.GetBytes(value.ToInt32()), 0, bytes, offset, 4);
+    }
+
     private static void Run()
     {
         foreach (int pointerSize in new[] { 4, 8 })
@@ -62,13 +70,39 @@ internal static class RawInputTests
             Check((flags & 0x0040) != 0 && (flags & 0x0100) != 0, "both side buttons are visible");
             Check(wheel == -120, "a negative wheel delta is preserved");
 
+            // ---- 绝对坐标包:位移不参与 DPI 换算,但按钮/滚轮仍必须解码 ----
+            PutUShort(mouse, header, 1);            // MOUSE_MOVE_ABSOLUTE
+            PutUShort(mouse, header + 4, 0x0001);   // 左键按下
+            PutShort(mouse, header + 6, 120);
+            double absoluteCounts;
+            bool absolute;
+            ushort absoluteFlags;
+            short absoluteWheel;
+            Check(RawMouseInput.DecodeAll(mouse, mouse.Length, pointerSize, out absoluteCounts,
+                out absolute, out absoluteFlags, out absoluteWheel),
+                "an absolute packet must still decode buttons/wheel");
+            Check(absolute && absoluteCounts == 0, "absolute movement is not used for distance");
+            Check((absoluteFlags & 0x0001) != 0 && absoluteWheel == 120,
+                "absolute packet keeps its button and wheel data");
+            PutUShort(mouse, header, 0);
+
             // ---- 键盘包:类型 1,RI_KEY_BREAK 在 flags 的最低位 ----
             byte[] key = new byte[header + 16];
             Put(key, 0, 1);                    // RIM_TYPEKEYBOARD
             Put(key, 4, key.Length);
+            PutPtr(key, 8, new IntPtr(0x1234), pointerSize);
             PutUShort(key, header, 0x1E);      // MakeCode = A
             PutUShort(key, header + 2, 0);     // 按下
             PutUShort(key, header + 6, 0x41);  // VK_A
+            Put(key, header + 8, 0x0100);      // WM_KEYDOWN
+            Put(key, header + 12, 0x55AA);     // ExtraInformation
+
+            RawKeyData full;
+            Check(RawKeyInput.DecodeFull(key, key.Length, pointerSize, out full), "a full keyboard packet decodes");
+            Check(full.Device == new IntPtr(0x1234), "hDevice is read from offset 8");
+            Check(full.MakeCode == 0x1E && full.VKey == 0x41 && full.Message == 0x0100,
+                "make code, vkey and message are read");
+            Check(full.ExtraInformation == 0x55AA && full.Down, "extra info and down state are read");
 
             ushort vk;
             bool down;
@@ -93,6 +127,21 @@ internal static class RawInputTests
         ushort v; bool d;
         Check(!RawKeyInput.Decode(new byte[8], 8, 8, out v, out d), "a short keyboard packet is rejected");
         Check(!RawKeyInput.Decode(null, 0, 8, out v, out d), "a null keyboard packet is rejected");
+
+        // ---- WHEEL_DELTA 累计:余数跨包保留,正负方向都能结算 ----
+        WheelAccumulator wheelAccumulator = new WheelAccumulator();
+        Check(wheelAccumulator.Add(60) == 0 && wheelAccumulator.Remainder == 60,
+            "a half notch stays in the remainder");
+        Check(wheelAccumulator.Add(60) == 1 && wheelAccumulator.Remainder == 0,
+            "two half notches settle one standard scroll");
+        Check(wheelAccumulator.Add(-30) == 0 && wheelAccumulator.Remainder == -30,
+            "negative delta accumulates its sign");
+        Check(wheelAccumulator.Add(-90) == -1 && wheelAccumulator.Remainder == 0,
+            "negative remainder settles one negative scroll");
+        Check(wheelAccumulator.Add(240) == 2, "a 240 delta settles two scrolls");
+        WheelAccumulator horizontal = new WheelAccumulator();
+        Check(horizontal.Add(120) == 1 && wheelAccumulator.Remainder == 0,
+            "vertical and horizontal accumulators stay independent");
 
         Console.WriteLine("RawInputTests: " + checks + " checks passed");
     }

@@ -31,6 +31,13 @@ internal static class WellbeingTests
         WellbeingSettings.SummaryEnabled = false;
         WellbeingSettings.SummaryHour = 22;
         WellbeingSettings.SummarySent = "";
+        WellbeingSettings.FocusPillEnabled = true;
+        WellbeingSettings.FocusPillAfterMinutes = 5;
+        WellbeingSettings.FocusBreakEnabled = false;
+        WellbeingSettings.FocusBreakAfterMinutes = 45;
+        WellbeingSettings.FocusBreakIdleSeconds = 18;
+        WellbeingSettings.BreakSnoozeUntil = DateTime.MinValue;
+        WellbeingSettings.BreakMutedDay = "";
         Wellbeing.FullscreenProbe = delegate { return false; };
     }
 
@@ -57,6 +64,13 @@ internal static class WellbeingTests
         WellbeingSettings.SummaryEnabled = true;
         WellbeingSettings.SummaryHour = 21;
         WellbeingSettings.SummarySent = "2026-09-08";
+        WellbeingSettings.FocusPillEnabled = false;
+        WellbeingSettings.FocusPillAfterMinutes = 6;
+        WellbeingSettings.FocusBreakEnabled = true;
+        WellbeingSettings.FocusBreakAfterMinutes = 50;
+        WellbeingSettings.FocusBreakIdleSeconds = 20;
+        WellbeingSettings.BreakSnoozeUntil = new DateTime(2026, 9, 9, 10, 45, 0);
+        WellbeingSettings.BreakMutedDay = "2026-09-09";
         string encoded = WellbeingSettings.Encode();
         Reset();
         WellbeingSettings.Load(encoded);
@@ -68,6 +82,11 @@ internal static class WellbeingTests
         Check(WellbeingSettings.LastReminder == new DateTime(2026, 9, 9, 10, 30, 0), "last reminder round trip");
         Check(WellbeingSettings.SummaryEnabled && WellbeingSettings.SummaryHour == 21, "summary round trip");
         Check(WellbeingSettings.SummarySent == "2026-09-08", "summary sent round trip");
+        Check(!WellbeingSettings.FocusPillEnabled && WellbeingSettings.FocusPillAfterMinutes == 6, "focus pill round trip");
+        Check(WellbeingSettings.FocusBreakEnabled && WellbeingSettings.FocusBreakAfterMinutes == 50, "focus break round trip");
+        Check(WellbeingSettings.FocusBreakIdleSeconds == 20, "focus break idle round trip");
+        Check(WellbeingSettings.BreakSnoozeUntil == new DateTime(2026, 9, 9, 10, 45, 0), "focus break snooze round trip");
+        Check(WellbeingSettings.BreakMutedDay == "2026-09-09", "focus break mute round trip");
 
         // 越界值必须被收敛到安全范围
         WellbeingSettings.Load("9|1000||1|9999|9999||1|99|");
@@ -125,6 +144,10 @@ internal static class WellbeingTests
         Check(Wellbeing.ContinuousMessage(now, longSession) == null, "fullscreen suppresses the reminder");
         Wellbeing.FullscreenProbe = delegate { return false; };
         Check(Wellbeing.ContinuousMessage(now, longSession) != null, "reminder returns when not fullscreen");
+        WellbeingSettings.FocusBreakEnabled = true;
+        WellbeingSettings.LastReminder = DateTime.MinValue;
+        Check(Wellbeing.ContinuousMessage(now, longSession) == null, "focus break suppresses legacy continuous reminder");
+        WellbeingSettings.FocusBreakEnabled = false;
         Reset();
 
         // ---- 每日摘要 ----

@@ -67,8 +67,8 @@ namespace KeyMouseStats
     /// <summary>无锁 SPSC 环形缓冲区。</summary>
     internal sealed class EventRing
     {
-        /// <summary>默认容量。8192 槽 × 约 40 字节 ≈ 320 KB,常驻内存可接受。</summary>
-        internal const int DefaultCapacity = 8192;
+        /// <summary>默认容量。32768 槽 × 约 40 字节 ≈ 1.25 MB,覆盖 8 kHz 鼠标 1 秒以上的突发。</summary>
+        internal const int DefaultCapacity = 32768;
 
         private readonly RawInputEvent[] _slots;
         private readonly int _mask;
@@ -103,6 +103,9 @@ namespace KeyMouseStats
         {
             get { return unchecked(_write - _read); }
         }
+
+        /// <summary>积压达到容量一半。写线程应在此时被提前唤醒。</summary>
+        internal bool IsBacklogged { get { return PendingCount >= (_capacity >> 1); } }
 
         /// <summary>因环满被丢弃的事件总数(原子读)。</summary>
         internal long DroppedCount { get { return Interlocked.Read(ref _dropped); } }

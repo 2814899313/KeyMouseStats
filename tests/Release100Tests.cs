@@ -26,6 +26,18 @@ internal static class Release100Tests
         tracker.OnActiveInterval=delegate(DayRecord d,ActiveSession s,DateTime a,DateTime b){CrossTelemetry.Interval(d,s,"app",a,b);};
         DateTime midnight=DateTime.Today.AddDays(1);tracker.Sample(midnight.AddSeconds(-1),1000,0,60);tracker.Sample(midnight.AddSeconds(1),3000,0,60);
         Near(split[midnight.AddDays(-1)].Cross.AppHours["app"][23],1,"midnight previous date");Near(split[midnight].Cross.AppHours["app"][0],1,"midnight new date");
+        Check(Native.MouseButtonId(Native.WM_LBUTTONDOWN,0)==1&&Native.MouseButtonId(Native.WM_RBUTTONDOWN,0)==2&&Native.MouseButtonId(Native.WM_MBUTTONDOWN,0)==3,"left/right/middle ids");
+        Check(Native.MouseButtonId(Native.WM_XBUTTONDOWN,1u<<16)==4&&Native.MouseButtonId(Native.WM_XBUTTONDOWN,2u<<16)==5,"XButton1=4, XButton2=5");
+        Check(Native.MouseButtonId(Native.WM_XBUTTONUP,1u<<16)==4&&Native.MouseButtonId(Native.WM_XBUTTONUP,2u<<16)==5,"side button release uses the same ids");
+        MouseVectorTracker side=new MouseVectorTracker();DayRecord sideDay=NewDay();
+        side.Button(sideDay,0,4,true);      // Raw Input down
+        side.Button(sideDay,10,4,false);    // unified hook up
+        side.Move(sideDay,20,1,20,0,0);
+        Near(sideDay.Cross.DragCounts,0,"side button release must clear the held state");
+        side.Button(sideDay,30,5,true);
+        side.Button(sideDay,40,5,false);
+        side.Move(sideDay,50,1,20,0,0);
+        Near(sideDay.Cross.DragCounts,0,"XButton2 also clears its held state");
         MouseVectorTracker mouse=new MouseVectorTracker();DayRecord vector=NewDay();
         mouse.Move(vector,0,1,-3,4,0);Near(vector.Cross.Direction[0],3,"left component");Near(vector.Cross.Direction[3],4,"down component");Near(vector.Cross.PathCounts,5,"euclidean path distinct from axial total");Check(vector.Cross.Flicks==0&&vector.Cross.CalibratedPackets==0,"unset DPI excludes flick detection");
         mouse.Button(vector,100,1,true);mouse.Move(vector,110,1,0,-5,0);mouse.Button(vector,120,1,false);mouse.Button(vector,1000,2,true);mouse.Button(vector,1010,2,false);

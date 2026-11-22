@@ -187,7 +187,14 @@ namespace KeyMouseStats
             return id >= 0 && id < All.Length ? id : 0;
 #endif
         }
-        public static ArtTheme Current { get { return All[Validate(Store.ThemeId)]; } }
+        public static ArtTheme Current
+        {
+            get
+            {
+                ArtTheme custom = CustomThemeStore.ActiveTheme;
+                return custom != null ? custom : All[Validate(Store.ThemeId)];
+            }
+        }
         public static Color Mix(Color a, Color b, double amount)
         {
             amount = Math.Max(0, Math.Min(1, amount));
@@ -242,29 +249,82 @@ namespace KeyMouseStats
     internal sealed partial class Dashboard
     {
         private readonly RectangleF[] _themeRects = new RectangleF[ArtTheme.All.Length];
+        private RectangleF _customThemeRect;
+        private bool _customThemeHover;
         private void PaintThemePicker(Graphics g)
         {
-#if CLEAN_EDITION
-            AppText(g, "外观 · 清爽版", _fSmall, Ctext, new RectangleF(24, 492, 132, 24), false);
-            AppText(g, "轻量基础界面", _fAxis, Csub, new RectangleF(24, 513, 132, 18), false);
-            return;
-#else
             PointF mouse = ToBase(_mouse);
-            string name = GujianArt.Active ? "琴心剑魄" : EuroTruckArt.Active ? "长途之路" : WuxiaArt.Active ? "碧血丹心" : ThemeShortName(ArtTheme.Validate(Store.ThemeId));
+            string name = CustomArt.Active ? CustomThemeStore.ActiveNameOr("自定义皮肤")
+                : GujianArt.Active ? "琴心剑魄" : EuroTruckArt.Active ? "长途之路" : WuxiaArt.Active ? "碧血丹心" : ThemeShortName(ArtTheme.Validate(Store.ThemeId));
+#if CLEAN_EDITION
+            AppText(g, "外观 · " + (CustomArt.Active ? name : "清爽版"), _fSmall, Ctext, new RectangleF(24, 490, 132, 24), false);
+            AppText(g, CustomArt.Active ? "自定义壁纸 · " + CustomThemeStore.ActiveDim + "%" : "轻量基础界面", _fAxis, Csub, new RectangleF(24, 513, 132, 18), false);
+#else
             for (int i = 0; i < ArtTheme.All.Length; i++)
             {
                 RectangleF r = new RectangleF(24 + i % 7 * 19, 522 + i / 7 * 24, 14, 14);
                 _themeRects[i] = new RectangleF(r.X-2,r.Y-3,18,20);
                 ArtTheme theme = ArtTheme.All[i];
-                bool selected=Store.ThemeId==i;
+                bool selected=Store.ThemeId==i && !CustomArt.Active;
                 using (SolidBrush b = new SolidBrush(theme.Accent)) g.FillEllipse(b, r);
                 if (selected || _themeRects[i].Contains(mouse))
                     using (Pen p = new Pen(selected ? Ctext : Csub, 1.5f))
                         g.DrawEllipse(p, r.X - 3, r.Y - 3, r.Width + 6, r.Height + 6);
                 if (_themeRects[i].Contains(mouse)) name = ThemeShortName(i);
             }
+            if (CustomArt.Active && !_customThemeHover) name = CustomThemeStore.ActiveNameOr("自定义皮肤");
             AppText(g, "外观 · " + name, _fSmall, Csub, new RectangleF(24, 490, 132, 24), false);
 #endif
+            PaintCustomThemeDot(g, mouse);
+        }
+        /// <summary>调色板末尾的「+ 自定义皮肤」圆点;有自定义壁纸时实心强调色。</summary>
+        private void PaintCustomThemeDot(Graphics g, PointF mouse)
+        {
+            int index = ArtTheme.All.Length;
+            RectangleF r = new RectangleF(24 + index % 7 * 19, 522 + index / 7 * 24, 14, 14);
+            _customThemeRect = new RectangleF(r.X - 2, r.Y - 3, 20, 20);
+            _customThemeHover = _customThemeRect.Contains(mouse);
+            bool active = CustomArt.Active;
+            Color accent = active ? ArtTheme.Current.Accent : Csub;
+            if (active)
+                using (SolidBrush fill = new SolidBrush(accent)) g.FillEllipse(fill, r);
+            else
+                using (SolidBrush fill = new SolidBrush(Color.FromArgb(30, Ctext))) g.FillEllipse(fill, r);
+            using (Pen ring = new Pen(accent, 1.15f))
+            {
+                if (!active) ring.DashStyle = DashStyle.Dash;
+                g.DrawEllipse(ring, r);
+            }
+            Color plus = active ? ArtTheme.Current.OnAccent : Ctext;
+            using (Pen pen = new Pen(plus, 1.35f))
+            {
+                float cx = r.X + r.Width / 2f;
+                float cy = r.Y + r.Height / 2f;
+                g.DrawLine(pen, cx - 3.2f, cy, cx + 3.2f, cy);
+                g.DrawLine(pen, cx, cy - 3.2f, cx, cy + 3.2f);
+            }
+            if (active || _customThemeHover)
+                using (Pen outline = new Pen(active ? Ctext : Csub, 1.5f))
+                    g.DrawEllipse(outline, r.X - 3, r.Y - 3, r.Width + 6, r.Height + 6);
+        }
+        private void OpenCustomThemeDialog()
+        {
+            using (CustomThemeDialog dialog = new CustomThemeDialog()) dialog.ShowDialog(this);
+            _paintedTheme = Store.ThemeId;
+            RefreshThemeSurfaces();
+        }
+        private void RefreshThemeSurfaces()
+        {
+            BackColor = Cbg;
+            if (_healthEditHost != null) _healthEditHost.SetScale(_s);
+            if (_healthInfoHost != null) _healthInfoHost.SetScale(_s);
+            RequestCustomComposite();
+            foreach (Form form in Application.OpenForms)
+            {
+                StatsWidget widget = form as StatsWidget;
+                if (widget != null) widget.RefreshTheme();
+                form.Invalidate();
+            }
         }
         /// <summary>侧栏主题名要放进 132 px,长名字用简称。</summary>
         private static string ThemeShortName(int id)
@@ -278,30 +338,29 @@ namespace KeyMouseStats
         }
         private bool HandleThemeClick(PointF point)
         {
+            if (_customThemeRect.Contains(point))
+            {
+                OpenCustomThemeDialog();
+                return true;
+            }
 #if CLEAN_EDITION
             return false;
 #else
             for (int i = 0; i < _themeRects.Length; i++) if (_themeRects[i].Contains(point))
             {
-                Store.ThemeId = i;NikkiArt.SyncTheme();
-                BackColor = Cbg;
+                Store.ThemeId = i;
+                CustomThemeStore.ClearActive();
+                NikkiArt.SyncTheme();
+                RefreshThemeSurfaces();
                 Store.Save();
-                foreach (Form form in Application.OpenForms)
-                {
-                    StatsWidget widget=form as StatsWidget;if(widget!=null)widget.RefreshTheme();
-                    form.Invalidate();
-                }
                 return true;
             }
             return false;
 #endif
         }
-        private void PaintThemeTexture(Graphics g)
+        /// <summary>当前逻辑画布:不小于设计基准,大窗口时铺满整页。</summary>
+        private RectangleF CurrentPageRect()
         {
-            // 3.0:主题原画按「当前逻辑尺寸」铺,而不是设计基准 BW×BH。
-            // 基准是 1072×724,窗口一旦更大(2K,或 1080p@150% 的逻辑 1280×720 之外的实际值),
-            // 原画就只盖住左上角那一块,右边和下方露出纯底色 —— 也就是大屏上看到的「背景只铺了一半」。
-            // 小于基准时仍按基准画,避免原画被压扁。
             float pageW = BW, pageH = BH;
             try
             {
@@ -313,7 +372,70 @@ namespace KeyMouseStats
                 }
             }
             catch { }
-            RectangleF pageRect = new RectangleF(0, 0, pageW, pageH);
+            return new RectangleF(0, 0, pageW, pageH);
+        }
+
+        /// <summary>请求按当前物理视口预合成壁纸背景。只在尺寸/DPI/皮肤变化时调用。</summary>
+        private void RequestCustomComposite()
+        {
+            int page = (int)_tab;
+            if (!CustomArt.ActiveForPage(page) || !IsHandleCreated) return;
+            float scale = LayoutFrame.Sanitize(_s);
+            if (scale <= 0f) scale = 1f;
+            RectangleF pageRect = CurrentPageRect();
+            int width = (int)Math.Round(pageRect.Width * scale);
+            int height = (int)Math.Round(pageRect.Height * scale);
+            if (width > 0 && height > 0) CustomThemeStore.RequestComposite(width, height, scale, page);
+        }
+
+        /// <summary>后台合成完成:切回 UI 线程刷新一次,避免等 1 秒定时器。</summary>
+        private void OnCustomCompositeReady(object sender, EventArgs e)
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            try
+            {
+                BeginInvoke(new MethodInvoker(delegate
+                {
+                    if (IsDisposed) return;
+                    _sceneCacheValid = false;
+                    ClearHoverCache();
+                    RequestCustomComposite();
+                    Invalidate();
+                }));
+            }
+            catch { }
+        }
+
+        /// <summary>图标/徽章配置变化:场景底板失效并整窗重绘。</summary>
+        private void OnIconPackChanged(object sender, EventArgs e)
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            try
+            {
+                BeginInvoke(new MethodInvoker(delegate
+                {
+                    if (IsDisposed) return;
+                    _sceneCacheValid = false;
+                    ClearHoverCache();
+                    Invalidate();
+                }));
+            }
+            catch { }
+        }
+
+        private void PaintThemeTexture(Graphics g)
+        {
+            // 3.0:主题原画按「当前逻辑尺寸」铺,而不是设计基准 BW×BH。
+            // 基准是 1072×724,窗口一旦更大(2K,或 1080p@150% 的逻辑 1280×720 之外的实际值),
+            // 原画就只盖住左上角那一块,右边和下方露出纯底色 —— 也就是大屏上看到的「背景只铺了一半」。
+            // 小于基准时仍按基准画,避免原画被压扁。
+            RectangleF pageRect = CurrentPageRect();
+            float pageW = pageRect.Width, pageH = pageRect.Height;
+            if (CustomArt.ActiveForPage((int)_tab))
+            {
+                CustomArt.DrawPage(g, pageRect, (int)_tab);
+                return;
+            }
             if(GujianArt.Active)GujianArt.DrawPage(g,(int)_tab,pageRect);
             if(OriArt.Active)OriArt.DrawPage(g,(int)_tab,pageRect);
             if(EuroTruckArt.Active)EuroTruckArt.DrawPage(g,(int)_tab,pageRect);
@@ -376,6 +498,7 @@ namespace KeyMouseStats
         /// <summary>某个主题的底色;未知主题返回空色(表示不做淡化)。</summary>
         private static Color ThemeFadeColor(int theme)
         {
+            if (CustomArt.Active) return ArtTheme.Current.Background;
             ArtTheme previous = ArtTheme.All[ArtTheme.Validate(theme)];
             return previous == null ? Color.Empty : previous.Background;
         }

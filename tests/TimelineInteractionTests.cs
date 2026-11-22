@@ -41,6 +41,8 @@ internal static class TimelineInteractionTests
         WheelZoom();
         KeyboardSteps();
         HoverAndFocus();
+        FocusViewport();
+        ActiveRangeAndPulse();
         Degradation();
         DensityOnActiveBurst();
         KeyboardGate();
@@ -181,7 +183,66 @@ internal static class TimelineInteractionTests
         Equal(drag.EndSec, drag.StartSec + drag.SpanSec, "视窗终点 = 起点 + 跨度");
     }
 
-    /// <summary>7. 清爽版降级判定。</summary>
+    /// <summary>7. 默认聚焦活跃视口;双击仍复位全天。</summary>
+    private static void FocusViewport()
+    {
+        TimelineDrag drag = NewMachine();
+        Check(drag.FocusRange(10 * 3600, 11 * 3600), "聚焦活跃段应报告需要重绘");
+        Equal(drag.StartSec, 9 * 3600 + 1800, "视窗起点 = 首段前 30 分钟");
+        Equal(drag.SpanSec, 7200, "视窗最小跨度 2 小时");
+        Check(drag.ResetView(), "双击复位仍应报告需要重绘");
+        Equal(drag.StartSec, 0, "复位后起点为 0");
+        Equal(drag.SpanSec, 86400, "复位后仍为 24 小时全天");
+
+        TimelineDrag shortRange = NewMachine();
+        shortRange.FocusRange(12 * 3600, 12 * 3600 + 20 * 60);
+        Check(shortRange.SpanSec >= 7200, "短活跃段视窗也不低于 2 小时");
+        Check(shortRange.StartSec <= 12 * 3600
+            && shortRange.StartSec + shortRange.SpanSec >= 12 * 3600 + 20 * 60,
+            "短活跃段必须完整落在视窗内");
+    }
+
+    /// <summary>8. 非 Idle 活跃范围与脉冲高度/Idle 低对比渲染契约。</summary>
+    private static void ActiveRangeAndPulse()
+    {
+        DateTime day = new DateTime(2026, 11, 21);
+        FlowBoardData data = new FlowBoardData();
+        data.Day = day;
+        data.Report = new FlowReport();
+        long t0 = FlowBoard.DayStartMs(day);
+
+        FlowSegment idle = new FlowSegment();
+        idle.StartMs = t0; idle.EndMs = t0 + 3600000L; idle.State = FlowState.Idle;
+        FlowSegment normal = new FlowSegment();
+        normal.StartMs = t0 + 3600000L; normal.EndMs = t0 + 5400000L; normal.State = FlowState.Normal;
+        FlowSegment deep = new FlowSegment();
+        deep.StartMs = t0 + 5400000L; deep.EndMs = t0 + 7200000L; deep.State = FlowState.Deep;
+        FlowSegment idle2 = new FlowSegment();
+        idle2.StartMs = t0 + 7200000L; idle2.EndMs = t0 + 9000000L; idle2.State = FlowState.Idle;
+        data.Report.Segments.Add(idle);
+        data.Report.Segments.Add(normal);
+        data.Report.Segments.Add(deep);
+        data.Report.Segments.Add(idle2);
+
+        int first, last;
+        Check(data.ActiveRange(out first, out last), "存在非 Idle 段时应返回活跃范围");
+        Equal(first, 3600, "首条非 Idle 段起点");
+        Equal(last, 7200, "末条非 Idle 段终点");
+
+        Check(Dashboard.FlowPulseHeight(0, 100, 22f) >= 3f, "无击键分钟仍保留底柱");
+        Check(Dashboard.FlowPulseHeight(100, 100, 22f)
+            > Dashboard.FlowPulseHeight(25, 100, 22f), "输入越密集脉冲越高");
+        Check(Dashboard.FlowPulseHeight(100, 100, 22f) <= 22f, "脉冲不得溢出轨道");
+        Check(Dashboard.FlowColor(FlowState.Idle).A < Dashboard.FlowColor(FlowState.Fragmented).A,
+            "Idle 必须比碎片段更低对比度");
+
+        string golden = Dashboard.FlowGoldenLine(data);
+        Check(golden.StartsWith("今日黄金时段 · "), "黄金时段摘要固定前缀");
+        Check(golden.IndexOf("\n") < 0, "黄金时段摘要必须单行");
+        Check(golden.IndexOf(" / ") > 0, "两个黄金时段应以 / 横向拼接");
+    }
+
+    /// <summary>9. 清爽版降级判定。</summary>
     private static void Degradation()
     {
         bool shadow = ShadowPipeline.Available;
