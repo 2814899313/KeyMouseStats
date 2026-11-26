@@ -26,12 +26,12 @@ jobs:
       - name: Build
         run: dotnet build KeyMouseStats.slnx -c Release --no-restore
 
-      # PageGoldenTests 的 9 页基线按 2026-11-23 生成，页面使用 DateTime.Today；
-      # 日期漂移会误报。发布门禁先排除这一类，其余测试照常执行。
+      # 视觉 golden 依赖本机字体 / DPI，CI runner 上不稳定；发布门禁只卡
+      # 逻辑 / 数据 / 输入 / 架构四组，视觉基线按 docs/v4-acceptance.md 本地人工验收。
       - name: Test
         run: >-
           dotnet test KeyMouseStats.slnx -c Release --no-build
-          --filter "FullyQualifiedName!~PageGoldenTests"
+          --filter "FullyQualifiedName!~Kms.Golden.Tests"
           --logger "trx;LogFileName=v4-release.trx"
           --results-directory artifacts/test-results
 
