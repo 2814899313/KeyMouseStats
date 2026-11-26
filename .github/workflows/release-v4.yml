@@ -29,11 +29,35 @@ jobs:
       # 视觉 golden 依赖本机字体 / DPI，CI runner 上不稳定；发布门禁只卡
       # 逻辑 / 数据 / 输入 / 架构四组，视觉基线按 docs/v4-acceptance.md 本地人工验收。
       - name: Test
-        run: >-
-          dotnet test KeyMouseStats.slnx -c Release --no-build
-          --filter "FullyQualifiedName!~Kms.Golden.Tests"
-          --logger "trx;LogFileName=v4-release.trx"
-          --results-directory artifacts/test-results
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts/test-results | Out-Null
+          $log = "artifacts/test-results/dotnet-test.log"
+          $args = @(
+            "test", "KeyMouseStats.slnx", "-c", "Release", "--no-build",
+            "--filter", "FullyQualifiedName!~Kms.Golden.Tests",
+            "--logger", "trx;LogFileName=v4-release.trx",
+            "--results-directory", "artifacts/test-results"
+          )
+          & dotnet @args 2>&1 | Tee-Object -FilePath $log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            $failures = Select-String -Path $log -Pattern '\[FAIL\]|Failed!|失败' -ErrorAction SilentlyContinue
+            if ($failures) {
+              $failures | ForEach-Object { Write-Host "::error::$($_.Line.Trim())" }
+            } else {
+              Write-Host "::error::dotnet test failed; see artifacts/test-results/dotnet-test.log"
+            }
+            exit $code
+          }
+
+      - name: Upload test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v4-release-test-log
+          path: artifacts/test-results/dotnet-test.log
+          if-no-files-found: ignore
 
       - name: Verify fixtures
         run: dotnet run --project tools/scrub-fixtures -c Release --no-build -- verify
