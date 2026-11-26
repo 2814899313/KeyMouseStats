@@ -28,8 +28,8 @@ public sealed class TextOracleParityTests
         Assert.True(File.Exists(textPath), $"缺少固件：{textPath}");
         Assert.True(File.Exists(expectedPath), $"缺少 v3 期望值：{expectedPath}");
 
-        string expected = File.ReadAllText(expectedPath, new UTF8Encoding(false));
-        string actual = Program.Dump(TextStatsCodec.Load(File.ReadAllText(textPath, Encoding.UTF8)));
+        string expected = Normalize(File.ReadAllText(expectedPath, new UTF8Encoding(false)));
+        string actual = Normalize(Program.Dump(TextStatsCodec.Load(File.ReadAllText(textPath, Encoding.UTF8))));
 
         string? difference = FirstDifference(expected, actual);
         if (difference is not null)
@@ -37,6 +37,13 @@ public sealed class TextOracleParityTests
             throw new Xunit.Sdk.XunitException(difference);
         }
     }
+
+    /// <summary>
+    /// GitHub Actions 的 Windows runner 默认 core.autocrlf=true，期望 dump 会检出为 CRLF；
+    /// 这里统一成 LF，避免行尾差异被误判成数据差异。
+    /// </summary>
+    private static string Normalize(string text) =>
+        text.Replace("\r\n", "\n").Replace('\r', '\n');
 
     private static string? FirstDifference(string expected, string actual)
     {
