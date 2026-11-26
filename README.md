@@ -1,7 +1,7 @@
 # KeyMouseStats · 键鼠统计
 
-> **v4 重写（.NET 10 + Avalonia 12.1）已发布 `4.0.0-beta.2` 一屏全览版**，正式版是 3.4.3。
-> 发布说明见 [`docs/releases/v4.0.0-beta.2.md`](docs/releases/v4.0.0-beta.2.md)。
+> **v4 重写（.NET 10 + Avalonia 12.1）已发布 `4.0.0-alpha.1` 首版**，正式版是 3.4.3。
+> 发布说明见 [`docs/releases/v4.0.0-alpha.1.md`](docs/releases/v4.0.0-alpha.1.md)。
 > 方案与进度见 [`docs/v4-rewrite-plan.md`](docs/v4-rewrite-plan.md) 与
 > [`docs/v4-plan/04-wbs.md`](docs/v4-plan/04-wbs.md)；
 > 实时采集接线见 [`docs/v4-live-capture.md`](docs/v4-live-capture.md)；

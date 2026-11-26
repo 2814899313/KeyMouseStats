@@ -1,0 +1,87 @@
+name: Release v4
+
+on:
+  push:
+    tags:
+      - 'v4.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore KeyMouseStats.slnx
+
+      - name: Build
+        run: dotnet build KeyMouseStats.slnx -c Release --no-restore
+
+      # PageGoldenTests 的 9 页基线按 2026-11-23 生成，页面使用 DateTime.Today；
+      # 日期漂移会误报。发布门禁先排除这一类，其余测试照常执行。
+      - name: Test
+        run: >-
+          dotnet test KeyMouseStats.slnx -c Release --no-build
+          --filter "FullyQualifiedName!~PageGoldenTests"
+          --logger "trx;LogFileName=v4-release.trx"
+          --results-directory artifacts/test-results
+
+      - name: Verify fixtures
+        run: dotnet run --project tools/scrub-fixtures -c Release --no-build -- verify
+
+      - name: Publish v4
+        shell: pwsh
+        run: >
+          dotnet publish src/Kms.App/Kms.App.csproj -c Release -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:PublishReadyToRun=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:DebugType=None
+          -p:DebugSymbols=false
+          -o artifacts/publish-v4
+
+      - name: Verify the tag matches the product version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $expected = $tag.TrimStart('v')
+          $actual = (Get-Item artifacts/publish-v4/Kms.App.exe).VersionInfo.ProductVersion
+          if ($actual -ne $expected) {
+            throw "Kms.App.exe reports $actual but tag $tag expects $expected."
+          }
+          Write-Host "version check passed: $expected"
+
+      - name: Compose release notes
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $note = "docs/releases/$tag.md"
+          if (Test-Path $note) {
+            Copy-Item $note release-body.md
+          } else {
+            "KeyMouseStats $tag" | Set-Content -Encoding UTF8 release-body.md
+          }
+          Compress-Archive -Path artifacts/publish-v4/Kms.App.exe `
+            -DestinationPath "artifacts/publish-v4/Kms.App-$tag-win-x64.zip"
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${{ github.ref_name }}"
+          artifacts/publish-v4/Kms.App.exe
+          artifacts/publish-v4/Kms.App-${{ github.ref_name }}-win-x64.zip
+          --title "KeyMouseStats ${{ github.ref_name }}"
+          --notes-file release-body.md

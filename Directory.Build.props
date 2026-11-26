@@ -14,7 +14,7 @@
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
 
     <VersionPrefix>4.0.0</VersionPrefix>
-    <VersionSuffix>beta.2</VersionSuffix>
+    <VersionSuffix>alpha.1</VersionSuffix>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 
     <Product>键鼠统计</Product>

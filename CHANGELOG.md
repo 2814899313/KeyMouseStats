@@ -2,6 +2,8 @@
 
 本文件记录 KeyMouseStats 的版本变更，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。版本按发布时间倒序排列；每个版本的完整说明见 [`docs/releases/`](docs/releases/)。
 
+> 当前 v4 分支发布标签：`v4.0.0-alpha.1`。下方 `4.0.0-beta.1` / `4.0.0-beta.2` 段落是该快照已包含的预览内容。
+
 ## 4.0.0-beta.2
 
 一屏全览布局版；24h 对拍与真机验收仍未关闭，**不替代 v3 正式版**。
