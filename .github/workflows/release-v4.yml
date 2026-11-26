@@ -36,13 +36,14 @@ jobs:
           $args = @(
             "test", "KeyMouseStats.slnx", "-c", "Release", "--no-build",
             "--filter", "FullyQualifiedName!~Kms.Golden.Tests",
+            "--logger", "console;verbosity=detailed",
             "--logger", "trx;LogFileName=v4-release.trx",
             "--results-directory", "artifacts/test-results"
           )
           & dotnet @args 2>&1 | Tee-Object -FilePath $log
           $code = $LASTEXITCODE
           if ($code -ne 0) {
-            $failures = Select-String -Path $log -Pattern '\[FAIL\]|Failed!|失败' -ErrorAction SilentlyContinue
+            $failures = Select-String -Path $log -Pattern '\[FAIL\]|Failed!|错误消息|期望:|实际:|第 \d+ 行|XunitException' -ErrorAction SilentlyContinue
             if ($failures) {
               $failures | ForEach-Object { Write-Host "::error::$($_.Line.Trim())" }
             } else {
