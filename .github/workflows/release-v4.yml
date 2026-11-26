@@ -110,9 +110,20 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release create "${{ github.ref_name }}"
-          artifacts/publish-v4/Kms.App.exe
-          artifacts/publish-v4/Kms.App-${{ github.ref_name }}-win-x64.zip
-          --title "KeyMouseStats ${{ github.ref_name }}"
-          --notes-file release-body.md
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $assets = @(
+            "artifacts/publish-v4/Kms.App.exe",
+            "artifacts/publish-v4/Kms.App-$tag-win-x64.zip"
+          )
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            # 允许重打同一个 v4 alpha/beta 标签：更新说明与资产，并确保标记为 prerelease，
+            # 避免 GitHub 把 v4 预发布当成 releases/latest，破坏 v3 的下载链接。
+            gh release edit $tag --prerelease --notes-file release-body.md
+            gh release upload $tag @assets --clobber
+          } else {
+            gh release create $tag @assets --prerelease `
+              --title "KeyMouseStats $tag" `
+              --notes-file release-body.md
+          }
