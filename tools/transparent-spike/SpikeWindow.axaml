@@ -1,0 +1,33 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Kms.TransparentSpike.SpikeWindow"
+        Title="透明窗 spike"
+        Width="380" Height="230"
+        WindowStartupLocation="CenterScreen"
+        WindowDecorations="None"
+        CanResize="False"
+        ShowInTaskbar="False"
+        Topmost="True"
+        TransparencyLevelHint="Transparent"
+        Background="Transparent">
+  <Border CornerRadius="18"
+          Background="#D918202E"
+          BorderBrush="#80729BFF"
+          BorderThickness="1"
+          Padding="22">
+    <StackPanel Spacing="10">
+      <TextBlock Text="透明 / 点击穿透 spike"
+                 FontSize="20" FontWeight="SemiBold" Foreground="#E9EDF6" />
+      <TextBlock x:Name="Status"
+                 Text="当前：可交互（不抢焦点）"
+                 FontSize="13" Foreground="#A0ABBC" TextWrapping="Wrap" />
+      <Border Height="1" Background="#303F54" Margin="0,4" />
+      <TextBlock Text="Ctrl + Alt + T  切换点击穿透"
+                 FontSize="12" Foreground="#4CC9F0" />
+      <TextBlock Text="Ctrl + Alt + ↑ / ↓  调整不透明度"
+                 FontSize="12" Foreground="#4CC9F0" />
+      <TextBlock Text="验证点：拖动、命中、焦点、透明度、跨屏 DPI。"
+                 FontSize="11" Foreground="#A0ABBC" TextWrapping="Wrap" />
+    </StackPanel>
+  </Border>
+</Window>

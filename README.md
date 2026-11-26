@@ -1,5 +1,15 @@
 # KeyMouseStats · 键鼠统计
 
+> **v4 重写（.NET 10 + Avalonia 12.1）已发布 `4.0.0-beta.2` 一屏全览版**，正式版是 3.4.3。
+> 发布说明见 [`docs/releases/v4.0.0-beta.2.md`](docs/releases/v4.0.0-beta.2.md)。
+> 方案与进度见 [`docs/v4-rewrite-plan.md`](docs/v4-rewrite-plan.md) 与
+> [`docs/v4-plan/04-wbs.md`](docs/v4-plan/04-wbs.md)；
+> 实时采集接线见 [`docs/v4-live-capture.md`](docs/v4-live-capture.md)；
+> 页面视觉改版见 [`docs/v4-ui-art-pass.md`](docs/v4-ui-art-pass.md)；
+> 真机验收清单见 [`docs/v4-acceptance.md`](docs/v4-acceptance.md)。
+> 自检：`Kms.App.exe --selfcheck-ui`；帧基准：`Kms.App.exe --bench-ui`。
+> V3 的 13 套主题/美术皮肤与自定义壁纸已迁移；侧栏 `+` 打开皮肤画廊。
+
 <p align="center">
   <strong>本地优先的 Windows 键鼠使用统计：记录、可视化、日报，全程离线。</strong>
 </p>

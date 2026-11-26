@@ -1,0 +1,12 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 采集层：Win32 钩子 / Raw Input / 设备身份。可在控制台宿主中单独运行。 -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kms.Core\Kms.Core.csproj" />
+  </ItemGroup>
+
+</Project>

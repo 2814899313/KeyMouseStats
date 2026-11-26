@@ -1,5 +1,14 @@
 # 主题资源扩展约定
 
+## v4 美术皮肤
+
+- v3 的页面原画保留在 `assets/*.jpg`，v4 通过 `Kms.App.csproj` 的 `AvaloniaResource Include="..\..\assets\*.jpg"` 嵌入单文件；不嵌入图标图集、预览图和透明 PNG。
+- `Kms.App/Theming/ThemeArtwork.cs` 维护 `主题 id → 9 个页面图片名` 的映射；新增美术主题时在这里登记，页面索引固定为 总览/趋势/时段/按键/应用/洞察/文本/日报/热区。
+- `ShellView` 的 `ThemeBackdrop` + `ThemeScrim` 负责整页背景与可读性遮罩；美术主题或自定义壁纸下，`PageKit` 自动使用半透明卡片和页头底板。
+- 主题选择优先读 `theme_id`，缺失时回退 v3 的 `art_theme`；自定义壁纸迁移读取 `%APPDATA%\键鼠统计\themes\custom-themes.json`（只读）。
+- 侧栏 `+` 打开 `ThemeGalleryWindow`：内置 13 主题预览 + v3 自定义皮肤缩略图 + 导入壁纸。壁纸文件保存到 `%LOCALAPPDATA%\KeyMouseStats4\themes`。
+- v3 自定义皮肤读取 `background/accent/text`，由 `ThemePaletteBuilder` 生成 card/raised/line/muted/green/orange/purple/red/cyan/sidebar 全套令牌；新导入的普通图片沿用当前主题调色板。
+
 ## 注册与构建
 
 1. 在 `ArtTheme.All` 添加主题配色，在 `ThemeAssets` 中登记该主题的全部嵌入资源名称；图标放在列表前部以优先解码。

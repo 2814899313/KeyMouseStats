@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 渲染内核：主题令牌 + 图表原语。允许引用 Avalonia，但不得有 Window/Timer/数据库。 -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kms.Core\Kms.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Tokens\themes.json" />
+  </ItemGroup>
+
+</Project>

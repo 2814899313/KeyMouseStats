@@ -1,0 +1,23 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Kms.App/Kms.App.csproj" />
+    <Project Path="src/Kms.Core/Kms.Core.csproj" />
+    <Project Path="src/Kms.Input/Kms.Input.csproj" />
+    <Project Path="src/Kms.Oracle/Kms.Oracle.csproj" />
+    <Project Path="src/Kms.Render/Kms.Render.csproj" />
+    <Project Path="src/Kms.Storage/Kms.Storage.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Kms.Architecture.Tests/Kms.Architecture.Tests.csproj" />
+    <Project Path="tests/Kms.Benchmarks/Kms.Benchmarks.csproj" />
+    <Project Path="tests/Kms.Core.Tests/Kms.Core.Tests.csproj" />
+    <Project Path="tests/Kms.Golden.Tests/Kms.Golden.Tests.csproj" />
+    <Project Path="tests/Kms.Input.Tests/Kms.Input.Tests.csproj" />
+    <Project Path="tests/Kms.Storage.Tests/Kms.Storage.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/input-probe/InputProbe.csproj" />
+    <Project Path="tools/scrub-fixtures/ScrubFixtures.csproj" />
+    <Project Path="tools/transparent-spike/TransparentSpike.csproj" />
+  </Folder>
+</Solution>

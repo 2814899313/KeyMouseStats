@@ -1,0 +1,59 @@
+name: v4 dotnet
+
+# v4 独立 CI：只构建 src/ 下的新解决方案，不触碰 v3 的 build.yml / release.yml。
+on:
+  push:
+    branches: [v4, main]
+    paths:
+      - "src/**"
+      - "tests/Kms*/**"
+      - "Directory.Build.props"
+      - "Directory.Packages.props"
+      - "global.json"
+      - "KeyMouseStats.slnx"
+      - ".github/workflows/dotnet.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/Kms*/**"
+      - "Directory.Build.props"
+      - "Directory.Packages.props"
+      - "global.json"
+      - "KeyMouseStats.slnx"
+      - ".github/workflows/dotnet.yml"
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore KeyMouseStats.slnx
+
+      - name: Build
+        run: dotnet build KeyMouseStats.slnx -c Release --no-restore
+
+      - name: Test
+        run: >-
+          dotnet test KeyMouseStats.slnx -c Release --no-build
+          --logger "trx;LogFileName=v4.trx"
+          --results-directory artifacts/test-results
+
+      - name: Verify fixtures
+        run: dotnet run --project tools/scrub-fixtures -c Release --no-build -- verify
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v4-test-results
+          path: artifacts/test-results
+          if-no-files-found: ignore

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 本机冒烟：真实安装低级钩子 + Raw Input，每秒打印计数。不参与 CI。 -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Kms.Core\Kms.Core.csproj" />
+    <ProjectReference Include="..\..\src\Kms.Input\Kms.Input.csproj" />
+    <ProjectReference Include="..\..\src\Kms.Storage\Kms.Storage.csproj" />
+  </ItemGroup>
+
+</Project>

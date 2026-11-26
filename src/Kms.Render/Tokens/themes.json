@@ -1,0 +1,99 @@
+[
+  {
+    "id": 0, "name": "午夜蓝", "radius": 13,
+    "background": "#0F141E", "card": "#18202E", "raised": "#1D2737", "line": "#303F54",
+    "text": "#E9EDF6", "muted": "#A0ABBC", "accent": "#729BFF", "onAccent": "#101622",
+    "green": "#4BD2A8", "orange": "#F1BB6F", "purple": "#B19DF8", "red": "#FF6B81",
+    "cyan": "#4CC9F0", "sidebar": "#0C111A"
+  },
+  {
+    "id": 1, "name": "奶油手账", "radius": 4,
+    "background": "#F1EBDD", "card": "#FFFCF5", "raised": "#FFFCF5", "line": "#CEC1AB",
+    "text": "#382F27", "muted": "#746452", "accent": "#9C4A30", "onAccent": "#FFFFFF",
+    "green": "#357258", "orange": "#93651B", "purple": "#805C82", "red": "#B73943",
+    "cyan": "#336E80", "sidebar": "#E8DECB"
+  },
+  {
+    "id": 2, "name": "奥日 · 灵光森林", "radius": 13,
+    "background": "#050D20", "card": "#0B1D34", "raised": "#102B43", "line": "#2B6078",
+    "text": "#F0FCFF", "muted": "#9ABCCB", "accent": "#54D7F0", "onAccent": "#07111D",
+    "green": "#65D6B4", "orange": "#F2C66D", "purple": "#A783E8", "red": "#D75B9C",
+    "cyan": "#6DEAFF", "sidebar": "#050B19",
+    "heat": ["#163468", "#1DA8BE", "#D2F8FF", "#A16FDA", "#F4BE5B"]
+  },
+  {
+    "id": 3, "name": "霓虹夜航", "radius": 5,
+    "background": "#130E25", "card": "#201536", "raised": "#2C1B49", "line": "#604579",
+    "text": "#F5ECFF", "muted": "#C0AED7", "accent": "#E68EFF", "onAccent": "#200E30",
+    "green": "#63E3BC", "orange": "#FFCB7A", "purple": "#B49BFF", "red": "#FF83B4",
+    "cyan": "#62DCEE", "sidebar": "#0D091C"
+  },
+  {
+    "id": 4, "name": "蓝图工坊", "radius": 0,
+    "background": "#EAF0F7", "card": "#FFFFFF", "raised": "#FFFFFF", "line": "#9BB2CD",
+    "text": "#142C4D", "muted": "#4F6581", "accent": "#235DB4", "onAccent": "#FFFFFF",
+    "green": "#237654", "orange": "#976016", "purple": "#7655A7", "red": "#B73353",
+    "cyan": "#176C8E", "sidebar": "#DDE7F3"
+  },
+  {
+    "id": 5, "name": "暖暖 · 星愿织梦", "radius": 18,
+    "background": "#F8F4FC", "card": "#FFFCFF", "raised": "#F4ECF8", "line": "#DACBE3",
+    "text": "#473B59", "muted": "#796884", "accent": "#9263AA", "onAccent": "#FFFFFF",
+    "green": "#548F8D", "orange": "#B78945", "purple": "#AE75A2", "red": "#BF537B",
+    "cyan": "#578BAD", "sidebar": "#F0E8F6",
+    "heat": ["#5070BE", "#53A6BD", "#E1C473", "#DB8574", "#BA3965"]
+  },
+  {
+    "id": 6, "name": "士官长 · 战术终端", "radius": 6,
+    "background": "#0C141C", "card": "#14212A", "raised": "#1C2C35", "line": "#3C5360",
+    "text": "#E5ECE8", "muted": "#A9BABF", "accent": "#ADC184", "onAccent": "#152119",
+    "green": "#7EB99F", "orange": "#D5AF62", "purple": "#A0AFBF", "red": "#E27464",
+    "cyan": "#63B8D8", "sidebar": "#0A1118",
+    "heat": ["#2F60B5", "#39A3C9", "#DBD88F", "#DA9943", "#CD4B36"]
+  },
+  {
+    "id": 7, "name": "生化危机 · 档案", "radius": 5,
+    "background": "#111416", "card": "#1B2326", "raised": "#293236", "line": "#536366",
+    "text": "#EBEEE9", "muted": "#B7C2C1", "accent": "#DA7773", "onAccent": "#221113",
+    "green": "#8AB9A1", "orange": "#D6AE72", "purple": "#ACA6BA", "red": "#E27474",
+    "cyan": "#7BAEBB", "sidebar": "#0B1012"
+  },
+  {
+    "id": 8, "name": "我的世界 · 方块", "radius": 2,
+    "background": "#101D18", "card": "#1B2C23", "raised": "#293E2D", "line": "#617458",
+    "text": "#EDF0DB", "muted": "#B5C6A5", "accent": "#9BCB70", "onAccent": "#16220F",
+    "green": "#75BDA0", "orange": "#DEB26B", "purple": "#B6A2D6", "red": "#DF8573",
+    "cyan": "#70C9CF", "sidebar": "#0B1711"
+  },
+  {
+    "id": 9, "name": "小丑牌 · 幻彩牌桌", "radius": 7,
+    "background": "#101F23", "card": "#193037", "raised": "#25424A", "line": "#507178",
+    "text": "#F5E9CB", "muted": "#ADC5C5", "accent": "#F08075", "onAccent": "#271316",
+    "green": "#87C3A2", "orange": "#E6B964", "purple": "#BB99D6", "red": "#ED6F68",
+    "cyan": "#6AD3DD", "sidebar": "#0B181C",
+    "heat": ["#3658BF", "#4DBDD3", "#E4C969", "#E9845B", "#DB474F"]
+  },
+  {
+    "id": 10, "name": "大侠立志传 · 碧血丹心", "radius": 5,
+    "background": "#091318", "card": "#122226", "raised": "#1C3031", "line": "#6B6048",
+    "text": "#F2E7CA", "muted": "#BDB49D", "accent": "#B7453F", "onAccent": "#FFF1D2",
+    "green": "#54A194", "orange": "#C8A55E", "purple": "#8872A4", "red": "#B74449",
+    "cyan": "#62B5B3", "sidebar": "#071014",
+    "heat": ["#18435B", "#248484", "#D5BE6B", "#BF5B36", "#8F232B"]
+  },
+  {
+    "id": 11, "name": "欧洲卡车 · 长途之路", "radius": 7,
+    "background": "#07111E", "card": "#0E1C2B", "raised": "#14283B", "line": "#31506A",
+    "text": "#EDF4F8", "muted": "#93A9B7", "accent": "#E7A23B", "onAccent": "#16130D",
+    "green": "#58BCA5", "orange": "#F0A840", "purple": "#8D86C9", "red": "#E46E5C",
+    "cyan": "#3CCBE7", "sidebar": "#08131F"
+  },
+  {
+    "id": 12, "name": "古剑奇谭 · 琴心剑魄", "radius": 7,
+    "background": "#07121B", "card": "#10232D", "raised": "#17343D", "line": "#557070",
+    "text": "#F1E8D3", "muted": "#A8B7B3", "accent": "#49BFC3", "onAccent": "#081416",
+    "green": "#68A98D", "orange": "#D5AA58", "purple": "#8F78B6", "red": "#B74E46",
+    "cyan": "#62E0DD", "sidebar": "#061018",
+    "heat": ["#10304C", "#229797", "#DEECCD", "#D59D4E", "#AE3830"]
+  }
+]

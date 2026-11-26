@@ -1,0 +1,26 @@
+<Project>
+
+  <!--
+    v4 公共构建属性。
+    版本号唯一来源：本文件。AssemblyInformationalVersion 由 SDK 自动生成，
+    Kms.Core 的 BuildInfo 从这里读取，不要再新增 Version.cs。
+  -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+
+    <VersionPrefix>4.0.0</VersionPrefix>
+    <VersionSuffix>beta.2</VersionSuffix>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+
+    <Product>键鼠统计</Product>
+    <Company>KeyMouseStats</Company>
+    <Copyright>Copyright © 2026 KeyMouseStats</Copyright>
+    <NeutralLanguage>zh-CN</NeutralLanguage>
+  </PropertyGroup>
+
+</Project>

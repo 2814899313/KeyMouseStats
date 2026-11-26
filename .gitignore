@@ -33,6 +33,8 @@ text-input-demo/
 
 # 本地数据恢复留档与一次性调试产物(不进仓库)
 /_recovery/
+# v4 重写用的真实数据样本(含真实窗口标题/进程路径,必须清洗后才能入库)
+/_fixtures/
 /.tmp-*/
 /_head_*.cs
 /_fixed_*.cs
