@@ -26,6 +26,12 @@ jobs:
       - name: Build
         run: dotnet build KeyMouseStats.slnx -c Release --no-restore
 
+      # v3 oracle 期望 dump 使用 +08:00 本地时间；CI runner 默认 UTC，
+      # 不先对齐时区会让 session 时间戳与按日期关联的 reason / coverage 全部错位。
+      - name: Set time zone for oracle parity
+        shell: pwsh
+        run: tzutil /s "China Standard Time"
+
       # 视觉 golden 依赖本机字体 / DPI，CI runner 上不稳定；发布门禁只卡
       # 逻辑 / 数据 / 输入 / 架构四组，视觉基线按 docs/v4-acceptance.md 本地人工验收。
       - name: Test
