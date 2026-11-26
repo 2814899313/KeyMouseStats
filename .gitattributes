@@ -8,3 +8,9 @@
 *.jpg binary
 *.ico binary
 *.exe binary
+
+# v4 固件按 LF 校验 SHA256；不能让 Windows CI 的 core.autocrlf 改成 CRLF。
+tests/Fixtures/*.txt text eol=lf
+tests/Fixtures/*.csv text eol=lf
+tests/Fixtures/expected/*.dump text eol=lf
+tests/Fixtures/CHECKSUMS.txt text eol=lf
