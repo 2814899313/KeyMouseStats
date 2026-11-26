@@ -16,12 +16,15 @@ namespace KeyMouseStats
     //  * Run 键没有失败原因、没有状态查询,用户只有「登录后看到/没看到」一条反馈。
     //
     //  现在改成「当前用户的计划任务」:
-    //  * 触发器同时挂「开机」与「登录后」,并打开 StartWhenAvailable ——
-    //    开机时还没有交互会话(GUI 程序在 session 0 里既没有界面也收不到输入),
-    //    任务会被排到用户登录的那一刻执行。对这类必须跑在交互会话里的统计程序,
-    //    这才是「开机就启动」在 Windows 上真正能落地的形态。
-    //  * 任务是交互身份(InteractiveToken)、普通权限,不需要管理员,也不会弹 UAC。
-    //  * 每次启动调用一次 Sync():路径变了就重注册,旧 Run 键顺手清掉。
+    //  * 触发器只挂「登录后」,并延迟 30 秒,同时打开 StartWhenAvailable ——
+    //    登录瞬间任务栏、Explorer 和输入桌面都还没就绪:托盘图标会创建失败,
+    //    低级键鼠钩子可能挂到尚未激活的桌面上,表现为「进程活着但不计数」。
+    //    延迟到 shell 稳定后再启动,是这类交互式统计程序最可靠的做法。
+    //  * 不再挂「开机」触发器:没有用户登录就没有可采集的输入,开机触发只会
+    //    把进程拉进 session 0 / 安全桌面的竞态里。
+    //  * 任务是交互身份(InteractiveToken)、最高权限,与 requireAdministrator
+    //    清单一致,不额外弹 UAC。
+    //  * 每次启动调用一次 Sync():路径变了或任务修订号过期就重注册,旧 Run 键顺手清掉。
     //
     //  默认关闭:新装/首次运行不会创建任何任务,必须由用户在托盘菜单里打开。
     // ============================================================================
@@ -29,6 +32,12 @@ namespace KeyMouseStats
     {
         /// <summary>任务计划程序里的任务名(根目录下)。改名会让老用户的自启失效,不要动。</summary>
         internal const string TaskName = "KeyMouseStats";
+
+        /// <summary>任务定义修订号。升级后据此自动重注册旧任务,让新的延迟/权限设置生效。</summary>
+        internal const string TaskRevision = "r2-logon-delay-30s";
+
+        /// <summary>登录后延迟秒数:等 Explorer、任务栏和输入桌面就绪。</summary>
+        internal const int LogonDelaySeconds = 30;
 
         /// <summary>1.9.0 之前用的注册表值名,只用于迁移与清理。</summary>
         internal const string LegacyRunValueName = "KeyMouseStatsWidget";
@@ -38,7 +47,6 @@ namespace KeyMouseStats
         // Task Scheduler 的常量,写死在这里免得为了几个 enum 去引 COM 互操作程序集。
         private const int TaskCreateOrUpdate = 6;
         private const int LogonInteractiveToken = 3;   // TASK_LOGON_INTERACTIVE_TOKEN
-        private const int TriggerBoot = 8;             // TASK_TRIGGER_BOOT
         private const int TriggerLogon = 9;            // TASK_TRIGGER_LOGON
         private const int ActionExec = 0;              // TASK_ACTION_EXEC
         private const int InstancesIgnoreNew = 3;      // 已经在跑就忽略新的
@@ -86,7 +94,7 @@ namespace KeyMouseStats
         }
 
         /// <summary>
-        /// 打开自启:注册一个「开机 + 登录」触发的交互式任务。
+        /// 打开自启:注册一个「登录后延迟 30 秒」的交互式任务。
         /// 失败时把原因交给调用方显示 —— 静默失败的自启比没有更糟。
         /// </summary>
         internal static bool Enable(string exePath, out string error)
@@ -104,7 +112,7 @@ namespace KeyMouseStats
             if (service == null)
             {
                 string cliError;
-                if (CreateWithSchtasks(exe, out cliError)) { DeleteLegacyRunValue(); return true; }
+                if (CreateWithSchtasks(exe, out cliError)) { MarkEnabled(exe); return true; }
                 error = "任务计划程序服务不可用(Schedule.Service)。" + Environment.NewLine + cliError;
                 return false;
             }
@@ -114,31 +122,28 @@ namespace KeyMouseStats
                 if (folder == null)
                 {
                     string cliError;
-                    if (CreateWithSchtasks(exe, out cliError)) { DeleteLegacyRunValue(); return true; }
+                    if (CreateWithSchtasks(exe, out cliError)) { MarkEnabled(exe); return true; }
                     error = "打不开任务计划程序的根目录。" + Environment.NewLine + cliError;
                     return false;
                 }
 
-                // 先试「开机 + 登录」两路触发器;个别策略不允许非管理员建开机任务,退化成登录触发。
-                // COM 迟绑定在少数系统上会报 DISP_E_UNKNOWNNAME(按名字找不到成员),
-                // 此时退回 schtasks.exe 命令行,保证「打开自启」这个动作仍然能成功。
-                if (!Register(folder, exe, folderPath, true, ref error))
+                // 只注册「登录后」触发器。COM 迟绑定在少数系统上会报
+                // DISP_E_UNKNOWNNAME / DISP_E_BADPARAMCOUNT,此时退回 schtasks.exe
+                // 命令行,保证「打开自启」这个动作仍然能成功。
+                if (!Register(folder, exe, folderPath, ref error))
                 {
-                    if (!Register(folder, exe, folderPath, false, ref error))
+                    string comError = error;
+                    string cliError;
+                    if (!CreateWithSchtasks(exe, out cliError))
                     {
-                        string comError = error;
-                        string cliError;
-                        if (!CreateWithSchtasks(exe, out cliError))
-                        {
-                            error = comError + Environment.NewLine + "命令行方式也失败：" + cliError;
-                            return false;
-                        }
-                        Log("COM 注册失败，已改用 schtasks 创建：" + comError);
-                        error = "";
+                        error = comError + Environment.NewLine + "命令行方式也失败：" + cliError;
+                        return false;
                     }
+                    Log("COM 注册失败，已改用 schtasks 创建：" + comError);
+                    error = "";
                 }
 
-                DeleteLegacyRunValue();
+                MarkEnabled(exe);
                 return true;
             }
             catch (Exception ex)
@@ -149,6 +154,13 @@ namespace KeyMouseStats
             finally { Release(service); }
         }
 
+        /// <summary>登记成功后清旧 Run 项并记住修订号;schtasks 兜底任务没有描述,靠这个标记避免每次启动都重注册。</summary>
+        private static void MarkEnabled(string exe)
+        {
+            DeleteLegacyRunValue();
+            RememberRevision(exe);
+        }
+
         /// <summary>关掉自启:删任务,顺手清掉历史遗留的 Run 键。</summary>
         internal static bool Disable(out string error)
         {
@@ -157,7 +169,7 @@ namespace KeyMouseStats
             if (service == null)
             {
                 string cliError;
-                if (DeleteWithSchtasks(out cliError)) { DeleteLegacyRunValue(); return true; }
+                if (DeleteWithSchtasks(out cliError)) { MarkDisabled(); return true; }
                 error = "任务计划程序服务不可用(Schedule.Service)。" + Environment.NewLine + cliError;
                 return false;
             }
@@ -174,7 +186,7 @@ namespace KeyMouseStats
                     string cliError;
                     if (!DeleteWithSchtasks(out cliError)) { error = cliError; return false; }
                 }
-                DeleteLegacyRunValue();
+                MarkDisabled();
                 return true;
             }
             catch (Exception ex)
@@ -183,6 +195,13 @@ namespace KeyMouseStats
                 return false;
             }
             finally { Release(service); }
+        }
+
+        /// <summary>关闭后清掉 Run 项与修订标记;下次打开自启会重新写。</summary>
+        private static void MarkDisabled()
+        {
+            DeleteLegacyRunValue();
+            ForgetRevision();
         }
 
         /// <summary>
@@ -207,10 +226,12 @@ namespace KeyMouseStats
                     return;
                 }
                 if (hasLegacy) DeleteLegacyRunValue();
-                if (!SamePath(registered, exePath))
+                // 任务指向的 exe 变了,或还是旧修订(没有登录延迟/权限设置)时重注册。
+                bool outdated = !HasCurrentRevision(exePath);
+                if (!SamePath(registered, exePath) || outdated)
                 {
                     string error;
-                    if (!Enable(exePath, out error)) Log("更新自启路径失败: " + error);
+                    if (!Enable(exePath, out error)) Log("更新自启失败: " + error);
                 }
             }
             catch (Exception ex) { Log(ex.Message); }
@@ -237,6 +258,52 @@ namespace KeyMouseStats
             string b = NormalizePath(right);
             if (a.Length == 0 || b.Length == 0) return false;
             return string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // ---------------------------------------------------------------- 修订标记
+
+        /// <summary>
+        /// schtasks 兜底任务没有 Description,读不回修订号;用一个小文件记住
+        /// 「这个 exe 已经按当前修订注册过」,避免每次启动都重建正在运行的任务。
+        /// 文件位于 %LOCALAPPDATA%\KeyMouseStats\autostart.rev,删掉只会触发一次重注册。
+        /// </summary>
+        private static string RevisionMarkerPath()
+        {
+            return Path.Combine(NativeBoot.DataRoot(), "autostart.rev");
+        }
+
+        private static string RevisionKey(string exePath)
+        {
+            return TaskRevision + "|" + NormalizePath(exePath);
+        }
+
+        private static bool HasCurrentRevision(string exePath)
+        {
+            try
+            {
+                string path = RevisionMarkerPath();
+                if (!File.Exists(path)) return false;
+                return string.Equals(File.ReadAllText(path).Trim(), RevisionKey(exePath),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception) { return false; }
+        }
+
+        private static void RememberRevision(string exePath)
+        {
+            try
+            {
+                string path = RevisionMarkerPath();
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllText(path, RevisionKey(exePath));
+            }
+            catch (Exception) { }
+        }
+
+        private static void ForgetRevision()
+        {
+            try { File.Delete(RevisionMarkerPath()); }
+            catch (Exception) { }
         }
 
         // ---------------------------------------------------------------- 注册表迁移
@@ -266,7 +333,7 @@ namespace KeyMouseStats
 
         // ---------------------------------------------------------------- 计划任务(COM 迟绑定)
 
-        private static bool Register(object folder, string exe, string workingDirectory, bool withBootTrigger, ref string error)
+        private static bool Register(object folder, string exe, string workingDirectory, ref string error)
         {
             string step = "创建任务定义";
             try
@@ -278,7 +345,7 @@ namespace KeyMouseStats
                 object info = GetProperty(definition, "RegistrationInfo");
                 if (info != null)
                 {
-                    TrySet(info, "Description", "键鼠统计:登录后自动启动(可在托盘菜单关闭)");
+                    TrySet(info, "Description", "键鼠统计:登录后自动启动(可在托盘菜单关闭) · " + TaskRevision);
                     TrySet(info, "Author", "KeyMouseStats");
                 }
 
@@ -286,7 +353,7 @@ namespace KeyMouseStats
                 object settings = GetProperty(definition, "Settings");
                 if (settings != null)
                 {
-                    // 关键:错过开机那一刻(还没有交互会话)时,等用户一登录就补跑。
+                    // 登录瞬间任务服务/桌面可能还没就绪:错过就等下一个可用时机。
                     TrySet(settings, "StartWhenAvailable", true);
                     TrySet(settings, "DisallowStartIfOnBatteries", false);
                     TrySet(settings, "StopIfGoingOnBatteries", false);
@@ -305,13 +372,11 @@ namespace KeyMouseStats
                 step = "创建触发器";
                 object triggers = GetProperty(definition, "Triggers");
                 if (triggers == null) { error = "无法创建触发器。"; return false; }
-                if (withBootTrigger)
-                {
-                    object boot = Invoke(triggers, "Create", new object[] { TriggerBoot });
-                    if (boot == null) { error = "无法创建开机触发器。"; return false; }
-                }
                 object logon = Invoke(triggers, "Create", new object[] { TriggerLogon });
                 if (logon == null) { error = "无法创建登录触发器。"; return false; }
+                // 关键:登录后等 Explorer / 任务栏 / 输入桌面就绪再启动。
+                // 没有这段延迟时,托盘图标会添加失败,低级钩子也可能挂到尚未激活的桌面。
+                TrySet(logon, "Delay", "PT" + LogonDelaySeconds + "S");
 
                 step = "创建启动动作";
                 object actions = GetProperty(definition, "Actions");
@@ -322,8 +387,11 @@ namespace KeyMouseStats
                 if (!string.IsNullOrEmpty(workingDirectory)) TrySet(action, "WorkingDirectory", workingDirectory);
 
                 step = "RegisterTaskDefinition";
+                // 7 个入参缺一不可:最后一个 sddl 传 null。少传会被 IDispatch 判为
+                // DISP_E_BADPARAMCOUNT,整条 COM 注册失败并静默退回 schtasks,
+                // 结果就是任务没有延迟、电池策略和 StartWhenAvailable。
                 Invoke(folder, "RegisterTaskDefinition",
-                    new object[] { TaskName, definition, TaskCreateOrUpdate, null, null, LogonInteractiveToken });
+                    new object[] { TaskName, definition, TaskCreateOrUpdate, null, null, LogonInteractiveToken, null });
                 return true;
             }
             catch (Exception ex)
@@ -371,8 +439,11 @@ namespace KeyMouseStats
         /// <summary>COM 不可用时的登录触发兜底;不需要管理员,不会弹 UAC。</summary>
         private static bool CreateWithSchtasks(string exe, out string error)
         {
-            string args = "/Create /TN \"" + TaskName + "\" /TR \\\"" + exe + "\\\" /SC ONLOGON /RL HIGHEST /F";
-            bool ok = RunSchtasks(args, out error);
+            // 和 COM 路径保持同样的 30 秒登录延迟。个别旧系统不认 /DELAY 时
+            // 再退回不带延迟的命令,至少让自启本身可用。
+            string basic = "/Create /TN \"" + TaskName + "\" /TR \\\"" + exe + "\\\" /SC ONLOGON /RL HIGHEST";
+            bool ok = RunSchtasks(basic + " /DELAY 0000:" + LogonDelaySeconds.ToString("00") + " /F", out error);
+            if (!ok) ok = RunSchtasks(basic + " /F", out error);
             if (!ok && string.IsNullOrEmpty(error)) error = "schtasks 创建任务失败。";
             return ok;
         }

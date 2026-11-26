@@ -33,6 +33,16 @@ namespace KeyMouseStats
             { LogFailure("Unhandled",error.ExceptionObject as Exception); };
             try { SetProcessDPIAware(); } catch { }
 
+            // 计划任务如果被错误地配成非交互/会话 0,窗口、托盘和低级钩子都不可用。
+            // 记录后直接退出,不要留下一个「进程活着但不干活」的僵尸。
+            int sessionId = System.Diagnostics.Process.GetCurrentProcess().SessionId;
+            if (sessionId == 0 || !Environment.UserInteractive)
+            {
+                LogEvent("启动中止: 非交互会话 session=" + sessionId
+                    + " interactive=" + Environment.UserInteractive);
+                return;
+            }
+
             bool createdNew;
             Mutex mutex = new Mutex(true, "KeyMouseStats_Widget_SingleInstance", out createdNew);
             if (!createdNew)
@@ -67,6 +77,11 @@ namespace KeyMouseStats
             // 绝不阻塞 v13 文本主链路。
             ShadowPipeline.Start();
             AppDomain.CurrentDomain.ProcessExit += delegate { ShadowPipeline.Flush(2000); };
+            LogEvent("启动: session=" + sessionId + " shell=" + Native.GetShellWindow()
+                + " 数据目录=" + Store.DataDirectory
+                + " 阴影=" + ShadowPipeline.Diagnosis);
+            // 登录瞬间任务栏可能还没建好;等 shell 出现后再创建托盘/安装钩子。
+            WaitForShell();
             StatsWidget widget = new StatsWidget();
             widget.ListenForDashboard(dashEvent);
             Application.Run(widget);
@@ -77,6 +92,27 @@ namespace KeyMouseStats
             GC.KeepAlive(mutex);
             GC.KeepAlive(dashEvent);
         }
+
+        /// <summary>
+        /// 等 Explorer / 任务栏就绪,最多 30 秒。登录触发比 shell 创建更早时,
+        /// 直接创建 NotifyIcon 会静默失败;先等 shell,托盘和输入桌面都更可靠。
+        /// </summary>
+        private static void WaitForShell()
+        {
+            if (Native.GetShellWindow() != IntPtr.Zero) return;
+            System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+            while (watch.Elapsed < TimeSpan.FromSeconds(30))
+            {
+                Thread.Sleep(250);
+                if (Native.GetShellWindow() != IntPtr.Zero)
+                {
+                    LogEvent("桌面就绪:等待 " + (long)watch.Elapsed.TotalMilliseconds + " ms");
+                    return;
+                }
+            }
+            LogEvent("桌面等待超时: 30 秒内没有 shell 窗口,继续启动");
+        }
+
         /// <summary>UI 线程停顿与关键动作的诊断记录(仅追加一行,超过 256 KB 轮换)。</summary>
         internal static void LogStall(string context, double seconds)
         {
@@ -1908,6 +1944,14 @@ namespace KeyMouseStats
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();
 
+        /// <summary>Explorer 的桌面窗口。为零表示 shell / 任务栏还没就绪。</summary>
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetShellWindow();
+
+        /// <summary>注册「TaskbarCreated」广播:Explorer 重启后重新把托盘图标加回去。</summary>
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern uint RegisterWindowMessage(string lpString);
+
         [DllImport("user32.dll", SetLastError = true)]
         public static extern IntPtr SetWindowsHookEx(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
         [DllImport("user32.dll", SetLastError = true)]
@@ -2244,6 +2288,10 @@ namespace KeyMouseStats
         private long _lastSaveFailureVersion;
 
         private NotifyIcon _tray;
+        private System.Windows.Forms.Timer _trayTimer;
+        private int _trayRetries;
+        private long _lastSessionRetry;
+        private static readonly int WM_TASKBARCREATED = unchecked((int)Native.RegisterWindowMessage("TaskbarCreated"));
         private ContextMenuStrip _menu;
         private ToolStripMenuItem _miShow;
         private ToolStripMenuItem _miTopMost;
@@ -2394,6 +2442,11 @@ namespace KeyMouseStats
         protected override void WndProc(ref Message m)
         {
             ActivityMonitor.Message(m.Msg, m.WParam);
+            // Explorer 重启/登录后才建好任务栏:收到广播就把托盘图标重新加回去。
+            if (WM_TASKBARCREATED != 0 && m.Msg == WM_TASKBARCREATED)
+            {
+                if (!EnsureTrayVisible()) StartTrayWatch();
+            }
             if (m.Msg == Native.WM_DISPLAYCHANGE)
             {
                 ClampWidgetToScreen();
@@ -2403,7 +2456,11 @@ namespace KeyMouseStats
             if (m.Msg == Native.WM_HOTKEY && m.WParam.ToInt32() == Native.HotkeyId) OpenDashboard();
             if(m.Msg==0x02B1||m.Msg==0x0218)_mouseVectors.Reset();
             // 解锁 / 休眠唤醒:钩子是会话级对象,恢复后重新装一次最稳(幂等,代价只有两次系统调用)。
-            if (m.Msg == 0x02B1 && m.WParam.ToInt64() == 8) InstallHooks();
+            if (m.Msg == 0x02B1 && m.WParam.ToInt64() == 8)
+            {
+                InstallHooks();
+                ActivityMonitor.EnsureRegistered(Handle);
+            }
             else if (m.Msg == 0x0218 && (m.WParam.ToInt64() == 0x07 || m.WParam.ToInt64() == 0x12)) InstallHooks();
             if (_combos != null && (m.Msg == 0x02B1 || m.Msg == 0x0218
                 && (m.WParam.ToInt64() == 4 || m.WParam.ToInt64() == 7 || m.WParam.ToInt64() == 18))) _combos.Reset();
@@ -2570,6 +2627,13 @@ namespace KeyMouseStats
             else if (!MouseDistance.ValidDpi(Store.MouseDpi))
                 _tray.ShowBalloonTip(6000, "请设置鼠标 DPI", "右键菜单 → 鼠标 DPI / 距离校准，设置后开始估算实际移动距离。", ToolTipIcon.Info);
             _timer.Start();
+            Program.LogEvent("启动完成: session=" + System.Diagnostics.Process.GetCurrentProcess().SessionId
+                + " shell=" + Native.GetShellWindow()
+                + " 读取失败=" + Store.LoadFailed
+                + " 托盘请求=" + (_tray != null && _tray.Visible)
+                + " 会话通知=" + ActivityMonitor.NotificationsReady
+                + " 键盘钩子=" + (_kbHook != IntPtr.Zero)
+                + " 鼠标钩子=" + (_msHook != IntPtr.Zero));
         }
 
         private void OnDisplaySettingsChanged(object sender, EventArgs e)
@@ -3808,6 +3872,43 @@ namespace KeyMouseStats
             _tray.Visible = true;
             _tray.ContextMenuStrip = _menu;
             _tray.MouseDoubleClick += delegate { ToggleVisible(); };
+            StartTrayWatch();
+        }
+
+        /// <summary>
+        /// 登录瞬间 Explorer / 任务栏可能还没建好,Shell_NotifyIcon 会静默失败。
+        /// 每 2 秒检查一次 shell 窗口,就绪后重新添加一次图标;60 秒后放弃。
+        /// </summary>
+        private void StartTrayWatch()
+        {
+            if (IsDisposed || Disposing) return;
+            if (_trayTimer == null)
+            {
+                _trayTimer = new System.Windows.Forms.Timer();
+                _trayTimer.Interval = 2000;
+                _trayTimer.Tick += delegate
+                {
+                    if (EnsureTrayVisible()) { _trayTimer.Stop(); return; }
+                    if (++_trayRetries >= 30) _trayTimer.Stop();
+                };
+            }
+            _trayRetries = 0;
+            _trayTimer.Start();
+        }
+
+        /// <summary>把托盘图标重新加一遍。返回 true 表示 shell 已就绪且本次已尝试。</summary>
+        private bool EnsureTrayVisible()
+        {
+            if (_tray == null || IsDisposed || Disposing) return false;
+            try
+            {
+                if (Native.GetShellWindow() == IntPtr.Zero) return false;
+                // 先关再开:NotifyIcon 内部仍以为图标在时,单给 Visible=true 不会重发 NIM_ADD。
+                _tray.Visible = false;
+                _tray.Visible = true;
+                return true;
+            }
+            catch (Exception) { return false; }
         }
 
         private void ToggleVisible()
@@ -3934,6 +4035,15 @@ namespace KeyMouseStats
 
             // 钩子体检:每 5 秒一次,被系统/安全软件摘掉后自己装回来,不用用户重启。
             try { HookHealth(); } catch (Exception error) { Program.LogFailure("钩子体检", error); }
+
+            // 会话通知注册:登录瞬间可能失败;每 5 秒重试,成功后不再调用。
+            if (!ActivityMonitor.NotificationsReady &&
+                HookWatchdog.Elapsed(Environment.TickCount, _lastSessionRetry) >= 5000)
+            {
+                _lastSessionRetry = Environment.TickCount;
+                if (ActivityMonitor.EnsureRegistered(Handle))
+                    Program.LogEvent("会话通知注册成功(启动失败后重试)");
+            }
 
             long previousTrend=LiveRate.TrendVersion;
             long previousApm = LiveRate.Apm;
@@ -4135,6 +4245,7 @@ namespace KeyMouseStats
             }
             ReleaseHooks();
             if (_storageTimer != null) { _storageTimer.Dispose(); _storageTimer = null; }
+            if (_trayTimer != null) { _trayTimer.Stop(); _trayTimer.Dispose(); _trayTimer = null; }
             if (_timer != null) { _timer.Stop(); _timer.Dispose(); }
             if (_tray != null) { _tray.Visible = false; Icon icon=_tray.Icon;_tray.Dispose();if(icon!=null)icon.Dispose(); }
         }

@@ -176,6 +176,19 @@ namespace KeyMouseStats
         public static void Reset(SessionStartReason reason=SessionStartReason.Startup) { Tracker.Reset(reason); AppTelemetry.Reset(); Status = "等待采样"; }
         public static void Register(IntPtr window) { _notificationsReady = WTSRegisterSessionNotification(window, 0); }
         public static void Unregister(IntPtr window) { WTSUnRegisterSessionNotification(window); _notificationsReady = false; }
+
+        /// <summary>登录瞬间注册可能失败;窗口句柄不变时成功一次即可。</summary>
+        public static bool NotificationsReady { get { return _notificationsReady; } }
+
+        /// <summary>会话通知注册失败后的幂等重试。失败不抛异常,调用方按 5 秒节奏再试。</summary>
+        public static bool EnsureRegistered(IntPtr window)
+        {
+            if (_notificationsReady) return true;
+            if (window == IntPtr.Zero) return false;
+            try { _notificationsReady = WTSRegisterSessionNotification(window, 0); }
+            catch (Exception) { _notificationsReady = false; }
+            return _notificationsReady;
+        }
         internal static uint IdleMilliseconds(uint currentTick, uint lastInputTick) { return unchecked(currentTick - lastInputTick); }
         private static DayRecord GetDay(DateTime date)
         {

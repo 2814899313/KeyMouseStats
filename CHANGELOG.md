@@ -2,6 +2,23 @@
 
 本文件记录 KeyMouseStats 的版本变更，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。版本按发布时间倒序排列；每个版本的完整说明见 [`docs/releases/`](docs/releases/)。
 
+## 3.4.3
+
+修复开机自启后「进程在、托盘没图标、完全不计数」的问题。
+
+### 自启
+
+- 修正计划任务 COM 注册少传 `sddl` 参数导致一直回退到 `schtasks` 的问题；现在能真正写入登录延迟、电池策略、`StartWhenAvailable`、执行时限与工作目录。
+- 自启任务只保留「登录后」触发器，并延迟 30 秒启动，避开登录瞬间任务栏、Explorer 与输入桌面尚未就绪的竞态；旧任务按修订号自动重注册。
+- `schtasks` 兜底也加 30 秒延迟；不支持 `/DELAY` 的旧系统自动退回不带延迟的命令，至少保持自启可用。
+
+### 采集与托盘
+
+- 托盘图标在 Explorer 未就绪时失败后会每 2 秒重试，并处理 `TaskbarCreated`，Explorer 重启后图标自动回来。
+- 会话通知（`WTSRegisterSessionNotification`）注册失败后每 5 秒重试；解锁时也会重试，不再永久停在「会话检测不可用」。
+- 启动时等待 shell 就绪（最多 30 秒）再创建托盘、安装钩子；非交互会话（session 0）记录诊断后直接退出。
+- 启动日志补充 session、shell、数据读取状态、托盘、会话通知与钩子状态，便于下次排查。
+
 ## 3.4.1
 
 外设健康升级为多键盘 / 多鼠标的只读数据面板。

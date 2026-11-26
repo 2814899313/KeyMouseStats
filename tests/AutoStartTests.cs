@@ -28,6 +28,11 @@ internal static class AutoStartTests
         Check(AutoStart.TaskName == "KeyMouseStats", "the task name is a stable contract");
         Check(AutoStart.LegacyRunValueName == "KeyMouseStatsWidget", "the legacy run value name is stable");
 
+        // ---- 登录延迟是修复「启动过早」的外部契约;修订号变化会触发旧任务重注册 ----
+        Check(AutoStart.TaskRevision.Length > 0, "the task revision is not empty");
+        Check(AutoStart.LogonDelaySeconds >= 15,
+            "the logon delay is long enough for Explorer and the input desktop");
+
         // ---- 路径归一化:引号、空白、相对路径 ----
         string exe = Path.Combine(Path.GetTempPath(), "KeyMouseStats.exe");
         Check(AutoStart.NormalizePath("\"" + exe + "\"").Length > 0, "a quoted path normalizes to something");
