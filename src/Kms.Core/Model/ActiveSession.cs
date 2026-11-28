@@ -27,6 +27,14 @@ public sealed class ActiveSession
     public long LastApm { get; set; }
     public double PeakOffsetSeconds { get; set; }
     public double CrossObservedSeconds { get; set; }
+
+    /// <summary>SQLite v2 会话补全的归属信息；v13 文本会话没有这些列时为空。</summary>
+    public string ProcessPath { get; set; } = "";
+    public string ProcessName { get; set; } = "";
+    public string WindowTitle { get; set; } = "";
+    public int CategoryId { get; set; } = -1;
+    public double MovePx { get; set; }
+
     public Dictionary<string, double> AppSeconds { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public ActiveSession Copy()
@@ -41,7 +49,12 @@ public sealed class ActiveSession
             PeakApm = PeakApm,
             LastApm = LastApm,
             PeakOffsetSeconds = PeakOffsetSeconds,
-            CrossObservedSeconds = CrossObservedSeconds
+            CrossObservedSeconds = CrossObservedSeconds,
+            ProcessPath = ProcessPath,
+            ProcessName = ProcessName,
+            WindowTitle = WindowTitle,
+            CategoryId = CategoryId,
+            MovePx = MovePx
         };
         foreach ((string key, double value) in AppSeconds)
         {

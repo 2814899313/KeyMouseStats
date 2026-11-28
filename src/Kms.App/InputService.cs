@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
 using Avalonia.Threading;
+using Kms.App.Apps;
+using Kms.Core.Apps;
 using Kms.Core.Input;
 using Kms.Core.Model;
 using Kms.Core.Time;
@@ -32,6 +34,7 @@ public sealed class InputService : IDisposable
     public const int DrainIntervalMs = 30;
 
     private readonly LoadedStats _loaded;
+    private readonly AppCategoryService _categories;
     private readonly EventRing _ring;
     private readonly CountingInputSink _sink;
     private readonly QueuedInputSink _queue;
@@ -58,6 +61,7 @@ public sealed class InputService : IDisposable
     public InputService(LoadedStats loaded)
     {
         _loaded = loaded;
+        _categories = new AppCategoryService(DataPaths.V4Database, loaded.Data);
         _ring = new EventRing();
         _sink = new CountingInputSink(loaded.Data, _ring, SystemClock.Instance, NativeForeground);
         _queue = new QueuedInputSink();
@@ -72,6 +76,14 @@ public sealed class InputService : IDisposable
                 ProcessName = info.ProcessName,
                 WindowTitle = info.WindowTitle
             };
+        };
+        _writer.ClassifyWindow = (processPath, windowTitle) =>
+        {
+            AppCategoryMatch match = _categories.Resolve(processPath, windowTitle);
+            return new WindowCategory(
+                match.Category.LegacyId,
+                match.Source,
+                match.Reason);
         };
 
         _tracker = new ActivityTracker(date => loaded.Data.GetOrCreate(date));
@@ -106,6 +118,8 @@ public sealed class InputService : IDisposable
     }
 
     public StatsData Data => _loaded.Data;
+
+    public AppCategoryService Categories => _categories;
 
     public LoadedStats Loaded => _loaded;
 

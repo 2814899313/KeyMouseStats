@@ -56,6 +56,7 @@ public sealed class DbWriter : IDisposable
     private readonly EventRing _ring;
     private readonly DbWriterOptions _options;
     private readonly EventClock _clock;
+    private AppBucketWriter? _appBuckets;
     private readonly RawInputEvent[] _buffer = new RawInputEvent[BatchSize];
     private readonly WriteBatch _batch = new();
     private readonly AutoResetEvent _signal = new(false);
@@ -140,6 +141,7 @@ public sealed class DbWriter : IDisposable
             KmsSchema.Ensure(connection, options.AppVersion);
 
             DbWriter writer = new(connection, fullPath, ring, options);
+            writer._appBuckets = new AppBucketWriter(connection);
             if (options.RunSelfHeal)
             {
                 writer.SelfHeal();
@@ -247,6 +249,14 @@ public sealed class DbWriter : IDisposable
         try
         {
             _signal.Dispose();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            _appBuckets?.Dispose();
         }
         catch
         {
@@ -470,6 +480,7 @@ public sealed class DbWriter : IDisposable
         bool needsWindow = item.Kind is InputEventKind.KeyDown
             or InputEventKind.MouseDown
             or InputEventKind.Wheel;
+        bool appChanged = false;
 
         if (needsWindow)
         {
@@ -495,6 +506,7 @@ public sealed class DbWriter : IDisposable
                 }
 
                 OpenSession(ms, info);
+                appChanged = changed;
             }
         }
 
@@ -506,24 +518,31 @@ public sealed class DbWriter : IDisposable
             if (gap > 0 && gap <= ActiveGapMs)
             {
                 _session.ActiveMs += gap;
+                _appBuckets?.AddActive(_session.AppUid, ms, gap);
             }
 
             _session.EndMs = ms;
         }
 
+        if (appChanged)
+        {
+            _appBuckets?.RecordSwitch(_session?.AppUid ?? Kms.Core.Apps.AppIdentity.OtherAppUid, ms);
+        }
+
+        int appUid = _session?.AppUid ?? Kms.Core.Apps.AppIdentity.OtherAppUid;
         switch (item.Kind)
         {
             case InputEventKind.KeyDown:
-                CountKeyDown(item, ms);
+                CountKeyDown(item, ms, appUid);
                 break;
             case InputEventKind.MouseDown:
-                CountMouseDown(item, ms);
+                CountMouseDown(item, ms, appUid);
                 break;
             case InputEventKind.Wheel:
                 CountWheel(ms);
                 break;
             case InputEventKind.Move:
-                CountMove(item);
+                CountMove(item, ms, appUid);
                 break;
             default:
                 // KeyUp 与未知类型不计数（v3 同口径）。
@@ -531,7 +550,7 @@ public sealed class DbWriter : IDisposable
         }
     }
 
-    private void CountKeyDown(RawInputEvent item, long ms)
+    private void CountKeyDown(RawInputEvent item, long ms, int appUid)
     {
         _batch.Keys++;
         if (_session is not null)
@@ -542,6 +561,7 @@ public sealed class DbWriter : IDisposable
         int hour = HourOf(ms);
         AddCounter(_batch.HourKeys, hour, 1);
         AddCounter(_batch.Vk, item.VkOrButton, 1);
+        _appBuckets?.AddKey(appUid, item.VkOrButton, ms);
 
         if (_burst is null)
         {
@@ -582,7 +602,7 @@ public sealed class DbWriter : IDisposable
         AddWindowCounters(1, 0, 0, 0, 0, 0, ms);
     }
 
-    private void CountMouseDown(RawInputEvent item, long ms)
+    private void CountMouseDown(RawInputEvent item, long ms, int appUid)
     {
         long left = 0;
         long right = 0;
@@ -638,6 +658,7 @@ public sealed class DbWriter : IDisposable
         int channel = item.VkOrButton is >= 1 and <= 3 ? item.VkOrButton : 4;
         long channelKey = V13Codecs.ClickChannelKey(channel, cellKey);
         AddCounter(_batch.Cells, channelKey, 1);
+        _appBuckets?.AddClick(appUid, channel, cellX, cellY, ms);
 
         AddWindowCounters(0, left, right, middle, extra, 0, ms);
     }
@@ -657,7 +678,7 @@ public sealed class DbWriter : IDisposable
         AddWindowCounters(0, 0, 0, 0, 0, 1, ms);
     }
 
-    private void CountMove(RawInputEvent item)
+    private void CountMove(RawInputEvent item, long ms, int appUid)
     {
         double distance = item.Delta;
         if (distance <= 0)
@@ -670,6 +691,8 @@ public sealed class DbWriter : IDisposable
         {
             _session.MovePx += distance;
         }
+
+        _appBuckets?.AddMove(appUid, distance, ms);
     }
 
     private void AddWindowCounters(
@@ -768,6 +791,8 @@ public sealed class DbWriter : IDisposable
             ?? WindowCategory.Unclassified;
         _session.CategoryId = category.CategoryId;
         _session.CategorySource = CategorySources.Normalize(category.Source);
+        _session.AppUid = _appBuckets?.Resolve(_session.ProcessPath, _session.ProcessName, ms)
+            ?? Kms.Core.Apps.AppIdentity.OtherAppUid;
     }
 
     private void CloseSession(long ms)
@@ -778,6 +803,7 @@ public sealed class DbWriter : IDisposable
         }
 
         _session.EndMs = ms;
+        _appBuckets?.RecordSessionClosed(_session.AppUid, _session.StartMs);
         _batch.ClosedSessions.Add(_session);
         _session = null;
     }
@@ -810,6 +836,7 @@ public sealed class DbWriter : IDisposable
             WriteSessions(transaction, batch);
             WriteBursts(transaction, batch);
             WriteDaily(transaction, batch);
+            _appBuckets?.Flush(transaction, batch.Day);
 
             Execute(
                 _connection,

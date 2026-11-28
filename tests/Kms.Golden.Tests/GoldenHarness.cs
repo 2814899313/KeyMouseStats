@@ -17,23 +17,45 @@ namespace Kms.Golden.Tests;
 public static class GoldenHarness
 {
     private static readonly object Gate = new();
-    private static bool _initialized;
+    private static Application? _warmedApplication;
+
+    public static AppBuilder BuildAppBuilder() =>
+        AppBuilder.Configure<HeadlessApplication>()
+            .UseSkia()
+            .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false });
 
     public static void EnsureAvalonia()
     {
+        // 测试框架会把每个测试调度到 Avalonia Dispatcher；PerTest 隔离下
+        // Application.Current 会更换，因此字体预热按应用实例而不是按进程缓存。
+        Application? application = Application.Current;
+        if (application is null)
+        {
+            lock (Gate)
+            {
+                if (Application.Current is null)
+                {
+                    BuildAppBuilder().SetupWithoutStarting();
+                }
+
+                application = Application.Current;
+            }
+        }
+
+        if (application is null || ReferenceEquals(_warmedApplication, application))
+        {
+            return;
+        }
+
         lock (Gate)
         {
-            if (_initialized)
+            if (ReferenceEquals(_warmedApplication, Application.Current))
             {
                 return;
             }
 
-            AppBuilder.Configure<HeadlessApplication>()
-                .UseSkia()
-                .UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false })
-                .SetupWithoutStarting();
-            _initialized = true;
             WarmupFonts();
+            _warmedApplication = Application.Current;
         }
     }
 
@@ -260,7 +282,7 @@ public static class GoldenHarness
         }
     }
 
-    private sealed class HeadlessApplication : Application
+    internal sealed class HeadlessApplication : Application
     {
         public override void Initialize()
         {

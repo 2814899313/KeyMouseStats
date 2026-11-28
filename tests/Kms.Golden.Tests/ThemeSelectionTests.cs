@@ -21,7 +21,7 @@ public sealed class ThemeSelectionTests
             data.Settings.Remove("theme_id");
             data.Settings["art_theme"] = "12";
             LoadedStats stats = new(data, "v4 文本 · golden", "实时采集中");
-            _ = new ShellView(stats);
+            _ = new ShellView(stats, layouts: GoldenLayouts.Empty);
             Assert.Equal(12, ThemeManager.Current.Id);
         }
         finally

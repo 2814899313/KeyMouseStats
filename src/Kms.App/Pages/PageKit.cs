@@ -30,6 +30,12 @@ internal static class PageKit
     public static double R(double min = 10, double max = 18) =>
         Math.Clamp(T.Radius, min, max);
 
+    /// <summary>矮视口：沿用既有紧凑降级。</summary>
+    public static bool IsCompact(double height) => height > 0 && height < 720;
+
+    /// <summary>高视口/全屏：增加列表行数并放大主图，避免卡片内大面积空白。</summary>
+    public static bool IsTall(double height) => height >= 880;
+
     public static Color Alpha(Color color, double opacity)
     {
         double a = Math.Clamp(opacity, 0, 1);
@@ -264,7 +270,11 @@ internal static class PageKit
         return Card(body, padding);
     }
 
-    public static Control StatStrip(params (string Label, string Value, Color Color)[] items)
+    public static Control StatStrip(params (string Label, string Value, Color Color)[] items) =>
+        Card(StatStripBody(items), 12, R(9, 14));
+
+    /// <summary>指标条内容（不含外框），供 BentoCardFrame 等统一外框复用。</summary>
+    public static Control StatStripBody(params (string Label, string Value, Color Color)[] items)
     {
         Grid grid = new() { ColumnSpacing = 0 };
         for (int i = 0; i < items.Length; i++)
@@ -273,6 +283,7 @@ internal static class PageKit
             StackPanel cell = new()
             {
                 Spacing = 1,
+                VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(i == 0 ? 0 : 12, 2, i == items.Length - 1 ? 0 : 12, 2)
             };
             cell.Children.Add(Label(items[i].Label, 9, T.Muted));
@@ -295,7 +306,7 @@ internal static class PageKit
             }
         }
 
-        return Card(grid, 12, R(9, 14));
+        return grid;
     }
 
     public static Control Metric(

@@ -674,9 +674,10 @@ public static class V2Migrator
         for (int i = 0; i < parsed.AppRules.Count; i++)
         {
             AppRule rule = parsed.AppRules[i];
+            bool custom = !string.IsNullOrWhiteSpace(rule.CategoryKey);
             if (string.IsNullOrEmpty(rule.RuleKey)
                 || rule.CategoryId < 0
-                || rule.CategoryId >= V13Codecs.AppCategoryCount)
+                || (!custom && rule.CategoryId >= V13Codecs.AppCategoryCount))
             {
                 continue;
             }
@@ -684,10 +685,12 @@ public static class V2Migrator
             int changed = Execute(
                 connection,
                 transaction,
-                "INSERT OR IGNORE INTO app_category_rule (rule_key, category_id, source, updated_ms) " +
-                "VALUES ($p0,$p1,$p2,$p3);",
+                "INSERT OR IGNORE INTO app_category_rule " +
+                "(rule_key, category_id, category_key, source, updated_ms) " +
+                "VALUES ($p0,$p1,$p2,$p3,$p4);",
                 rule.RuleKey,
                 rule.CategoryId,
+                rule.CategoryKey ?? "",
                 "user_override",
                 now);
             if (changed > 0)

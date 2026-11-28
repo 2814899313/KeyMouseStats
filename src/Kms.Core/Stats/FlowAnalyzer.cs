@@ -34,15 +34,20 @@ public static class FlowAnalyzer
     /// 当前时刻。非 null 时丢弃未来会话/突发，并把跨越当前时刻的会话/突发裁到 <paramref name="now"/>，
     /// 用于「今天还没结束」的时光机边界。null 时与 v3 行为一致。
     /// </param>
+    /// <param name="isWorkCategory">
+    /// 可选工作分类谓词；null 时回退内置 0/5/6/7。UI 注入用户分类的 is_work 标志。
+    /// </param>
     public static FlowReport Analyze(
         IEnumerable<FlowSessionRow>? sessions,
         IEnumerable<FlowBurstRow>? bursts = null,
         FlowConfig? config = null,
-        DateTimeOffset? now = null)
+        DateTimeOffset? now = null,
+        Func<int, bool>? isWorkCategory = null)
     {
         FlowConfig cfg = config ?? new FlowConfig();
         FlowReport report = new();
         long? nowMs = now?.ToUnixTimeMilliseconds();
+        bool IsWork(int categoryId) => isWorkCategory?.Invoke(categoryId) ?? IsWorkCategory(categoryId);
 
         if (nowMs is not null)
         {
@@ -117,7 +122,7 @@ public static class FlowAnalyzer
         for (long w0 = origin; w0 < end; w0 += stepMs)
         {
             long w1 = w0 + windowsMs;
-            WindowStat stat = Measure(normalized, report.Bursts, w0, w1, cfg);
+            WindowStat stat = Measure(normalized, report.Bursts, w0, w1, cfg, IsWork);
 
             // 空窗（没有任何会话重叠、也没有输入）不是「碎片化」，它是没在电脑前。
             // 用原始停留判断窗口是否存在；有效停留只负责粘性与主类别核算。
@@ -162,7 +167,7 @@ public static class FlowAnalyzer
 
         merged = MergeWindows(merged);
         report.Segments.AddRange(merged);
-        ComputeScore(report, merged, stickinessCount > 0 ? stickinessSum / stickinessCount : 0, cfg);
+        ComputeScore(report, merged, stickinessCount > 0 ? stickinessSum / stickinessCount : 0, cfg, IsWork);
         return report;
     }
 
@@ -233,6 +238,7 @@ public static class FlowAnalyzer
     private sealed class WindowStat
     {
         public double Stickiness;
+        public double WorkShare;    // 窗内工作类停留占比；多工作应用协同视为同一工作流
         public int PrimaryCategory = -1;
         public string PrimaryProcess = "";
         public int DistinctCategories;
@@ -242,6 +248,7 @@ public static class FlowAnalyzer
         public long Keys;
         public long RawDwell;       // 窗内原始会话停留；用于判断窗口是否存在于前台
         public long Dwell;          // 按 ActiveMs 约束后的有效停留；用于粘性与主类别
+        public long WorkDwell;      // 工作类有效停留；用于跨应用工作流粘性
         public long InputCount;     // 窗内有效键鼠输入（键盘 + 点击 + 滚轮）
         public long EffectiveInput; // max(Keys, InputCount)，用于最少输入阈值
         public int BurstCount;
@@ -319,7 +326,8 @@ public static class FlowAnalyzer
         IReadOnlyList<FlowBurstRow> bursts,
         long w0,
         long w1,
-        FlowConfig cfg)
+        FlowConfig cfg,
+        Func<int, bool> isWork)
     {
         WindowStat stat = new();
         Dictionary<string, long> dwellByProcess = new(StringComparer.Ordinal);
@@ -357,14 +365,18 @@ public static class FlowAnalyzer
 
                 dwellByCategory.TryGetValue(category, out long categoryDwell);
                 dwellByCategory[category] = categoryDwell + dwell;
+                if (isWork(category))
+                {
+                    stat.WorkDwell += dwell;
+                }
 
                 if (previousCategory >= 0 && previousCategory != category
-                    && IsWorkCategory(previousCategory) && !IsWorkCategory(category))
+                    && isWork(previousCategory) && !isWork(category))
                 {
                     stat.WorkToNonWork++;
                 }
 
-                if (!IsWorkCategory(category))
+                if (!isWork(category))
                 {
                     unrelatedRun++;
                     if (unrelatedRun > stat.MaxUnrelatedRun)
@@ -402,6 +414,8 @@ public static class FlowAnalyzer
                     stat.PrimaryProcess = pair.Key;
                 }
             }
+
+            stat.WorkShare = stat.WorkDwell * 1.0 / totalDwell;
         }
 
         // 主类别取停留最久的那一类。
@@ -477,7 +491,11 @@ public static class FlowAnalyzer
         }
 
         bool rhythm = stat.EffectiveInput >= cfg.MinInputPerWindow && RhythmOk(stat, cfg);
-        bool qualified = stat.Stickiness >= cfg.StickinessThreshold
+
+        // 粘性同时看单应用占比与工作类占比：在 IDE / 写作 / AI 协同之间协同
+        // 切换属于同一段工作流，不应被单应用粘性判成碎片。
+        double stickiness = Math.Max(stat.Stickiness, stat.WorkShare);
+        bool qualified = stickiness >= cfg.StickinessThreshold
             && stat.DistinctCategories <= cfg.MaxCategoriesPerWindow
             && stat.WorkToNonWork <= cfg.MaxWorkToNonWork
             && stat.LongCheckouts == 0
@@ -488,7 +506,7 @@ public static class FlowAnalyzer
             return FlowState.Deep;
         }
 
-        if (rhythm && stat.Stickiness >= cfg.NormalStickinessThreshold)
+        if (rhythm && stickiness >= cfg.NormalStickinessThreshold)
         {
             return FlowState.Normal;
         }
@@ -522,10 +540,11 @@ public static class FlowAnalyzer
         IEnumerable<FlowSessionRow>? sessions,
         IEnumerable<FlowBurstRow>? bursts,
         long atMs,
-        FlowConfig? config = null)
+        FlowConfig? config = null,
+        Func<int, bool>? isWorkCategory = null)
     {
         FlowConfig cfg = config ?? new FlowConfig();
-        return DiagnoseNormalized(Normalize(sessions, cfg), bursts, atMs, cfg);
+        return DiagnoseNormalized(Normalize(sessions, cfg), bursts, atMs, cfg, isWorkCategory);
     }
 
     /// <summary>已归一化列表上的悬停诊断，避免每次悬停重复排序。</summary>
@@ -533,7 +552,8 @@ public static class FlowAnalyzer
         IReadOnlyList<FlowSessionRow>? normalized,
         IEnumerable<FlowBurstRow>? bursts,
         long atMs,
-        FlowConfig? config = null)
+        FlowConfig? config = null,
+        Func<int, bool>? isWorkCategory = null)
     {
         if (normalized is null || normalized.Count == 0)
         {
@@ -564,7 +584,8 @@ public static class FlowAnalyzer
             }
         }
 
-        WindowStat stat = Measure(normalized, burstList, w0, w0 + windowsMs, cfg);
+        bool IsWork(int categoryId) => isWorkCategory?.Invoke(categoryId) ?? IsWorkCategory(categoryId);
+        WindowStat stat = Measure(normalized, burstList, w0, w0 + windowsMs, cfg, IsWork);
         return new FlowDiagnostic
         {
             WindowStartMs = w0,
@@ -860,7 +881,8 @@ public static class FlowAnalyzer
         FlowReport report,
         List<FlowSegment> segments,
         double stickiness,
-        FlowConfig cfg)
+        FlowConfig cfg,
+        Func<int, bool> isWork)
     {
         long total = 0;
         long deep = 0;
@@ -896,8 +918,8 @@ public static class FlowAnalyzer
 
             // 段之间的切换次数用作「平静度」的分子；空闲段跳过。
             if (previous is not null
-                && IsWorkCategory(previous.PrimaryCategory)
-                && !IsWorkCategory(segment.PrimaryCategory))
+                && isWork(previous.PrimaryCategory)
+                && !isWork(segment.PrimaryCategory))
             {
                 workSwitch++;
             }
@@ -992,8 +1014,11 @@ public static class ContextCost
         IEnumerable<FlowBurstRow>? bursts,
         FlowConfig? config = null,
         int minKeys = 5,
-        int minActiveSeconds = 15)
+        int minActiveSeconds = 15,
+        Func<int, bool>? isWorkCategory = null)
     {
+        bool IsWork(int categoryId) =>
+            isWorkCategory?.Invoke(categoryId) ?? FlowAnalyzer.IsWorkCategory(categoryId);
         if (minKeys <= 0)
         {
             minKeys = 5;
@@ -1029,7 +1054,7 @@ public static class ContextCost
         for (int i = 0; i < normalized.Count; i++)
         {
             FlowSessionRow current = normalized[i];
-            if (!FlowAnalyzer.IsWorkCategory(current.CategoryId))
+            if (!IsWork(current.CategoryId))
             {
                 continue;
             }
@@ -1048,7 +1073,13 @@ public static class ContextCost
             }
 
             long outMs = distractor.StartMs;
-            long recoveryMs = FindRecovery(normalized, burstList, distractorIndex + 1, minKeys, minActiveSeconds);
+            long recoveryMs = FindRecovery(
+                normalized,
+                burstList,
+                distractorIndex + 1,
+                minKeys,
+                minActiveSeconds,
+                IsWork);
             if (recoveryMs <= outMs)
             {
                 continue;
@@ -1109,12 +1140,13 @@ public static class ContextCost
         IReadOnlyList<FlowBurstRow> bursts,
         int startIndex,
         int minKeys,
-        int minActiveSeconds)
+        int minActiveSeconds,
+        Func<int, bool> isWork)
     {
         for (int i = startIndex; i < sessions.Count; i++)
         {
             FlowSessionRow row = sessions[i];
-            if (!FlowAnalyzer.IsWorkCategory(row.CategoryId))
+            if (!isWork(row.CategoryId))
             {
                 continue;
             }

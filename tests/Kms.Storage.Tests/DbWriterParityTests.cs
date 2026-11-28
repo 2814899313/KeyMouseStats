@@ -93,8 +93,8 @@ public sealed class DbWriterParityTests
 
             using SqliteConnection db = OpenDatabase(dbPath);
 
-            // 13 张表齐全。
-            Assert.Equal(13, KmsSchema.RequiredTables.Length);
+            // v3 完整表清单齐全。
+            Assert.Equal(20, KmsSchema.RequiredTables.Length);
             Assert.Empty(KmsSchema.MissingTables(db));
 
             // ---------------- 会话
@@ -198,6 +198,23 @@ public sealed class DbWriterParityTests
             Assert.Equal(7, Long(db, "SELECT SUM(cnt) FROM daily_key_agg;"));
             Assert.Equal(6, Long(db, "SELECT cnt FROM daily_key_agg WHERE vk=65;"));
             Assert.Equal(1, Long(db, "SELECT cnt FROM daily_key_agg WHERE vk=8;"));
+
+            // ---------------- v2 应用分桶：同一批事务内同步落盘
+            Assert.Equal(4, Long(db, "SELECT COUNT(*) FROM app_dim;"));
+            Assert.Equal(
+                "c:\\apps\\code.exe",
+                Text(db, "SELECT app_key FROM app_dim WHERE display_name='Code.exe';"));
+            Assert.Equal(7, Long(db, "SELECT SUM(keys) FROM daily_app_hour_agg;"));
+            Assert.Equal(4, Long(db, "SELECT SUM(clicks) FROM daily_app_hour_agg;"));
+            Assert.True(Real(db, "SELECT SUM(active_seconds) FROM daily_app_hour_agg;") > 0);
+            Assert.Equal(7, Long(db, "SELECT SUM(cnt) FROM daily_app_key_agg;"));
+            Assert.Equal(4, Long(db, "SELECT SUM(count) FROM daily_app_click_grid;"));
+            Assert.Equal(2, Long(db, "SELECT SUM(sessions) FROM daily_app_metric_agg;"));
+            Assert.Equal(2, Long(db, "SELECT SUM(switches) FROM daily_app_metric_agg;"));
+            Assert.True(Long(db, "SELECT MAX(peak_apm) FROM daily_app_metric_agg;") > 0);
+            Assert.Equal(
+                Long(db, "SELECT SUM(keys) FROM daily_summary;"),
+                Long(db, "SELECT SUM(keys) FROM daily_app_hour_agg;"));
         }
         finally
         {

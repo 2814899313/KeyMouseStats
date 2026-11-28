@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <!-- 应用外壳：Avalonia 窗口、9 个页面、悬浮窗与托盘。 -->
+  <!-- Version / InformationalVersion 由根 Directory.Build.props 统一提供（4.2.0）。 -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>

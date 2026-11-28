@@ -544,17 +544,20 @@ public static class V13Codecs
 
     public static string EncodeAppRule(AppRule rule)
     {
-        return EncodeText(rule.RuleKey) + "|" + rule.CategoryId.ToString(Invariant);
+        string text = EncodeText(rule.RuleKey) + "|" + rule.CategoryId.ToString(Invariant);
+        return string.IsNullOrWhiteSpace(rule.CategoryKey)
+            ? text
+            : text + "|" + EncodeText(rule.CategoryKey);
     }
 
     public static bool TryDecodeAppRule(string? value, out AppRule? rule)
     {
         rule = null;
         string[] parts = (value ?? "").Split('|');
-        if (parts.Length != 2
+        if (parts.Length is not (2 or 3)
             || !int.TryParse(parts[1], NumberStyles.Integer, Invariant, out int category)
             || category < 0
-            || category >= AppCategoryCount)
+            || (parts.Length == 2 && category >= AppCategoryCount))
         {
             return false;
         }
@@ -564,7 +567,13 @@ public static class V13Codecs
             return false;
         }
 
-        rule = new AppRule(key, category);
+        string categoryKey = "";
+        if (parts.Length == 3 && !TryDecodeText(parts[2], out categoryKey))
+        {
+            return false;
+        }
+
+        rule = new AppRule(key, category, categoryKey);
         return true;
     }
 

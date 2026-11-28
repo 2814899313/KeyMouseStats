@@ -2,7 +2,188 @@
 
 本文件记录 KeyMouseStats 的版本变更，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)，格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。版本按发布时间倒序排列；每个版本的完整说明见 [`docs/releases/`](docs/releases/)。
 
-> 当前 v4 分支发布标签：`v4.0.0-alpha.1`。下方 `4.0.0-beta.1` / `4.0.0-beta.2` 段落是该快照已包含的预览内容。
+> 当前 v4 分支发布标签：`v4.2.0`。下方 `4.0.1-pre` 及更早段落是历史快照。
+
+## 4.2.0
+
+应用维度归一化与 SQLite v2 增量分桶第一阶段；本步只落底层存储与查询契约，不改变现有页面行为。
+
+### 应用身份与过滤契约
+
+- 新增 `AppFilterKind` / `AppFilterScope` / `AppScopeSet`：稳定缓存键 `all` / `app:<key>` / `cat:<key>`，类别过滤由调用方展开应用键集合。
+- 新增 `AppDataCapability` 位掩码与 `AppDataCapabilities`：逐维度表达 Exact / Pending，旧区间缺少单应用明细时如实标记，不做比例分摊。
+- 应用键统一为 `process_path.ToLowerInvariant()`；新增 `__other__` 溢出桶，单日最多追踪 64 个活跃应用。
+
+### SQLite schema_rev = 2
+
+- 新增 `app_dim`、`app_alias`、`daily_app_hour_agg`、`daily_app_key_agg`、`daily_app_click_grid`、`daily_app_metric_agg`；四张分桶表使用 `WITHOUT ROWID`。
+- `SchemaV2Migrator` 幂等升级：只建表/索引与 `__other__` 保留行，不修改或回填历史数据。
+- 补充 `ix_wda_proc_day`、`ix_ews_proc_day`、`ix_eib_proc_day` 与按日索引。
+
+### 实时写入与只读仓库
+
+- `DbWriter` 在现有单事务批提交内同步 UPSERT 四张 `daily_app_*` 表；写线程维护 app_key → app_uid 目录与 LRU 热缓存，复用 prepared command。
+- 单应用点击格按 30 天滚动清理；跨日会话、64 应用溢出与 `__other__` 守恒。
+- `SqliteStatsReader` 补全 `events_window_session` 的 `process_path` / `process_name` / `window_title` / `category_id` / `move_px`。
+- 新增 `AppProfileRepository`：独立只读短连接、后台 `Task` 查询、48 条 LRU + TTL，内存总量优先、SQLite v2 补齐小时/VK/热区/会话，能力缺失返回 Pending。
+
+### 全局应用筛选与页面联动
+
+- `MainViewModel` 新增 `SelectedAppFilter` 与 `AppFilterChanged`；Shell 侧栏在时间范围下方新增紧凑应用筛选器，支持近期活跃排序、实时搜索、应用名显示与一键清除。
+- `WidgetDescriptor` 新增 `RequiredCapabilities` / `GlobalOnly`；`WidgetContext` 注入 `AppFilter` / `Capabilities` / `Profile`，`ResolveModel` 缓存键按应用上下文隔离。
+- `BentoPageBuilder` 统一门控：非 All 且能力 Pending 时生成柔和提示卡，不修改 82 个模块内部渲染；硬件与隐私模块标注“全生命周期·全局”。
+- 9 页模型接入 `AppScopeData` 与 `AppProfileSnapshot`：总览/趋势/日报/洞察/字符按应用聚合，时段/按键/热区使用 v2 分桶，应用统计页在单应用态自动拆解为窗口标题/子文档排行。
+- 非 All 状态冻结全局 `WidgetLiveBus`，总览速率 KPI 标为区间平均。
+- 新增 WidgetContext 缓存隔离、门控/GlobalOnly、LiveBus 冻结、单应用窗口下钻 96/144 DPI 回归测试；同步更新侧栏新增控件后的 Shell 基线。
+
+### 自定义工作性质分类与规则（Step 3）
+
+- schema_rev 升至 3：新增 `app_category`，内置编程/写作/AI 协同/科研仿真/办公/影音娱乐/沟通等分类；`app_category_rule` 增加 `category_key`，历史 0..9 数字规则自动回填且不改写历史统计。
+- 新增 `AppCategoryResolver` 责任链：窗口精确规则 > 标题关键词 > 应用默认规则 > 内置启发式 > 未分类；同时识别完整进程路径与历史 exe 文件名规则。
+- `DbWriter` 写入窗口会话时按分类器落 `category_id`；`FlowAnalyzer` 通过可注入 `is_work` 谓词识别自定义专注分类，并把多工作应用协同计入同一工作流。
+- 应用统计页新增“管理分类 / 规则”轻量浮层与每行分类徽章：支持新建、改名、配色、排序、删除自定义分类，以及应用默认归类与“标题包含关键词”规则。
+- `apps.category_summary` 改为按工作性质汇总 ring / bars / treemap，展示分类时长、击键与占比。
+- 侧栏应用筛选器新增 `[按应用] / [按工作性质]` 分段；选中分类后展开为归属应用集合，9 页同步切换并在标题副标显示分类名与应用数。
+- 新增 v2→v3 幂等迁移、分类 CRUD、历史规则兼容、优先级匹配、FlowAnalyzer 自定义 is_work、ByCategory 展开与 96/144 DPI 零滚动测试。
+
+### 应用筛选体验与能力门控修复
+
+- 侧栏应用筛选浮层升级为原生图标磁贴：后台异步提取 exe 图标并写入 128 项 LRU，失败时使用首字母圆角徽章；图标容器按 `sqrt(t/tmax)` 映射到 28–56px，内部图标固定约 68%，完整路径只保留在 ToolTip。
+- 磁贴使用 WrapPanel 流式排布，支持搜索过滤，并按窗口可视高度动态限制列表高度、内部局部滚动；选中应用按钮同步显示小图标。
+- 应用筛选卡片、按钮、分段标签与 FlyoutPresenter 全部改用当前主题令牌，浅色主题自动切换清透卡片与深色文字，深色主题保持深色底；切换主题时重建筛选器。
+- 修复单应用内存总量被误判 PENDING：只要内存 `StatsData.History[].Apps` 或 `window_daily_agg` 存在应用记录，`AppTotals` 始终 Exact；Hourly / KeyDetail / Heatmap 才依赖 v4.2.0 分桶。
+- 3×1 微型卡片能力降级改为单行「暂未采集」徽标，不再堆叠多行说明与路径；RowSpan ≥ 2 的大卡保留完整说明。
+- 新增图标尺寸平方根映射、128 项 LRU、无 v2 分桶总量 Exact、AppPageContext 能力升级与 3×1 降级无裁切测试。
+
+### 实机图标与筛选面板精细修复
+
+- 图标提取拆成「后台原始 BGRA 像素 + UI 线程创建 Avalonia 位图」两段；SHGetFileInfo 大图标失败时回退 ExtractIconEx，所有 HICON/HBITMAP 句柄都在 finally 中释放，异常写入 Debug 日志不再静默吞掉。
+- 修复首帧占位徽章不刷新：图标异步完成后直接写回磁贴 host 与侧栏已选应用按钮的小图标，不再因 host 尚未挂入视觉树而提前返回。
+- 同名多版本/多路径应用按展示名分组：ChatGPT、KeyMouseStats、QQ 等只展示一个磁贴，时长/击键按所有路径汇总，图标优先使用仍存在的 exe；点击后 `AppFilterScope.ByAppGroup` 用多键 `AppScopeSet` 查询完整历史。
+- 磁贴尺寸梯度调整为 30–64px，移除固定高度造成的上下空白，外框改为自然包裹图标/名称/时长；筛选面板增加顶部与搜索框留白，并保持动态 MaxHeight 局部滚动。
+- 新增同名多路径聚合、多键 AppScopeSet 查询、图标异步完成与 LRU 刷新测试。
+
+### 时间维度联动与降级卡坐标锁定
+
+- `GetRecentApps` 接收当前 `TimeScopeRange`，只聚合今日/本周/本月内的应用时长与击键；排序、磁贴平方根尺寸与时长标签全部按当前范围重算，空范围显示温和空态。
+- `[按工作性质]` 分类卡片改用当前区间的覆盖应用数与使用时长；切换时间范围时同步刷新应用筛选面板与分类统计。
+- ByApp / ByCategory 在 Profile 尚未返回时也能从内存应用集合确认 `AppTotals` Exact，避免总览首行 KPI 被误降级。
+- `BentoPageBuilder` 对正常态、PENDING 降级态及缺失模块都保留布局中的原始 (Col, Row, ColSpan, RowSpan) 占位，不删除、不隐藏、不重排；新增总览 11 张默认卡片坐标完整性测试。
+
+### 应用筛选浮层与 KPI Sparkline 可读性
+
+- 应用筛选浮层宽度提升到 400px，小窗口按 `Min(400, windowWidth - 48)` 自适应；单个应用磁贴 `MinWidth=76`，400px 面板内稳定一行 4 个，名称与时长不再被压成细线。
+- 应用短名与紧凑时长字号略增大，文本宽度跟随磁贴宽度；完整路径仍只放在 ToolTip。
+- 总览 `overview.kpi.*` 在 `ColSpan >= 4` 的宽卡片中，APM Sparkline 宽度按跨度映射到 120–160px，减少右侧大面积留白。
+
+### 工作性质分类页双列卡片与入口精简
+
+- `[按工作性质]` 列表改为自适应双列网格卡片（等宽、8px 间距）：彩色圆点 + 分类名 + 专注徽标 + `N 个应用 · X.Xh`，400px 浮层左右铺满，消除右侧留白。
+- 分类面板底部新增「⚙ 管理分类与自动归类规则」，点击关闭浮层、跳转应用统计页并自动打开分类管理浮层。
+- 合并默认「影音娱乐」与「娱乐」为 media；历史数字 9 通过 LegacyAliases 映射到 media，迁移时把旧规则/内置娱乐分类合并清理，界面不再出现两个“娱乐”。
+- 新增内置分类合并、迁移幂等、双列分类卡片与入口可见性回归测试。
+
+## 4.1.1
+
+Bento 工作台页面域隔离与细颗粒积木扩充；不改变采集钩子、存档格式、默认锁定态预设与运行中的旧版进程。
+
+### 页面域严格隔离
+
+- `WidgetDescriptor` 新增强类型 `OwnerPage` 与 `AllowedPages`；9 个页面统一由 `PageId` 枚举标识，`WidgetRegistry.ForPage` 只返回本页专属模块与明确允许复用的通用模块。
+- `BentoPageEditor` 模块抽屉改为按当前页过滤分类与模块，跨页模块不再出现在无关页面；`TryAddModule` 同步拒绝页面域外模块。既有多页面 `layouts.json` 仍按原方式加载，不强制迁移。
+- 官方极客/极简场景中的跨页模块通过 `AllowedPages` 显式保留：`hourly.distribution_chart`、`insights.focus_pulse`、`hardware.peripheral_wear`、`keys.ranking_list`、`keys.top5_bars`。
+
+### 细颗粒微指标卡
+
+- 新增 27 个 3×1 / 3×2 独立微卡：趋势 4、时段 4、按键 4、应用 4、洞察 3、字符 4、热区 4。原 12×1 通栏模块 ID 全部保留，既有布局零回归。
+- `MicroKpiCard` 统一自适应字号与辅助说明；3×1 只保留主数字，3×2 增加辅助信息，避免 3×1 高度被标题栏吃掉。
+
+### 紧凑半高图表
+
+- `apps.ranking_list`、`apps.category_summary`、`apps.key_composition`、`hourly.distribution_chart`、`trends.metric_selector_chart`、`keys.ranking_list`、`keys.combo_list`、`heatmap.zone_stats` 等核心模块新增 6×2 / 3×2 尺寸。
+- 6×2 排行自动浓缩为 Top 3 并隐藏表头，3×2 窄卡只保留序号、名称与当前排序值；趋势/时段图在窄卡内隐藏指标选择器与长说明，保证不裁切、不产生外层滚动。
+- 新增页面域完整性、抽屉隔离、微卡与紧凑图表 96/144 DPI 渲染测试。
+
+## 4.1.0
+
+Bento 栅格与声明式模块布局第一阶段；不改变采集钩子、存档格式与运行中的旧版进程。
+
+### Bento 栅格
+
+- 新增 `BentoGridPanel`：12 列 × 6 行、统一 `Spacing`、`Col` / `Row` / `ColSpan` / `RowSpan` 附加属性；`MeasureOverride` / `ArrangeOverride` 按父视口均分列宽与行高并夹紧边界，100% / 125% / 150% DPI 与窗口缩放下锁死在一屏视口内，不产生纵向滚动。
+- 新增 `BentoCardFrame` 统一圆角、主题毛玻璃底色、描边令牌与标题栏/挂件槽位；具体变体由内嵌 `ContentControl` 承载，任意模块混搭时视觉一致。
+
+### 模块注册表
+
+- 新增 `IStatWidgetModule` / `WidgetDescriptor` / `WidgetRegistry`；在静态构造函数中显式注册 **55 个模块**：Step 1 的 15 个总览/应用模块，加上趋势 5、时段 5、按键/外设 9、洞察 5、字符 5、日报 6、热区 5。
+- 未进入当前页面布局的模块不创建、不计算、不订阅；总览实时 KPI 只注册到页面级 `WidgetLiveBus`，页面卸载时停止定时器并清空订阅。
+- 按键页的「外设健康」模块独立为 `hardware.peripheral_wear` / `hardware.health_summary` / `hardware.health_notes`，明确标注全生命周期物理累计、不受全局时间范围限制，可后续单独拖入总览。
+
+### 多图表变体
+
+- 应用/分类分布：`apps.category_summary` 与 `overview.distribution_ring` 保留默认 `ring`，新增 `bars`（横向占比排行）与 `treemap`（矩形树状面积图）。
+- 24 小时时段：`hourly.distribution_chart` 默认 `columns`，新增 `area`（平滑贝塞尔面积折线）与 `polar`（24 小时极坐标雷达图）。
+- 多指标趋势：`trends.metric_selector_chart` 默认 `line`，新增 `impulse`（脉冲柱状对比）与 `cumulative`（周期累计阶梯曲线）。
+- 最常按键：`keys.top5_bars` 与 `keys.ranking_list` 默认 `bars`，新增 `keycaps`（机械键帽矩阵）。
+- 核心 KPI：`overview.kpi.*` 默认 `sparkline`，新增 `minimal`（超大居中极简数字卡）。
+- `BentoCardFrame` 新增受编辑态开关控制的变体选择器接口；默认锁定态完全隐藏，选择时只重建当前卡片内容并复用页面级只读快照，不重新扫描数据库或执行磁盘 I/O。
+- `LayoutValidation` / `BentoPageBuilder` 对空或非法 `VariantId` 统一回退到 `SupportedVariants[0]`。
+
+### 可视化布局编辑器
+
+- 九大页面默认锁定态保持原布局，仅在标题栏右侧提供克制的「自定义布局」入口；进入编辑态后启用卡片变体选择、尺寸循环（`SupportedSpans`）、移除（×）与顶部编辑工具条。
+- 新增 `BentoPageEditor`：编辑态复制当前生效布局，保存时走 `LayoutConfigService.SavePageLayoutAsync` 原子写入 `layouts.json` 并退出；取消时丢弃修改并恢复进入编辑前的快照；「恢复默认」只改写工作副本，保存后才持久化。
+- 新增 12×6 编辑算法 `BentoLayoutMath`：空位首次适配、同尺寸卡片交换、尺寸切换碰撞回退；每次结构变更最终都经 `LayoutValidation` 校验，零重叠、零越界。
+- 标题栏拖动支持半透明幽灵预览与目标格计算；模块抽屉按分类分组/搜索/翻页展示全部 55 个模块，点击或拖入时按 `DefaultSpan` 寻找首个空位，容量不足时给出温和提示。
+- 新增官方场景模板 `LayoutScenarios`：总览在「经典均衡」之外提供「极简沉浸」（minimal KPI + 12×3 面积主图）与「极客高密度监控」（实时速率 + 心流脉冲 + 外设寿命 + 键帽排行）。
+- `WidgetContext` 新增跨页模块模型缓存 `Models` / `ResolveModel<T>`，非本页模块（字符、硬件、洞察等）在总览等页面混搭时只加载一次数据，变体切换复用同一只读快照。
+
+### 声明式布局
+
+- 新增 `PageLayoutConfig` / `WidgetPlacement` / `LayoutJsonContext`（`System.Text.Json` Source Generator）与 `LayoutConfigService`。
+- 九大页面全部提供 12×6 默认预设；用户覆盖独立存于 `layouts.json`，文件缺失、损坏或校验失败时按页回退内置预设，不触碰 `stats.txt`。
+- 提供 `ResetPageToDefault(pageId)` 与 `SavePageLayoutAsync(pageId, placements)`，为后续可视化编辑器预留入口。
+- 按键页额外提供统计/组合键/全键热力/外设健康四套内置编排；字符页提供字词/图表/隐私三套；日报页提供单日与周/月两套。
+
+### 页面重构
+
+- 总览、应用统计、趋势、时段分布、按键排行、使用洞察、字符内容、日报、点击热区 **九页全部切换为 `BentoGridPanel` + `LayoutConfigService` 声明式驱动渲染**。
+- 保留各页原有主题切换、Today / ThisWeek / ThisMonth 全局范围、CSV/海报导出、页内分页、指标切换、小时点选、字符隐私开关、多屏热区筛选等交互；主内容区无外层 `ScrollViewer`。
+- 新增 Bento 坐标与越界夹紧、12×6 全量预设无重叠、全部模块注册、九页 Bento 接入、三档 DPI 零滚动、次级模式零滚动等单元/视觉测试；`dotnet build` 与 `dotnet test` 全通过。
+- 版本提升为 `4.1.0`（`Directory.Build.props` 单一来源）；模块发现不使用反射，JSON 全部走源生成器，Render 热路径无磁盘 I/O。
+
+## 4.0.1-pre
+
+全局时间维度上提与零垂直滚动视口版；不改变采集钩子、存档格式与运行中的旧版进程。
+
+### 全局时间范围
+
+- 新增 `GlobalTimeScopeService` + `MainViewModel`：今日 / 本周 / 本月统一为响应式 `SelectedTimeScope`，范围周一为一周起点、月末裁到今天，跨零点自动滚动。
+- 侧栏顶部固定全局分段切换器；切换后广播 `TimeScopeChanged`，当前激活页立即用同一份范围重建，切换标签页不重置时间跨度。
+- 九页移除局部「今日 / 近 7 天 / 本周 / 本月 / 本年」按钮；总览按键分布卡片内的周期胶囊一并删除。
+
+### 页面语义
+
+- 趋势：今日改为 24 小时逐时曲线并在副标标注「今日逐时视图」；本周/本月显示对应天数的日级曲线。
+- 时段分布：改为全局范围内 24 小时聚合；今日只统计已结束小时。
+- 按键排行、应用统计、使用洞察、字符内容、点击热区：全部按全局范围聚合；字符页复用缓存的 Rime 日志，切范围只重新切片。
+- 日报：今日保留单日日报与前后翻日；本周/本月自动切换周报/月报汇总（区间趋势、应用、按键与高光）。
+- 外设健康：保持全生命周期物理累计，副标标注「不受全局时间范围限制」。
+- 总览：KPI、按键分布、Top 5、洞察与 CSV 导出均跟随全局范围。
+
+### 视口与性能
+
+- 全页面继续保持无 `ScrollViewer`；为总览、趋势、日报补齐矮视口密度降级，侧栏在 960×640 下切换紧凑模式。
+- 高视口/全屏自适应：九页根据可用高度增加列表行数、放大图表/环图，应用表在宽屏下重新分配列宽；整页按窗口尺寸做 1.0–1.35× 统一缩放，字号、图标与图表同步放大。
+- 新增 9 页 × 632/712/950px（960×640 主窗内容区及中等高度）零滚动自动检查与 960×640 外壳检查；新增今日/本周/月报/紧凑外壳/全屏应用页/全屏按键页 golden 基线。
+- 版本固定为 `4.0.1-pre`（Directory.Build.props 单一来源）；不新增反射、JSON 序列化或 Render 期间磁盘 I/O。
+
+### 修复
+
+- 应用统计：通过 Win32 Shell 读取 exe 关联图标，按进程路径缓存，并在页面构建阶段加载；读取失败继续使用首字母色块，Render 热路径不读盘。
+- 点击热区：自动读取当前显示器布局，按虚拟桌面保留完整坐标范围，移除 64×40 格上限导致的右侧/底部折叠；支持负坐标、不同高度与多屏边框标注。
+- 点击热区对齐 V3 交互：新增「跨屏全览 / 屏幕 1 / 屏幕 2」选屏，单屏放大保持等比投影；九宫格按所选屏幕计算，补充本屏/其他屏幕点击、覆盖格、区域排行与色阶说明；「像素网格 / 平滑热力」切换文案对齐 V3。
+- 全屏布局：九页在高视口下增加列表行数、放大图表与环图；应用统计在宽屏下重新分配列宽，消除卡片内大面积空白。
 
 ## 4.0.0-beta.2
 

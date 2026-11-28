@@ -1,7 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="Kms.App.MainWindow"
-        Title="键鼠统计 v4"
+        Title="键鼠统计 v4.2.0"
         Width="1180" Height="760"
         MinWidth="960" MinHeight="640"
         Background="{DynamicResource Kms.Background}"

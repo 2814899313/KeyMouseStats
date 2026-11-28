@@ -2,7 +2,6 @@ using System.Diagnostics;
 using Kms.App.Reports;
 using Kms.Core.Model;
 using Kms.Render.Theming;
-using Xunit.Abstractions;
 
 namespace Kms.Golden.Tests;
 

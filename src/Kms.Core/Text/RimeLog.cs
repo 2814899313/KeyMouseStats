@@ -813,8 +813,36 @@ public sealed class RimeLogStats
         }
     }
 
-    /// <summary>切出 [from, to] 的聚合视图（按日期，含两端）。</summary>
-    public RimeSlice Slice(DateTime from, DateTime to)
+    private static bool MatchesApplication(string commitApplication, string? filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+        {
+            return true;
+        }
+
+        string application = commitApplication.Trim();
+        string key = filter.Trim();
+        if (application.Equals(key, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        string fileName = Path.GetFileName(key);
+        if (application.Equals(fileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        string stem = Path.GetFileNameWithoutExtension(fileName);
+        return application.Equals(stem, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// 切出 [from, to] 的聚合视图（按日期，含两端）。
+    /// application 为空时保持全局；非空时按 Rime 记录的 Application 字段过滤，
+    /// 兼容 exe 名、无扩展名和完整路径三种写法。
+    /// </summary>
+    public RimeSlice Slice(DateTime from, DateTime to, string? application = null)
     {
         RimeSlice slice = new()
         {
@@ -832,7 +860,8 @@ public sealed class RimeLogStats
         {
             RimeCommit commit = Commits[i];
             DateTime day = commit.Time.Date;
-            if (day < slice.From || day > slice.To)
+            if (day < slice.From || day > slice.To
+                || !MatchesApplication(commit.Application, application))
             {
                 continue;
             }

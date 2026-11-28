@@ -3,7 +3,9 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Kms.App.Layout;
 using Kms.App.Views;
+using Kms.Core;
 using Kms.Render.Theming;
 
 namespace Kms.App;
@@ -12,22 +14,32 @@ public sealed partial class MainWindow : Window
 {
     public ShellView Shell { get; }
 
-    public MainWindow() : this(null)
+    public MainViewModel ViewModel { get; }
+
+    public MainWindow() : this((InputService?)null)
     {
     }
 
     public MainWindow(InputService? service)
-        : this(service?.Loaded ?? StatsLoader.Load(), service)
+        : this(new MainViewModel(service?.Loaded ?? StatsLoader.Load(), service))
     {
     }
 
-    internal MainWindow(LoadedStats loaded, InputService? service = null)
+    internal MainWindow(LoadedStats loaded, InputService? service = null, LayoutConfigService? layouts = null)
+        : this(new MainViewModel(loaded, service), layouts)
+    {
+    }
+
+    internal MainWindow(MainViewModel viewModel, LayoutConfigService? layouts = null)
     {
         InitializeComponent();
         Icon = AppIcons.Load();
-        Shell = new ShellView(loaded, service);
+        Title = $"键鼠统计 v{BuildInfo.Version}";
+        ViewModel = viewModel;
+        Shell = new ShellView(viewModel, layouts);
         ShellHost.Content = Shell;
         Opened += (_, _) => Shell.Focus();
+        Closed += (_, _) => ViewModel.Dispose();
         BuildChrome();
 
         TitleDrag.PointerPressed += (_, e) =>

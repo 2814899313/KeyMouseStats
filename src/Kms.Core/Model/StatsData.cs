@@ -1,6 +1,6 @@
 namespace Kms.Core.Model;
 
-public sealed record AppRule(string RuleKey, int CategoryId);
+public sealed record AppRule(string RuleKey, int CategoryId, string CategoryKey = "");
 
 /// <summary>
 /// 数据上下文接缝。v3 的静态 <c>Store</c> 拆成实例后，测试可以各建一份，互不影响。

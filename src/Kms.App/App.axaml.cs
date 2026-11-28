@@ -6,6 +6,7 @@ using Avalonia.Threading;
 using Kms.App.Diagnostics;
 using Kms.App.Reports;
 using Kms.App.Widgets;
+using Kms.Core;
 
 namespace Kms.App;
 
@@ -269,7 +270,7 @@ public sealed partial class App : Application
         TrayIcon tray = new()
         {
             Icon = AppIcons.Load(),
-            ToolTipText = "键鼠统计 v4",
+            ToolTipText = $"键鼠统计 v{BuildInfo.Version}",
             Menu = menu,
             IsVisible = true
         };

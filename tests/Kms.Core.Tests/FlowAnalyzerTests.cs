@@ -757,4 +757,42 @@ public sealed class FlowAnalyzerTests
         Assert.True(zeroReport.DeepMs > 0);
         Assert.True(double.IsFinite(zeroReport.FocusScore));
     }
+
+    [Fact]
+    public void CustomWorkCategories_LinkFlowAcrossApps()
+    {
+        // 10 = AI 协同、12 = 用户自定义「小说创作」：默认硬编码 0/5/6/7 不认，
+        // 注入 is_work 谓词后应与编程/写作一样连成连续专注。
+        List<FlowSessionRow> sessions = new()
+        {
+            S(0, 300, "chatgpt.exe", 10, 3000),
+            S(300, 300, "goink.exe", 12, 3000),
+            S(600, 300, "chatgpt.exe", 10, 3000)
+        };
+        List<FlowBurstRow> bursts = Bursts(0, 900, 30, 40, 500);
+
+        FlowReport baseline = FlowAnalyzer.Analyze(sessions, bursts, new FlowConfig());
+        Assert.Equal(0, baseline.DeepMs);
+        Assert.True(baseline.NormalMs > 0 || baseline.FragmentedMs > 0);
+
+        FlowReport custom = FlowAnalyzer.Analyze(
+            sessions,
+            bursts,
+            new FlowConfig(),
+            null,
+            category => category is 10 or 12);
+        Assert.True(custom.DeepMs >= 600_000);
+        Assert.True(custom.LongestDeepMs >= 600_000);
+        Assert.Equal(FlowState.Deep, custom.StateAt(600_000));
+
+        FlowDiagnostic? hover = FlowAnalyzer.DiagnoseAt(
+            sessions,
+            bursts,
+            600_000,
+            new FlowConfig(),
+            category => category is 10 or 12);
+        Assert.NotNull(hover);
+        Assert.Equal(FlowState.Deep, hover.State);
+        Assert.Equal(0, hover.WorkToNonWork);
+    }
 }

@@ -179,11 +179,11 @@ public static class SqliteStatsReader
 
     private static StatsData Load(SqliteConnection connection)
     {
-        string[] missing = KmsSchema.MissingTables(connection);
+        string[] missing = KmsSchema.MissingLegacyTables(connection);
         if (missing.Length > 0)
         {
             throw new InvalidOperationException(
-                "SQLite 数据库缺少必需表：" + string.Join(", ", missing));
+                "SQLite 数据库缺少 v1 必需表：" + string.Join(", ", missing));
         }
 
         StatsData data = new();
@@ -435,14 +435,18 @@ public static class SqliteStatsReader
 
     private static void ReadAppRules(SqliteConnection connection, StatsData data)
     {
+        bool hasCategoryKey = TableHasColumn(connection, "app_category_rule", "category_key");
         using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT rule_key, category_id FROM app_category_rule ORDER BY rowid;";
+        command.CommandText = hasCategoryKey
+            ? "SELECT rule_key, category_id, IFNULL(category_key,'') FROM app_category_rule ORDER BY rowid;"
+            : "SELECT rule_key, category_id, '' FROM app_category_rule ORDER BY rowid;";
         using SqliteDataReader reader = command.ExecuteReader();
         while (reader.Read())
         {
             data.AppRules.Add(new AppRule(
                 ReadText(reader, 0),
-                ToInt32(ReadInt64(reader, 1), "app_category_rule", "category_id")));
+                ToInt32(ReadInt64(reader, 1), "app_category_rule", "category_id"),
+                ReadText(reader, 2)));
         }
     }
 
@@ -450,7 +454,8 @@ public static class SqliteStatsReader
     {
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText =
-            "SELECT id, start_ts_ms, end_ts_ms, day, active_ms FROM events_window_session " +
+            "SELECT id, start_ts_ms, end_ts_ms, day, active_ms, process_path, process_name, " +
+            "window_title, category_id, move_px FROM events_window_session " +
             "ORDER BY day, start_ts_ms, id;";
         using SqliteDataReader reader = command.ExecuteReader();
         while (reader.Read())
@@ -477,7 +482,12 @@ public static class SqliteStatsReader
                 Start = ToLocal(startMs, "events_window_session", id),
                 End = ToLocal(endMs, "events_window_session", id),
                 StartReason = SessionStartReason.Legacy,
-                Seconds = activeMs / 1000.0
+                Seconds = activeMs / 1000.0,
+                ProcessPath = ReadText(reader, 5),
+                ProcessName = ReadText(reader, 6),
+                WindowTitle = ReadText(reader, 7),
+                CategoryId = ToInt32(ReadInt64(reader, 8), "events_window_session", "category_id"),
+                MovePx = ReadDouble(reader, 9)
             });
         }
     }
@@ -509,6 +519,25 @@ public static class SqliteStatsReader
         data.Settings["migration_log.rows"] = migrationRows.ToString(CultureInfo.InvariantCulture);
         data.Settings["kms_import_log.rows"] = CountRows(connection, "kms_import_log")
             .ToString(CultureInfo.InvariantCulture);
+    }
+
+    private static bool TableHasColumn(
+        SqliteConnection connection,
+        string table,
+        string column)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "PRAGMA table_info(" + table + ");";
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static long CountRows(SqliteConnection connection, string table)

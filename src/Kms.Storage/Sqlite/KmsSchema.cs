@@ -6,20 +6,22 @@ using Microsoft.Data.Sqlite;
 namespace Kms.Storage.Sqlite;
 
 /// <summary>
-/// SQLite <c>schema_rev = 1</c> 的全部 DDL 与幂等初始化。
-/// DDL 与 v3 <c>KmsSchema.cs</c> 逐字一致（含索引、CHECK 与 <c>kms_import_log</c>）。
+/// SQLite <c>schema_rev = 3</c> 的 DDL 与幂等初始化。
+/// v1 核心 13 表保持与 v3 <c>KmsSchema.cs</c> 逐字一致（含索引、CHECK 与
+/// <c>kms_import_log</c>）；v2 增量新增应用身份与按日分桶表；v3 新增
+/// 自定义工作性质分类与规则 category_key。迁移只做增量，不回填历史统计。
 /// 本类型只负责建表与写 meta 基线，不包含 3995 年时间基准修复。
 /// </summary>
 public static class KmsSchema
 {
     /// <summary>当前 schema 版本。任何表结构变更都必须 +1 并补迁移分支。</summary>
-    public const int Rev = 1;
+    public const int Rev = 3;
 
     /// <summary>数据库文件名（放在数据根目录下）。</summary>
     public const string DbFileName = "kmstats.db";
 
-    /// <summary>13 张业务表；自检与测试按这份清单校验。</summary>
-    public static readonly string[] RequiredTables =
+    /// <summary>v1 的 13 张业务表；读取旧库时仍必须完整。</summary>
+    public static readonly string[] LegacyRequiredTables =
     [
         "meta",
         "events_window_session",
@@ -35,6 +37,24 @@ public static class KmsSchema
         "migration_log",
         "kms_import_log"
     ];
+
+    /// <summary>v2 应用维度新增表。</summary>
+    public static readonly string[] V2Tables =
+    [
+        "app_dim",
+        "app_alias",
+        "daily_app_hour_agg",
+        "daily_app_key_agg",
+        "daily_app_click_grid",
+        "daily_app_metric_agg"
+    ];
+
+    /// <summary>v3 自定义工作性质分类表。</summary>
+    public static readonly string[] V3Tables = ["app_category"];
+
+    /// <summary>v3 完整业务表清单；自检与新建库按这份清单校验。</summary>
+    public static readonly string[] RequiredTables =
+        [.. LegacyRequiredTables, .. V2Tables, .. V3Tables];
 
     private const string MetaDdl =
         "CREATE TABLE IF NOT EXISTS meta (" +
@@ -221,9 +241,95 @@ public static class KmsSchema
         "CREATE TABLE IF NOT EXISTS app_category_rule (" +
         "  rule_key TEXT PRIMARY KEY," +
         "  category_id INTEGER NOT NULL," +
+        "  category_key TEXT NOT NULL DEFAULT ''," +
         "  source TEXT NOT NULL DEFAULT 'user_override'," +
         "  updated_ms INTEGER NOT NULL DEFAULT 0" +
         ");";
+
+    private const string AppCategoryDdl =
+        "CREATE TABLE IF NOT EXISTS app_category (" +
+        "  category_key TEXT PRIMARY KEY," +
+        "  name TEXT NOT NULL," +
+        "  color_hex TEXT NOT NULL," +
+        "  is_work INTEGER NOT NULL DEFAULT 1," +
+        "  sort_order INTEGER NOT NULL DEFAULT 0," +
+        "  is_builtin INTEGER NOT NULL DEFAULT 0," +
+        "  legacy_id INTEGER NOT NULL DEFAULT -1" +
+        ");";
+
+    private const string AppDimDdl =
+        "CREATE TABLE IF NOT EXISTS app_dim (" +
+        "  app_uid INTEGER PRIMARY KEY," +
+        "  app_key TEXT NOT NULL UNIQUE," +
+        "  display_name TEXT NOT NULL DEFAULT ''," +
+        "  canonical_path TEXT NOT NULL DEFAULT ''," +
+        "  first_seen_ms INTEGER NOT NULL DEFAULT 0," +
+        "  last_seen_ms INTEGER NOT NULL DEFAULT 0," +
+        "  flags INTEGER NOT NULL DEFAULT 0" +
+        ");";
+
+    private const string AppAliasDdl =
+        "CREATE TABLE IF NOT EXISTS app_alias (" +
+        "  from_app_key TEXT PRIMARY KEY," +
+        "  to_app_uid INTEGER NOT NULL REFERENCES app_dim(app_uid)," +
+        "  reason TEXT NOT NULL DEFAULT ''," +
+        "  updated_ms INTEGER NOT NULL DEFAULT 0" +
+        ");";
+
+    private const string AppHourDdl =
+        "CREATE TABLE IF NOT EXISTS daily_app_hour_agg (" +
+        "  app_uid INTEGER NOT NULL," +
+        "  day TEXT NOT NULL," +
+        "  hour INTEGER NOT NULL," +
+        "  keys INTEGER NOT NULL DEFAULT 0," +
+        "  clicks INTEGER NOT NULL DEFAULT 0," +
+        "  active_seconds REAL NOT NULL DEFAULT 0," +
+        "  PRIMARY KEY (app_uid, day, hour)" +
+        ") WITHOUT ROWID;";
+
+    private const string AppKeyDdl =
+        "CREATE TABLE IF NOT EXISTS daily_app_key_agg (" +
+        "  app_uid INTEGER NOT NULL," +
+        "  day TEXT NOT NULL," +
+        "  vk INTEGER NOT NULL," +
+        "  cnt INTEGER NOT NULL," +
+        "  PRIMARY KEY (app_uid, day, vk)" +
+        ") WITHOUT ROWID;";
+
+    private const string AppClickGridDdl =
+        "CREATE TABLE IF NOT EXISTS daily_app_click_grid (" +
+        "  app_uid INTEGER NOT NULL," +
+        "  day TEXT NOT NULL," +
+        "  channel INTEGER NOT NULL," +
+        "  cell_x INTEGER NOT NULL," +
+        "  cell_y INTEGER NOT NULL," +
+        "  count INTEGER NOT NULL," +
+        "  PRIMARY KEY (app_uid, day, channel, cell_x, cell_y)" +
+        ") WITHOUT ROWID;";
+
+    private const string AppMetricDdl =
+        "CREATE TABLE IF NOT EXISTS daily_app_metric_agg (" +
+        "  app_uid INTEGER NOT NULL," +
+        "  day TEXT NOT NULL," +
+        "  move_px REAL NOT NULL DEFAULT 0," +
+        "  peak_apm INTEGER NOT NULL DEFAULT 0," +
+        "  sessions INTEGER NOT NULL DEFAULT 0," +
+        "  switches INTEGER NOT NULL DEFAULT 0," +
+        "  PRIMARY KEY (app_uid, day)" +
+        ") WITHOUT ROWID;";
+
+    private static readonly string[] V2Indexes =
+    [
+        "CREATE INDEX IF NOT EXISTS ix_app_dim_path ON app_dim(canonical_path);",
+        "CREATE INDEX IF NOT EXISTS ix_app_alias_uid ON app_alias(to_app_uid);",
+        "CREATE INDEX IF NOT EXISTS ix_wda_proc_day ON window_daily_agg(process_key, day);",
+        "CREATE INDEX IF NOT EXISTS ix_ews_proc_day ON events_window_session(process_path, day);",
+        "CREATE INDEX IF NOT EXISTS ix_eib_proc_day ON events_input_burst(process_path, start_ts_ms);",
+        "CREATE INDEX IF NOT EXISTS ix_daily_app_hour_day ON daily_app_hour_agg(day);",
+        "CREATE INDEX IF NOT EXISTS ix_daily_app_key_day ON daily_app_key_agg(day);",
+        "CREATE INDEX IF NOT EXISTS ix_daily_app_click_day ON daily_app_click_grid(day);",
+        "CREATE INDEX IF NOT EXISTS ix_daily_app_metric_day ON daily_app_metric_agg(day);"
+    ];
 
     private const string MigrationLogDdl =
         "CREATE TABLE IF NOT EXISTS migration_log (" +
@@ -235,7 +341,7 @@ public static class KmsSchema
         "  PRIMARY KEY (source_kind, source_id)" +
         ");";
 
-    /// <summary>按依赖顺序排列的全部 DDL。</summary>
+    /// <summary>v1 核心 DDL，按依赖顺序排列。</summary>
     public static string[] Statements()
     {
         List<string> all =
@@ -268,6 +374,31 @@ public static class KmsSchema
         return [.. all];
     }
 
+    /// <summary>v2 按应用增量分桶与身份表 DDL；迁移只新建，不回填历史。</summary>
+    public static string[] V2Statements()
+    {
+        List<string> all =
+        [
+            AppDimDdl,
+            AppAliasDdl,
+            AppHourDdl,
+            AppKeyDdl,
+            AppClickGridDdl,
+            AppMetricDdl
+        ];
+        all.AddRange(V2Indexes);
+        return [.. all];
+    }
+
+    /// <summary>v3 自定义工作性质分类 DDL；规则表的 category_key 由迁移按需 ALTER。</summary>
+    public static string[] V3Statements() =>
+    [
+        AppCategoryDdl,
+        "CREATE INDEX IF NOT EXISTS ix_app_category_sort ON app_category(sort_order, category_key);",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_app_category_legacy ON app_category(legacy_id) WHERE legacy_id >= 0;",
+        "CREATE INDEX IF NOT EXISTS ix_app_rule_category ON app_category_rule(category_key);"
+    ];
+
     /// <summary>
     /// 幂等落地 schema：建表 → 建索引 → 写 meta 基线 → 设 <c>user_version</c>。
     /// 反复调用结果恒等。不会执行 3995 年时间基准修复。
@@ -287,10 +418,13 @@ public static class KmsSchema
             Execute(connection, statement);
         }
 
+        Migration.SchemaV2Migrator.Apply(connection);
+        Migration.SchemaV3Migrator.Apply(connection);
+
         long now = UnixTime.NowMs(SystemClock.Instance);
         using (SqliteTransaction transaction = connection.BeginTransaction())
         {
-            InsertMeta(connection, transaction, "schema_rev", Rev.ToString(CultureInfo.InvariantCulture));
+            UpsertMeta(connection, transaction, "schema_rev", Rev.ToString(CultureInfo.InvariantCulture));
             InsertMeta(connection, transaction, "app_version", appVersion ?? "");
             InsertMeta(connection, transaction, "db_created_ms", now.ToString(CultureInfo.InvariantCulture));
             InsertMeta(connection, transaction, "migrated_from_format", "");
@@ -309,13 +443,20 @@ public static class KmsSchema
         Execute(connection, "PRAGMA user_version = " + Rev.ToString(CultureInfo.InvariantCulture) + ";");
     }
 
-    /// <summary>返回缺失的必需表名；空数组表示 schema 完整。</summary>
-    public static string[] MissingTables(SqliteConnection connection)
+    /// <summary>返回缺失的 v3 完整表名；空数组表示 schema 完整。</summary>
+    public static string[] MissingTables(SqliteConnection connection) =>
+        MissingTables(connection, RequiredTables);
+
+    /// <summary>v1 读取器兼容校验：只要求 13 张旧表存在。</summary>
+    public static string[] MissingLegacyTables(SqliteConnection connection) =>
+        MissingTables(connection, LegacyRequiredTables);
+
+    private static string[] MissingTables(SqliteConnection connection, string[] tables)
     {
         ArgumentNullException.ThrowIfNull(connection);
 
         List<string> missing = [];
-        foreach (string table in RequiredTables)
+        foreach (string table in tables)
         {
             using SqliteCommand command = connection.CreateCommand();
             command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$name;";
@@ -339,7 +480,23 @@ public static class KmsSchema
         command.ExecuteNonQuery();
     }
 
-    private static void Execute(SqliteConnection connection, string sql)
+    internal static void UpsertMeta(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string key,
+        string value)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText =
+            "INSERT INTO meta (k, v) VALUES ($key, $value) " +
+            "ON CONFLICT(k) DO UPDATE SET v=excluded.v;";
+        command.Parameters.AddWithValue("$key", key);
+        command.Parameters.AddWithValue("$value", value);
+        command.ExecuteNonQuery();
+    }
+
+    internal static void Execute(SqliteConnection connection, string sql)
     {
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = sql;

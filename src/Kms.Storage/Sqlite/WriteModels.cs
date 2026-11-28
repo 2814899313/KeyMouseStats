@@ -109,6 +109,7 @@ internal sealed class LiveSession
     public string ProcessPath = "";
     public string ProcessName = "";
     public string WindowTitle = "";
+    public int AppUid = Kms.Core.Apps.AppIdentity.OtherAppUid;
     public long KeyCount;
     public long Left;
     public long Right;

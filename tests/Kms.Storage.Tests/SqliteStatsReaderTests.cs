@@ -14,11 +14,12 @@ public sealed class SqliteStatsReaderTests
         string path = Fixture("v3-sqlite-normal.db");
         StatsData data = SqliteStatsReader.Read(path);
 
-        Assert.Equal(13, KmsSchema.RequiredTables.Length);
+        Assert.Equal(20, KmsSchema.RequiredTables.Length);
+        Assert.Equal(13, KmsSchema.LegacyRequiredTables.Length);
 
         using (SqliteConnection connection = Open(path, SqliteOpenMode.ReadOnly))
         {
-            Assert.Empty(KmsSchema.MissingTables(connection));
+            Assert.Empty(KmsSchema.MissingLegacyTables(connection));
         }
 
         Assert.Equal(48, data.History.Count);
@@ -127,7 +128,7 @@ public sealed class SqliteStatsReaderTests
                 KmsSchema.Ensure(connection, "should-not-overwrite");
 
                 Assert.Empty(KmsSchema.MissingTables(connection));
-                Assert.Equal("1", ScalarText(connection, "SELECT v FROM meta WHERE k='schema_rev';"));
+                Assert.Equal("3", ScalarText(connection, "SELECT v FROM meta WHERE k='schema_rev';"));
                 Assert.Equal("4.0.0-test", ScalarText(connection, "SELECT v FROM meta WHERE k='app_version';"));
                 Assert.Equal("", ScalarText(connection, "SELECT v FROM meta WHERE k='migrated_from_format';"));
                 Assert.Equal("0", ScalarText(connection, "SELECT v FROM meta WHERE k='last_event_ts_ms';"));
@@ -135,7 +136,7 @@ public sealed class SqliteStatsReaderTests
                 Assert.True(long.Parse(
                     ScalarText(connection, "SELECT v FROM meta WHERE k='db_created_ms';"),
                     CultureInfo.InvariantCulture) > 0);
-                Assert.Equal(1L, ScalarLong(connection, "PRAGMA user_version;"));
+                Assert.Equal(3L, ScalarLong(connection, "PRAGMA user_version;"));
             }
         }
         finally
