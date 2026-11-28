@@ -1,0 +1,25 @@
+# ============================================================
+# 方案补丁示例：把下面的 patch 合并进你的方案 patch 文件。
+#
+# 文件放哪里(以雾凇拼音为例):
+#   <Rime 用户目录>/rime_ice.custom.yaml
+# 双拼 / 九宫格等其它方案换成对应的：
+#   double_pinyin.custom.yaml / t9.custom.yaml ...
+#
+# 如果你已经有同名的 .custom.yaml，不要覆盖它 ——
+# 只把 patch: 里面的那四行合并进去即可。
+# 然后重新部署(小狼毫:托盘右键 → 重新部署)。
+# ============================================================
+
+patch:
+  # 处理器:负责「上屏时把一行写进 commit_log.csv」
+  # /+ 表示"追加到列表末尾"。
+  # 千万不要写成 engine/processors/@last —— 那是替换最后一项，
+  # 会把 express_editor 顶掉，导致空格不能上屏、退格删不掉、Esc 失效。
+  "engine/processors/+":
+    - lua_processor@*commit_logger
+
+  # 滤镜:负责补「候选序」那一列(上屏的是第几个候选)。
+  # 不装它也能记录，但候选序会恒为 -1，字符内容页的「效率」视图就没有数据。
+  "engine/filters/+":
+    - lua_filter@*commit_logger_filter

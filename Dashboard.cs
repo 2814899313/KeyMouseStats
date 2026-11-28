@@ -1541,9 +1541,16 @@ namespace KeyMouseStats
             }
         }
 
-        private void ApplyChip(int id)
+        /// <summary>用默认浏览器打开一个链接(字符内容页的安装引导用)。打不开就静默,不弹错误框。</summary>
+        private void OpenUrl(string url)
         {
-            if (id == 45) { OpenReport(); return; }   // 在报告中查看(带当前筛选)
+            if (string.IsNullOrEmpty(url)) return;
+            try { System.Diagnostics.Process.Start(url); }
+            catch (Exception) { SetStatus("无法打开浏览器：" + url); }
+        }
+
+        private void ApplyChip(int id)
+        {            if (id == 45) { OpenReport(); return; }   // 在报告中查看(带当前筛选)
             if (id == 44) { OpenHoldTrend(); return; }
             if (id == 302) { OpenTrendDistribution(); return; }
             if (id == KeySubviewStatsChipId) { SetKeySubview(0); return; }
@@ -1575,6 +1582,10 @@ namespace KeyMouseStats
             if (id == MouseHealthMoreChipId) { ShowHealthDeviceMenu(true); return; }
             if (id == MouseHealthMergeChipId) { MergeLegacyMouse(); return; }
             if (id == ExportChipId) { ExportCsv(); return; }   // 页脚「导出 CSV」
+            // 字符内容页:数据源引导(小狼毫 / 雾凇拼音 / 上屏记录插件)
+            if (id == 430) { OpenUrl("https://github.com/rime/weasel/releases/latest"); return; }
+            if (id == 431) { OpenUrl("https://github.com/iDvel/rime-ice"); return; }
+            if (id == 432) { OpenUrl("https://github.com/2814899313/KeyMouseStats/tree/main/rime/commit_logger"); return; }
             if (id >= DistributionMouseChipId && id <= DistributionPeriodChipId + 3) { ApplyDistributionChip(id); return; }
             if (id == 518) { _tab = TabId.Heat; _clickActionView = true; _clickRange = 0; _mouseActionCache = null; _mouseActionRange = -1; return; }
             if (id == 519) { _tab = TabId.Heat; _clickActionView = false; return; }
@@ -2564,6 +2575,15 @@ namespace KeyMouseStats
             {
                 // 字符内容页没有对应的统计报告,这个位置放「重新读取」。
                 PaintFooterChip(g, new RectangleF(FrameRight - 232, FrameH - 44, 104, 28), "重新读取", 404);
+                // 3.0:一份数据都没有时,把「需要装什么」摆在页脚 —— 用户落到这一页最常见的原因
+                // 就是还没装小狼毫/雾凇/记录插件,而不是日志坏了。
+                if (_rimeStats == null || !_rimeStats.HasData)
+                {
+                    // 从 440 起排:左边 200..~425 是「昨日报告已归档」状态徽标,不能压上去。
+                    PaintFooterChip(g, new RectangleF(440, FrameH - 44, 100, 28), "下载小狼毫", 430);
+                    PaintFooterChip(g, new RectangleF(548, FrameH - 44, 100, 28), "雾凇拼音", 431);
+                    PaintFooterChip(g, new RectangleF(656, FrameH - 44, 100, 28), "记录插件", 432);
+                }
             }
             if (_tab == TabId.Day)
             {

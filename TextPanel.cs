@@ -951,19 +951,33 @@ namespace KeyMouseStats
                 _fBody, Ctext, new RectangleF(x, y, w, 22), false);
             string path = RimeTextStats.DefaultPath;
             AppText(g, "期望位置：" + (string.IsNullOrEmpty(path) ? "(无法解析 %APPDATA%)" : path),
-                _fSmall, Csub, new RectangleF(x, y + 30, w, 20), false);
-            AppText(g, "让输入法按「时间点,汉字个数,汉字明文」三列追加这个 CSV，本页会自动出现统计；",
-                _fSmall, Csub, new RectangleF(x, y + 54, w, 20), false);
-            AppText(g, "记录一次上屏追加一行，写完不用重启面板。",
-                _fSmall, Csub, new RectangleF(x, y + 78, w, 20), false);
+                _fSmall, Csub, new RectangleF(x, y + 28, w, 20), false);
+            // 3.0:给出一条能照着做的路径,而不是只描述文件格式。三个入口都可点。
+            AppText(g, "需要三件套：小狼毫(Weasel) + 雾凇拼音(rime-ice) + 上屏记录插件。",
+                _fSmall, Ctext, new RectangleF(x, y + 52, w, 20), false);
+            AppText(g, "装好后每次上屏自动追加一行，本页立即出现统计，不用重启面板。",
+                _fSmall, Csub, new RectangleF(x, y + 74, w, 20), false);
 
-            using (Pen pen = new Pen(Cline)) g.DrawLine(pen, x, y + 110, x + w, y + 110);
+            float chipY = y + 102, chipH = 26f;
+            RectangleF weasel = new RectangleF(x, chipY, 118, chipH);
+            RectangleF ice = new RectangleF(x + 126, chipY, 118, chipH);
+            RectangleF plugin = new RectangleF(x + 252, chipY, 118, chipH);
+            _chipLedger.Add(430, weasel);
+            _chipLedger.Add(431, ice);
+            _chipLedger.Add(432, plugin);
+            PaintChip(g, weasel, "下载小狼毫", false, null);
+            PaintChip(g, ice, "雾凇拼音", false, null);
+            PaintChip(g, plugin, "记录插件", false, null);
+            AppText(g, "插件是开源的，装法见项目里的 rime/commit_logger/README.md",
+                _fAxis, Csub, new RectangleF(x + 378, chipY + 4, w - 378, 18), false);
 
-            AppText(g, "为什么单独做一页", _fH2, Ctext, new RectangleF(x, y + 122, w, 22), false);
+            using (Pen pen = new Pen(Cline)) g.DrawLine(pen, x, y + 142, x + w, y + 142);
+
+            AppText(g, "为什么单独做一页", _fH2, Ctext, new RectangleF(x, y + 156, w, 22), false);
             AppText(g, "键鼠数据回答「按了多少次」，字符数据回答「写了什么」。两者同机同时产生，但性质不同：",
-                _fSmall, Csub, new RectangleF(x, y + 150, w, 20), false);
+                _fSmall, Csub, new RectangleF(x, y + 184, w, 20), false);
             AppText(g, "字符内容更敏感，所以它不进入 stats.txt、不参与导出合并、也不与应用或窗口关联。",
-                _fSmall, Csub, new RectangleF(x, y + 172, w, 20), false);
+                _fSmall, Csub, new RectangleF(x, y + 206, w, 20), false);
 
             RectangleF refresh = new RectangleF(Cx + Cw - 132, Cy + 12, 108, ToggleChipHeight);
             _chipLedger.Add(404, refresh);
