@@ -41,6 +41,13 @@ jobs:
       - name: Build
         run: dotnet build KeyMouseStats.slnx -c Release --no-restore
 
+      # v3 oracle 期望 dump 使用 +08:00 本地时间；CI runner 默认 UTC，
+      # 不先对齐时区会让 session 时间戳与按日期关联的 reason / coverage 全部错位。
+      # release-v4.yml 早就有这一步，分支 CI 之前漏了 —— 同一提交两边结论相反就是这个原因。
+      - name: Set time zone for oracle parity
+        shell: pwsh
+        run: tzutil /s "China Standard Time"
+
       # 门禁只跑「逻辑 / 数据 / 输入 / 架构」四组 —— 与 release-v4.yml 口径一致。
       # 视觉黄金图依赖渲染环境(字体、DPI、无 GPU),在 CI 里天然与本地不同,
       # 按 docs/v4-acceptance.md 属于本地人工验收项;下面单独一步照跑,但不阻塞。
